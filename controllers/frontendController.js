@@ -1,4 +1,5 @@
 const roicService = require("../services/roicService");
+const stockSearchService = require("../services/stockSearchService");
 
 async function getStockPrices(req, res) {
   const identifier = String(req.params.ticker || "").trim().toUpperCase();
@@ -52,42 +53,15 @@ async function searchStocks(req, res) {
     });
   }
 
-  const uppercaseQuery = rawQuery.toUpperCase();
-  const isTickerQuery = roicService.isTickerLikeQuery(rawQuery);
-  const companyNameSearchQuery = isTickerQuery ? uppercaseQuery : rawQuery;
-  const searchTasks = [roicService.searchRoicByCompanyName(companyNameSearchQuery)];
-
-  if (isTickerQuery) {
-    searchTasks.unshift(roicService.searchRoicByExactTicker(uppercaseQuery));
-    searchTasks.push(roicService.searchRoicByTickerVariants(uppercaseQuery));
+  try {
+    const responseBody = await stockSearchService.searchStocks(rawQuery);
+    return res.json(responseBody);
+  } catch (error) {
+    return res.status(error.statusCode || 502).json({
+      message: error.message || `Unable to search stocks for "${rawQuery}".`,
+      details: error.details || error.message,
+    });
   }
-
-  const searchResults = await Promise.allSettled(searchTasks);
-  const successfulResultLists = searchResults
-    .filter((searchResult) => searchResult.status === "fulfilled")
-    .map((searchResult) => searchResult.value);
-
-  const mergedResults = roicService.mergeTickerSearchResults(rawQuery, ...successfulResultLists);
-
-  if (mergedResults.length === 0) {
-    const rejectedResults = searchResults.filter((searchResult) => searchResult.status === "rejected");
-
-    if (rejectedResults.length === searchResults.length) {
-      const firstError = rejectedResults[0]?.reason;
-      const statusCode = firstError?.response?.status || 502;
-
-      return res.status(statusCode).json({
-        message: `Unable to search stocks for "${rawQuery}".`,
-        details: firstError?.response?.data || firstError?.message || "ROIC search request failed.",
-      });
-    }
-  }
-
-  return res.json({
-    query: rawQuery,
-    queryType: isTickerQuery ? "ticker-or-name" : "name",
-    results: mergedResults,
-  });
 }
 
 module.exports = {

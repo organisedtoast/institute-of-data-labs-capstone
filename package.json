@@ -9,6 +9,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "search:live": "node scripts/live-stock-search-cli.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:e2e-stubbed": "node --test tests/e2e-stubbed-import-crud.test.js",
     "test:e2e-live": "node --test tests/e2e-live-import-crud.test.js",

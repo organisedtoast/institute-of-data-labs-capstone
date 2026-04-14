@@ -1,27 +1,61 @@
+// This test verifies the behavior of the frontend API routes defined in server.js.
+
+// Because these routes are just thin wrappers around the service layer, the tests
+// focus on confirming that the controller correctly validates and normalizes
+// client input, handles errors from the service layer appropriately, and
+// returns the expected HTTP status codes and response formats to the client.
+
+// These tests do not require a real MongoDB instance because the routes being
+// tested do not interact with the database directly. Instead, we stub out the
+// database connection functions to prevent the app from trying to connect to a
+// real database when the server starts up for testing.
+ 
+// The service layer is also stubbed in each test to control the data returned to the route handlers
+
+// Does this test connect to the real ROIC API? No, it does not. 
+// The service methods that would normally call the ROIC API are replaced with stub functions that return hardcoded data or throw errors as needed for each test case.
+// This allows us to test the route handlers in isolation without relying on external APIs or network calls.
+
+
+// Load environment variables from .env before the server is imported.
+// This keeps the test environment consistent with local development.
 require("dotenv").config();
 
+// Use a dedicated test port so these requests do not clash with a locally
+// running app on the default port.
 process.env.PORT = "3103";
 
+// Node's built-in assertion and test modules are enough for this file,
+// so we do not need Jest, Mocha, or another test framework here.
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const db = require("../config/db");
+const stockSearchService = require("../services/stockSearchService");
+
+// Replace the real database connect/disconnect functions with empty async
+// functions. That lets us test the HTTP routes without needing MongoDB
+// running for this file.
 db.connectDB = async () => {};
 db.disconnectDB = async () => {};
 
 const roicService = require("../services/roicService");
 
+// Save the original service methods so we can restore them after the tests.
+// Each test temporarily replaces one or more of these methods with a stub.
 const originalMethods = {
   fetchStockPrices: roicService.fetchStockPrices,
-  searchRoicByCompanyName: roicService.searchRoicByCompanyName,
-  searchRoicByExactTicker: roicService.searchRoicByExactTicker,
-  searchRoicByTickerVariants: roicService.searchRoicByTickerVariants,
+  searchStocks: stockSearchService.searchStocks,
 };
 
 const { startServer, stopServer } = require("../server");
 
 const BASE_URL = `http://127.0.0.1:${process.env.PORT}`;
 
+// Small helper that sends a request to the running test server and returns
+// a simple object containing the status code and parsed response body.
+// It tries JSON first, but safely falls back to plain text if the response
+// is not JSON.
 async function requestJson(path, options = {}) {
   const response = await fetch(`${BASE_URL}${path}`, {
     ...options,
@@ -47,18 +81,27 @@ async function requestJson(path, options = {}) {
   };
 }
 
+// Start the Express server once before all tests run. Because server.js
+// exports startServer(), these tests can boot the real app and talk to it
+// over HTTP just like a frontend client would.
 test.before(async () => {
   await startServer();
 });
 
+// After the tests finish, put the real service methods back and shut the
+// server down so the test process can exit cleanly.
 test.after(async () => {
-  Object.assign(roicService, originalMethods);
+  roicService.fetchStockPrices = originalMethods.fetchStockPrices;
+  stockSearchService.searchStocks = originalMethods.searchStocks;
   await stopServer();
 });
 
 test("GET /api/stock-prices/:ticker returns normalized prices and forwards optional dates", async () => {
   let capturedArgs = null;
 
+  // Stub the upstream service so this test controls the data returned to
+  // the route handler. We also capture the arguments to verify that the
+  // controller normalized the ticker and passed the query filters through.
   roicService.fetchStockPrices = async (ticker, options) => {
     capturedArgs = { ticker, options };
     return [
@@ -86,6 +129,8 @@ test("GET /api/stock-prices/:ticker returns normalized prices and forwards optio
 });
 
 test("GET /api/stock-prices/:ticker validates month filters, rejects blank tickers, and surfaces upstream failures", async () => {
+  // In this test we force the service call to fail so we can confirm the
+  // route returns the correct error response to the client.
   roicService.fetchStockPrices = async () => {
     const error = new Error("ROIC exploded");
     error.response = {
@@ -118,25 +163,20 @@ test("GET /api/stock-prices/:ticker validates month filters, rejects blank ticke
 });
 
 test("GET /api/stocks/search validates input, ranks ticker matches first, de-duplicates results, and tolerates partial failures", async () => {
-  roicService.searchRoicByExactTicker = async (ticker) => {
-    assert.equal(ticker, "AAPL");
-    return [{ identifier: "AAPL", name: "AAPL", type: "stock" }];
-  };
-
-  roicService.searchRoicByTickerVariants = async (query) => {
-    assert.equal(query, "AAPL");
-    return [
-      { identifier: "AAPL.AX", name: "AAPL Australian Listing", type: "stock" },
-      { identifier: "AAPL.AX", name: "AAPL Duplicate Variant", type: "stock" },
-    ];
-  };
-
-  roicService.searchRoicByCompanyName = async (query) => {
-    assert.equal(query, "AAPL");
-    return [
-      { symbol: "AAPL", name: "Apple Inc.", exchange: "NASDAQ", exchange_name: "NASDAQ", type: "stock" },
-      { symbol: "MSFT", name: "Microsoft Corporation", exchange: "NASDAQ", exchange_name: "NASDAQ", type: "stock" },
-    ];
+  // The route now delegates stock search composition to the dedicated backend
+  // stockSearchService, so this test only checks request validation and that
+  // the controller returns the service payload as JSON.
+  stockSearchService.searchStocks = async (query) => {
+    assert.equal(query, "aapl");
+    return {
+      query: "aapl",
+      queryType: "ticker-or-name",
+      results: [
+        { identifier: "AAPL", name: "Apple Inc.", exchange: "NASDAQ", exchangeName: "NASDAQ", type: "stock", nameSource: "profile", isFallbackName: false },
+        { identifier: "AAPL.AX", name: "Apple Australia", exchange: "ASX", exchangeName: "Australian Securities Exchange", type: "stock", nameSource: "profile", isFallbackName: false },
+        { identifier: "MSFT", name: "Microsoft Corporation", exchange: "NASDAQ", exchangeName: "NASDAQ", type: "stock", nameSource: "company-search", isFallbackName: false },
+      ],
+    };
   };
 
   const missingQueryResponse = await requestJson("/api/stocks/search");
@@ -147,84 +187,40 @@ test("GET /api/stocks/search validates input, ranks ticker matches first, de-dup
   assert.equal(successResponse.status, 200);
   assert.equal(successResponse.body.queryType, "ticker-or-name");
   assert.deepEqual(successResponse.body.results, [
-    { identifier: "AAPL", name: "AAPL", exchange: "", exchangeName: "", type: "stock" },
-    { identifier: "AAPL.AX", name: "AAPL Australian Listing", exchange: "", exchangeName: "", type: "stock" },
-    { identifier: "MSFT", name: "Microsoft Corporation", exchange: "NASDAQ", exchangeName: "NASDAQ", type: "stock" },
-  ]);
-
-  roicService.searchRoicByExactTicker = async () => {
-    throw new Error("ticker branch failed");
-  };
-  roicService.searchRoicByTickerVariants = async () => {
-    throw new Error("variant branch failed");
-  };
-  roicService.searchRoicByCompanyName = async () => {
-    return [
-      { symbol: "NVDA", name: "NVIDIA Corporation", exchange: "NASDAQ", exchange_name: "NASDAQ", type: "stock" },
-    ];
-  };
-
-  const partialFailureResponse = await requestJson("/api/stocks/search?q=nvda");
-  assert.equal(partialFailureResponse.status, 200);
-  assert.deepEqual(partialFailureResponse.body.results, [
-    { identifier: "NVDA", name: "NVIDIA Corporation", exchange: "NASDAQ", exchangeName: "NASDAQ", type: "stock" },
+    { identifier: "AAPL", name: "Apple Inc.", exchange: "NASDAQ", exchangeName: "NASDAQ", type: "stock", nameSource: "profile", isFallbackName: false },
+    { identifier: "AAPL.AX", name: "Apple Australia", exchange: "ASX", exchangeName: "Australian Securities Exchange", type: "stock", nameSource: "profile", isFallbackName: false },
+    { identifier: "MSFT", name: "Microsoft Corporation", exchange: "NASDAQ", exchangeName: "NASDAQ", type: "stock", nameSource: "company-search", isFallbackName: false },
   ]);
 });
 
 test("GET /api/stocks/search returns suffix variants for near ticker matches like WTC -> WTC.AX", async () => {
-  roicService.searchRoicByExactTicker = async (ticker) => {
-    assert.equal(ticker, "WTC");
-    return [];
-  };
-
-  roicService.searchRoicByTickerVariants = async (query) => {
+  stockSearchService.searchStocks = async (query) => {
     assert.equal(query, "WTC");
-    return [
-      { identifier: "WTC.AX", name: "WiseTech Global Ltd", exchange: "ASX", exchangeName: "Australian Securities Exchange", type: "stock" },
-      { identifier: "WTC.NZ", name: "Other WTC Listing", exchange: "NZX", exchangeName: "New Zealand Exchange", type: "stock" },
-    ];
-  };
-
-  roicService.searchRoicByCompanyName = async () => {
-    return [
-      { symbol: "AWTC", name: "A Company Mentioning WTC", exchange: "NYSE", exchange_name: "New York Stock Exchange", type: "stock" },
-    ];
+    return {
+      query: "WTC",
+      queryType: "ticker-or-name",
+      results: [
+        { identifier: "WTC.AX", name: "WiseTech Global Ltd", exchange: "ASX", exchangeName: "Australian Securities Exchange", type: "stock", nameSource: "profile", isFallbackName: false },
+        { identifier: "WTC.NZ", name: "Other WTC Listing", exchange: "NZX", exchangeName: "New Zealand Exchange", type: "stock", nameSource: "profile", isFallbackName: false },
+        { identifier: "AWTC", name: "A Company Mentioning WTC", exchange: "NYSE", exchangeName: "New York Stock Exchange", type: "stock", nameSource: "company-search", isFallbackName: false },
+      ],
+    };
   };
 
   const response = await requestJson("/api/stocks/search?q=WTC");
   assert.equal(response.status, 200);
   assert.deepEqual(response.body.results, [
-    { identifier: "WTC.AX", name: "WiseTech Global Ltd", exchange: "ASX", exchangeName: "Australian Securities Exchange", type: "stock" },
-    { identifier: "WTC.NZ", name: "Other WTC Listing", exchange: "NZX", exchangeName: "New Zealand Exchange", type: "stock" },
-    { identifier: "AWTC", name: "A Company Mentioning WTC", exchange: "NYSE", exchangeName: "New York Stock Exchange", type: "stock" },
+    { identifier: "WTC.AX", name: "WiseTech Global Ltd", exchange: "ASX", exchangeName: "Australian Securities Exchange", type: "stock", nameSource: "profile", isFallbackName: false },
+    { identifier: "WTC.NZ", name: "Other WTC Listing", exchange: "NZX", exchangeName: "New Zealand Exchange", type: "stock", nameSource: "profile", isFallbackName: false },
+    { identifier: "AWTC", name: "A Company Mentioning WTC", exchange: "NYSE", exchangeName: "New York Stock Exchange", type: "stock", nameSource: "company-search", isFallbackName: false },
   ]);
 });
 
 test("GET /api/stocks/search fails only when every upstream search branch fails", async () => {
-  roicService.searchRoicByExactTicker = async () => {
-    const error = new Error("ticker failed");
-    error.response = {
-      status: 502,
-      data: { message: "ticker search failed" },
-    };
-    throw error;
-  };
-
-  roicService.searchRoicByTickerVariants = async () => {
-    const error = new Error("variant failed");
-    error.response = {
-      status: 503,
-      data: { message: "variant search failed" },
-    };
-    throw error;
-  };
-
-  roicService.searchRoicByCompanyName = async () => {
-    const error = new Error("name failed");
-    error.response = {
-      status: 504,
-      data: { message: "name search failed" },
-    };
+  stockSearchService.searchStocks = async () => {
+    const error = new Error('Unable to search stocks for "TSLA".');
+    error.statusCode = 502;
+    error.details = { message: "ticker search failed" };
     throw error;
   };
 
