@@ -8,6 +8,7 @@ const express = require('express');
 const { connectDB, disconnectDB } = require('./config/db');
 
 // Import routes and middleware
+const frontendRoutes = require("./routes/frontendRoutes");
 const watchlistRoutes = require("./routes/watchlistRoutes");
 const errorHandler = require("./middleware/errorHandler");
 
@@ -30,6 +31,9 @@ app.get("/api/health", (req, res) => {
 app.get("/", (req, res) => {
   res.send("API is running");
 });
+
+// Mount frontend-support routes directly under /api
+app.use("/api", frontendRoutes);
  
 // Mount watchlist routes under /api/watchlist
 app.use("/api/watchlist", watchlistRoutes);
