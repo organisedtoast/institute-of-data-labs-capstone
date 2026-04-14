@@ -218,6 +218,35 @@ test("ticker-like queries drop weak incidental company-name matches but keep str
   ]);
 });
 
+test("ticker-first splitting keeps strong matches separate from looser company-name fill matches", () => {
+  const { strongMatches, looseMatches } = stockSearchService.splitTickerFirstCompanySearchResults(
+    "9988",
+    [
+      {
+        identifier: "9988.HK",
+        name: "Alibaba Group Holding Limited",
+      },
+      {
+        identifier: "BABA",
+        name: "Alibaba 9988 Tracking Basket",
+      },
+      {
+        identifier: "XYZ",
+        name: "Unrelated Company",
+      },
+    ],
+  );
+
+  assert.deepEqual(
+    strongMatches.map((result) => result.identifier),
+    ["9988.HK"],
+  );
+  assert.deepEqual(
+    looseMatches.map((result) => result.identifier),
+    ["BABA"],
+  );
+});
+
 test("query classification uses ticker-first only for clearly all-caps ticker input", () => {
   assert.equal(stockSearchService.isTickerFirstQuery("AAPL"), true);
   assert.equal(stockSearchService.isTickerFirstQuery("9888"), true);
@@ -355,6 +384,113 @@ test("searchStocks uses suffix variant probing for numeric ticker queries", asyn
   );
 });
 
+test("searchStocks fills spare ticker-first slots with looser company-name results while keeping the ticker hit first", async () => {
+  roicService.fetchStockPrices = async (ticker) => {
+    if (ticker === "9988.HK" || ticker === "BABA") {
+      return [{ date: "2026-04-15", close: 100 }];
+    }
+
+    return [];
+  };
+
+  roicService.fetchCompanyProfile = async (ticker) => {
+    if (ticker === "9988.HK") {
+      return {
+        company_name: "Alibaba Group Holding Limited",
+        exchange_short_name: "HKEX",
+        exchange: "Hong Kong Exchange",
+      };
+    }
+
+    throw new Error(`Unexpected profile lookup for ${ticker}`);
+  };
+
+  roicService.searchRoicByCompanyName = async () => [
+    {
+      symbol: "9988.HK",
+      name: "Alibaba Group Holding Limited",
+      exchange: "HKEX",
+      exchange_name: "Hong Kong Exchange",
+      type: "stock",
+    },
+    {
+      symbol: "BABA",
+      name: "Alibaba 9988 ADR",
+      exchange: "NYSE",
+      exchange_name: "New York Stock Exchange",
+      type: "stock",
+    },
+  ];
+
+  const response = await stockSearchService.searchStocks("9988");
+
+  assert.deepEqual(
+    response.results.map((result) => result.identifier),
+    ["9988.HK", "BABA"],
+  );
+});
+
+test("looser ticker-first fill results do not outrank exact or suffix-confirmed hits even with strong price data", async () => {
+  const response = stockSearchService.sortResultsWithPricePreference("9988", [
+    {
+      identifier: "BABA",
+      name: "Alibaba 9988 ADR",
+      priceStatus: "ok",
+      searchTier: 4,
+    },
+    {
+      identifier: "9988.HK",
+      name: "Alibaba Group Holding Limited",
+      priceStatus: "not-found",
+      searchTier: 2,
+    },
+  ]);
+
+  assert.deepEqual(
+    response.map((result) => result.identifier),
+    ["9988.HK", "BABA"],
+  );
+});
+
+test("ticker-first searches deduplicate loose company-name fills against stronger ticker hits", async () => {
+  roicService.fetchStockPrices = async (ticker) => {
+    if (ticker === "9988.HK") {
+      return [{ date: "2026-04-15", close: 100 }];
+    }
+
+    return [];
+  };
+
+  roicService.fetchCompanyProfile = async (ticker) => {
+    if (ticker === "9988.HK") {
+      return {
+        company_name: "Alibaba Group Holding Limited",
+        exchange_short_name: "HKEX",
+        exchange: "Hong Kong Exchange",
+      };
+    }
+
+    throw new Error(`Unexpected profile lookup for ${ticker}`);
+  };
+
+  roicService.searchRoicByCompanyName = async () => [
+    {
+      symbol: "9988.HK",
+      name: "Alibaba 9988 ADR",
+      exchange: "HKEX",
+      exchange_name: "Hong Kong Exchange",
+      type: "stock",
+    },
+  ];
+
+  const response = await stockSearchService.searchStocks("9988");
+
+  assert.deepEqual(
+    response.results.map((result) => result.identifier),
+    ["9988.HK"],
+  );
+});
+
 test("searchStocks skips suffix variant probing for name-first queries", async () => {
   const priceLookupTickers = [];
 
@@ -376,7 +512,8 @@ test("searchStocks skips suffix variant probing for name-first queries", async (
   const response = await stockSearchService.searchStocks("Alpha");
 
   assert.equal(response.queryType, "name");
-  assert.deepEqual(priceLookupTickers, ["ALPHA"]);
+  assert.equal(priceLookupTickers[0], "ALPHA");
+  assert.equal(priceLookupTickers.filter((ticker) => ticker === "GOOGL").length >= 1, true);
   assert.deepEqual(response.results, [
     {
       identifier: "GOOGL",
@@ -469,7 +606,13 @@ test("searchStocks broadens sparse word queries with fallback ROIC searches", as
 test("searchStocks does not broaden word queries once enough preferred results are already present", async () => {
   const capturedQueries = [];
 
-  roicService.fetchStockPrices = async () => [];
+  roicService.fetchStockPrices = async (ticker) => {
+    if (ticker === "ALPHA") {
+      return [];
+    }
+
+    return [{ date: "2026-04-15", close: 10 }];
+  };
   roicService.searchRoicByCompanyName = async (query) => {
     capturedQueries.push(query);
 
@@ -495,6 +638,55 @@ test("searchStocks does not broaden word queries once enough preferred results a
 
   assert.deepEqual(capturedQueries, ["alpha"]);
   assert.equal(response.results.length, 10);
+});
+
+test("searchStocks broadens word queries when too few prefix matches have usable price data", async () => {
+  const capturedQueries = [];
+
+  roicService.fetchStockPrices = async (ticker) => {
+    if (ticker === "ALPHA") {
+      return [];
+    }
+
+    return [{ date: "2026-04-15", close: 10 }];
+  };
+  roicService.searchRoicByCompanyName = async (query) => {
+    capturedQueries.push(query);
+
+    if (query === "alpha") {
+      return [
+        { symbol: "AAA", name: "Alpha One", exchange: "NYSE", exchange_name: "NYSE", type: "stock" },
+        { symbol: "AAB", name: "Alpha Two", exchange: "NYSE", exchange_name: "NYSE", type: "stock" },
+        { symbol: "AAC", name: "Alpha Three", exchange: "NYSE", exchange_name: "NYSE", type: "stock" },
+        { symbol: "AAD", name: "Alpha Four", exchange: "NYSE", exchange_name: "NYSE", type: "stock" },
+        { symbol: "AAE", name: "Alpha Five", exchange: "NYSE", exchange_name: "NYSE", type: "stock" },
+        { symbol: "AAF", name: "Alpha Six", exchange: "NYSE", exchange_name: "NYSE", type: "stock" },
+        { symbol: "AAG", name: "Alpha Seven", exchange: "NYSE", exchange_name: "NYSE", type: "stock" },
+        { symbol: "AAH", name: "Alpha Eight", exchange: "NYSE", exchange_name: "NYSE", type: "stock" },
+        { symbol: "AAI", name: "Alpha Nine", exchange: "NYSE", exchange_name: "NYSE", type: "stock" },
+      ];
+    }
+
+    if (query === "alphas") {
+      return [];
+    }
+
+    if (query === "alph") {
+      return [
+        { symbol: "ALPHX", name: "Alph Growth Holdings", exchange: "NYSE", exchange_name: "NYSE", type: "stock" },
+      ];
+    }
+
+    return [];
+  };
+
+  const response = await stockSearchService.searchStocks("alpha");
+
+  assert.deepEqual(capturedQueries, ["alpha", "alphas", "alph"]);
+  assert.equal(
+    response.results.some((result) => result.identifier === "ALPHX"),
+    true,
+  );
 });
 
 test("searchStocks can recover diesel-style plural and stem-adjacent matches from fallback name searches", async () => {
@@ -556,6 +748,18 @@ test("searchStocks can recover diesel-style plural and stem-adjacent matches fro
   assert.deepEqual(
     response.results.map((result) => result.identifier),
     ["6018.T", "6022.T", "UHN", "XTRM"],
+  );
+});
+
+test("countUsablePricedResults counts only successful latest-price lookups", () => {
+  assert.equal(
+    stockSearchService.countUsablePricedResults([
+      { identifier: "AAA", priceStatus: "ok" },
+      { identifier: "BBB", priceStatus: "not-found" },
+      { identifier: "CCC", priceStatus: "error" },
+      { identifier: "DDD", priceStatus: "ok" },
+    ]),
+    2,
   );
 });
 
@@ -657,6 +861,24 @@ test("strong company-name matches can rank above suffix variants", async () => {
 
   assert.equal(response[0].identifier, "TRIP");
   assert.equal(response[1].identifier, "FLT.AX");
+});
+
+test("sortResultsWithPricePreference prefers priced rows when text relevance is otherwise tied", () => {
+  const response = stockSearchService.sortResultsWithPricePreference("bank", [
+    {
+      identifier: "BNKZ",
+      name: "Bank Zebra Holdings",
+      priceStatus: "not-found",
+    },
+    {
+      identifier: "BNKA",
+      name: "Bank Alpha Holdings",
+      priceStatus: "ok",
+    },
+  ]);
+
+  assert.equal(response[0].identifier, "BNKA");
+  assert.equal(response[1].identifier, "BNKZ");
 });
 
 test("searchStocks tolerates partial failures when at least one branch succeeds", async () => {

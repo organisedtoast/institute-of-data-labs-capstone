@@ -5,6 +5,17 @@ const MAX_SEARCH_RESULTS = 10;
 const MIN_PREFIX_RESULTS_BEFORE_BROADEN = 10;
 const MIN_FUZZY_QUERY_LENGTH = 3;
 const EXCLUDED_BROAD_RESULT_NAME_PATTERN = /\b(warrant|warrants|right|rights|unit|units)\b/i;
+const LATEST_PRICE_LOOKUP_OPTIONS = {
+  order: "DESC",
+  limit: 1,
+};
+const SEARCH_RESULT_TIERS = {
+  exact: 1,
+  variant: 2,
+  tickerStrongName: 3,
+  tickerLooseName: 4,
+};
+const DEFAULT_SEARCH_TIER_PRIORITY = Number.MAX_SAFE_INTEGER;
 const COMMON_TICKER_SUFFIXES = [
   ".AX",
   ".AS",
@@ -60,6 +71,7 @@ function buildSearchResult(searchResult = {}, metadata = {}) {
     type: searchResult.type || "stock",
     nameSource: metadata.nameSource || "company-search",
     isFallbackName: Boolean(metadata.isFallbackName),
+    searchTier: metadata.searchTier ?? searchResult.searchTier,
   };
 }
 
@@ -188,6 +200,9 @@ function getNameSourcePriority(result = {}) {
 function choosePreferredResult(currentResult, candidateResult) {
   const currentPriority = getNameSourcePriority(currentResult);
   const candidatePriority = getNameSourcePriority(candidateResult);
+  const currentTier = Number.isFinite(currentResult.searchTier) ? currentResult.searchTier : Number.POSITIVE_INFINITY;
+  const candidateTier = Number.isFinite(candidateResult.searchTier) ? candidateResult.searchTier : Number.POSITIVE_INFINITY;
+  const preferredTier = Math.min(currentTier, candidateTier);
 
   if (candidatePriority > currentPriority) {
     const preferredResult = {
@@ -199,52 +214,72 @@ function choosePreferredResult(currentResult, candidateResult) {
       preferredResult.sources = currentResult.sources;
     }
 
+    if (Number.isFinite(preferredTier)) {
+      preferredResult.searchTier = preferredTier;
+    }
+
     return preferredResult;
+  }
+
+  if (Number.isFinite(preferredTier) && preferredTier < currentTier) {
+    return {
+      ...currentResult,
+      searchTier: preferredTier,
+    };
   }
 
   return currentResult;
 }
 
 function mergeTickerSearchResults(rawQuery, ...searchResultLists) {
-  const mergedResultsMap = new Map();
-
-  searchResultLists.flat().forEach((searchResult) => {
-    const normalizedResult = buildSearchResult(searchResult, {
-      nameSource: searchResult.nameSource,
-      isFallbackName: searchResult.isFallbackName,
-    });
-    if (!normalizedResult.identifier) {
-      return;
-    }
-
-    if (!mergedResultsMap.has(normalizedResult.identifier)) {
-      mergedResultsMap.set(normalizedResult.identifier, normalizedResult);
-      return;
-    }
-
-    mergedResultsMap.set(
-      normalizedResult.identifier,
-      choosePreferredResult(mergedResultsMap.get(normalizedResult.identifier), normalizedResult),
-    );
-  });
-
-  return [...mergedResultsMap.values()]
-    .sort((left, right) => {
-      const scoreDifference = getTickerMatchScore(rawQuery, right) - getTickerMatchScore(rawQuery, left);
-      if (scoreDifference !== 0) {
-        return scoreDifference;
-      }
-
-      return left.identifier.localeCompare(right.identifier);
-    })
-    .slice(0, MAX_SEARCH_RESULTS);
+  return mergeSearchResults(rawQuery, searchResultLists);
 }
 
 function mergeTickerSearchResultsWithSources(rawQuery, searchResultGroups = []) {
+  return mergeSearchResults(rawQuery, searchResultGroups, {
+    includeSources: true,
+  });
+}
+
+function mergeSearchResults(rawQuery, searchResultLists = [], options = {}) {
+  const {
+    includeSources = false,
+    maxResults = MAX_SEARCH_RESULTS,
+  } = options;
   const mergedResultsMap = new Map();
 
-  searchResultGroups.forEach(({ source, results = [] }) => {
-    results.forEach((searchResult) => {
+  if (includeSources) {
+    searchResultLists.forEach(({ source, results = [] }) => {
+      results.forEach((searchResult) => {
+        const normalizedResult = buildSearchResult(searchResult, {
+          nameSource: searchResult.nameSource,
+          isFallbackName: searchResult.isFallbackName,
+        });
+        if (!normalizedResult.identifier) {
+          return;
+        }
+
+        if (!mergedResultsMap.has(normalizedResult.identifier)) {
+          mergedResultsMap.set(normalizedResult.identifier, {
+            ...normalizedResult,
+            sources: [source],
+          });
+          return;
+        }
+
+        const existingResult = mergedResultsMap.get(normalizedResult.identifier);
+        if (!existingResult.sources.includes(source)) {
+          existingResult.sources.push(source);
+        }
+
+        mergedResultsMap.set(
+          normalizedResult.identifier,
+          choosePreferredResult(existingResult, normalizedResult),
+        );
+      });
+    });
+  } else {
+    searchResultLists.flat().forEach((searchResult) => {
       const normalizedResult = buildSearchResult(searchResult, {
         nameSource: searchResult.nameSource,
         isFallbackName: searchResult.isFallbackName,
@@ -254,26 +289,18 @@ function mergeTickerSearchResultsWithSources(rawQuery, searchResultGroups = []) 
       }
 
       if (!mergedResultsMap.has(normalizedResult.identifier)) {
-        mergedResultsMap.set(normalizedResult.identifier, {
-          ...normalizedResult,
-          sources: [source],
-        });
+        mergedResultsMap.set(normalizedResult.identifier, normalizedResult);
         return;
-      }
-
-      const existingResult = mergedResultsMap.get(normalizedResult.identifier);
-      if (!existingResult.sources.includes(source)) {
-        existingResult.sources.push(source);
       }
 
       mergedResultsMap.set(
         normalizedResult.identifier,
-        choosePreferredResult(existingResult, normalizedResult),
+        choosePreferredResult(mergedResultsMap.get(normalizedResult.identifier), normalizedResult),
       );
     });
-  });
+  }
 
-  return [...mergedResultsMap.values()]
+  const mergedResults = [...mergedResultsMap.values()]
     .sort((left, right) => {
       const scoreDifference = getTickerMatchScore(rawQuery, right) - getTickerMatchScore(rawQuery, left);
       if (scoreDifference !== 0) {
@@ -281,12 +308,19 @@ function mergeTickerSearchResultsWithSources(rawQuery, searchResultGroups = []) 
       }
 
       return left.identifier.localeCompare(right.identifier);
-    })
-    .slice(0, MAX_SEARCH_RESULTS)
-    .map((result) => ({
-      ...result,
-      sources: [...result.sources].sort(),
-    }));
+    });
+
+  const limitedResults =
+    Number.isFinite(maxResults) ? mergedResults.slice(0, maxResults) : mergedResults;
+
+  if (!includeSources) {
+    return limitedResults;
+  }
+
+  return limitedResults.map((result) => ({
+    ...result,
+    sources: [...result.sources].sort(),
+  }));
 }
 
 function buildTickerVariantCandidates(rawQuery) {
@@ -467,177 +501,81 @@ function countPreferredBroadResults(results = []) {
   return results.filter((result) => isPreferredBroadResultType(result)).length;
 }
 
-function filterCompanySearchResults(rawQuery, companySearchResults = [], options = {}) {
+function applySearchTier(results = [], searchTier) {
+  if (!Number.isFinite(searchTier)) {
+    return results;
+  }
+
+  return results.map((result) => ({
+    ...result,
+    searchTier,
+  }));
+}
+
+function isTickerLooseCompanyMatch(rawQuery, normalizedResult) {
+  const query = String(rawQuery || "").trim().toUpperCase();
+  const name = String(normalizedResult.name || "").trim().toUpperCase();
+
+  if (!query || !name) {
+    return false;
+  }
+
+  return name.includes(query);
+}
+
+function getPriceStatusPriority(result = {}) {
+  return result.priceStatus === "ok" ? 1 : 0;
+}
+
+function getSearchTierPriority(result = {}) {
+  return Number.isFinite(result.searchTier) ? result.searchTier : DEFAULT_SEARCH_TIER_PRIORITY;
+}
+
+function sortResultsWithPricePreference(rawQuery, results = []) {
+  return [...results].sort((left, right) => {
+    const tierDifference = getSearchTierPriority(left) - getSearchTierPriority(right);
+    if (tierDifference !== 0) {
+      return tierDifference;
+    }
+
+    const scoreDifference = getTickerMatchScore(rawQuery, right) - getTickerMatchScore(rawQuery, left);
+    if (scoreDifference !== 0) {
+      return scoreDifference;
+    }
+
+    const pricePriorityDifference = getPriceStatusPriority(right) - getPriceStatusPriority(left);
+    if (pricePriorityDifference !== 0) {
+      return pricePriorityDifference;
+    }
+
+    return String(left.identifier || "").localeCompare(String(right.identifier || ""));
+  });
+}
+
+function countUsablePricedResults(results = []) {
+  return results.filter((result) => result.priceStatus === "ok").length;
+}
+
+function buildResultOrderMap(results = []) {
+  return new Map(results.map((result, index) => [result.identifier, index]));
+}
+
+function stripPriceMetadata(result = {}) {
   const {
-    mode = "name-first",
-    minimumPrefixResultsBeforeBroaden = MIN_PREFIX_RESULTS_BEFORE_BROADEN,
-    fallbackQueries = [],
-  } = options;
+    latestPrice,
+    priceStatus,
+    priceError,
+    searchTier,
+    ...searchResult
+  } = result;
 
-  if (mode === "ticker-first") {
-    return companySearchResults.filter((result) => isStrongTickerLikeCompanyMatch(rawQuery, result));
-  }
-
-  const prefixMatches = companySearchResults.filter((result) => isPrefixCompanyMatch(rawQuery, result));
-  if (prefixMatches.length >= minimumPrefixResultsBeforeBroaden) {
-    return prefixMatches;
-  }
-
-  const usedIdentifiers = new Set(prefixMatches.map((result) => result.identifier));
-  const containsMatches = companySearchResults.filter((result) => {
-    if (usedIdentifiers.has(result.identifier)) {
-      return false;
-    }
-
-    return isContainsCompanyMatch(rawQuery, result) || isFallbackTokenPrefixMatch(fallbackQueries, result);
-  });
-
-  return [...prefixMatches, ...containsMatches];
+  return searchResult;
 }
 
-function normalizeNameSearchResultList(rawQuery, searchResults, tickerFirstQuery, options = {}) {
-  const normalizedResults = normalizeCompanySearchResults(searchResults);
-
-  return filterCompanySearchResults(rawQuery, normalizedResults, {
-    mode: tickerFirstQuery ? "ticker-first" : "name-first",
-    fallbackQueries: options.fallbackQueries || [],
-  });
-}
-
-async function runSearch(rawQuery) {
-  const uppercaseQuery = rawQuery.toUpperCase();
-  const tickerFirstQuery = isTickerFirstQuery(rawQuery);
-  const companyNameSearchQuery = tickerFirstQuery ? uppercaseQuery : rawQuery;
-  const searchTasks = [
-    {
-      source: "name",
-      promise: roicService.searchRoicByCompanyName(companyNameSearchQuery),
-    },
-    {
-      source: "exact",
-      promise: searchRoicByExactTicker(uppercaseQuery),
-    },
-  ];
-
-  if (tickerFirstQuery) {
-    searchTasks.push({
-      source: "variant",
-      promise: searchRoicByTickerVariants(uppercaseQuery),
-    });
-  }
-
-  const settledSearchResults = await Promise.allSettled(
-    searchTasks.map((searchTask) => searchTask.promise),
-  );
-
-  const successfulResultLists = settledSearchResults
-    .map((searchResult, index) => ({ searchResult, searchTask: searchTasks[index] }))
-    .filter(({ searchResult }) => searchResult.status === "fulfilled")
-    .map(({ searchResult, searchTask }) => {
-      if (searchTask.source === "name") {
-        return {
-          source: searchTask.source,
-          results: normalizeNameSearchResultList(rawQuery, searchResult.value, tickerFirstQuery),
-        };
-      }
-
-      return {
-        source: searchTask.source,
-        results: searchResult.value,
-      };
-    });
-
-  const rejectedResults = settledSearchResults
-    .map((searchResult, index) => ({ searchResult, searchTask: searchTasks[index] }))
-    .filter(({ searchResult }) => searchResult.status === "rejected");
-
-  let mergedResults = mergeTickerSearchResults(
-    rawQuery,
-    ...successfulResultLists.map((resultList) => resultList.results),
-  );
-  let diagnosticResults = mergeTickerSearchResultsWithSources(rawQuery, successfulResultLists);
-
-  if (!tickerFirstQuery && countPreferredBroadResults(mergedResults) < MIN_PREFIX_RESULTS_BEFORE_BROADEN) {
-    const fallbackQueries = buildWordSearchFallbackQueries(rawQuery);
-
-    if (fallbackQueries.length > 0) {
-      const fallbackSearchResults = await Promise.allSettled(
-        fallbackQueries.map((fallbackQuery) => roicService.searchRoicByCompanyName(fallbackQuery)),
-      );
-
-      fallbackSearchResults.forEach((fallbackSearchResult) => {
-        if (fallbackSearchResult.status === "fulfilled") {
-          successfulResultLists.push({
-            source: "name-fallback",
-          results: normalizeNameSearchResultList(rawQuery, fallbackSearchResult.value, false, {
-            fallbackQueries: fallbackQueries,
-          }),
-        });
-        return;
-      }
-
-        rejectedResults.push({
-          searchResult: fallbackSearchResult,
-          searchTask: {
-            source: "name-fallback",
-          },
-        });
-      });
-
-      mergedResults = mergeTickerSearchResults(
-        rawQuery,
-        ...successfulResultLists.map((resultList) => resultList.results),
-      );
-      diagnosticResults = mergeTickerSearchResultsWithSources(rawQuery, successfulResultLists);
-    }
-  }
-
-  if (mergedResults.length === 0) {
-    const hasAnySuccessfulRows = successfulResultLists.some((resultList) => resultList.results.length > 0);
-    if (!hasAnySuccessfulRows && rejectedResults.length > 0) {
-      const firstError = rejectedResults[0]?.searchResult?.reason;
-      const error = new Error(`Unable to search stocks for "${rawQuery}".`);
-      error.statusCode = firstError?.response?.status || 502;
-      error.details = firstError?.response?.data || firstError?.message || "ROIC search request failed.";
-      throw error;
-    }
-  }
-
-  return {
-    query: rawQuery,
-    queryType: tickerFirstQuery ? "ticker-or-name" : "name",
-    results: mergedResults,
-    diagnosticResults,
-  };
-}
-
-async function searchStocks(rawQuery) {
-  const searchSummary = await runSearch(rawQuery);
-
-  return {
-    query: searchSummary.query,
-    queryType: searchSummary.queryType,
-    results: searchSummary.results,
-  };
-}
-
-async function searchStocksWithDiagnostics(rawQuery) {
-  const searchSummary = await runSearch(rawQuery);
-
-  return {
-    query: searchSummary.query,
-    queryType: searchSummary.queryType,
-    results: searchSummary.diagnosticResults,
-  };
-}
-
-async function enrichResultsWithLatestPrices(results = []) {
+async function fetchLatestPriceDataForResults(results = []) {
   const settledResults = await Promise.allSettled(
     results.map(async (result) => {
-      const priceRows = await roicService.fetchStockPrices(result.identifier, {
-        order: "DESC",
-        limit: 1,
-      });
+      const priceRows = await roicService.fetchStockPrices(result.identifier, LATEST_PRICE_LOOKUP_OPTIONS);
       const latestPrice = priceRows[0] || null;
 
       return {
@@ -670,15 +608,270 @@ async function enrichResultsWithLatestPrices(results = []) {
   });
 }
 
+function filterCompanySearchResults(rawQuery, companySearchResults = [], options = {}) {
+  const {
+    mode = "name-first",
+    minimumPrefixResultsBeforeBroaden = MIN_PREFIX_RESULTS_BEFORE_BROADEN,
+    fallbackQueries = [],
+  } = options;
+
+  if (mode === "ticker-first") {
+    return companySearchResults.filter((result) => isStrongTickerLikeCompanyMatch(rawQuery, result));
+  }
+
+  const prefixMatches = companySearchResults.filter((result) => isPrefixCompanyMatch(rawQuery, result));
+  if (prefixMatches.length >= minimumPrefixResultsBeforeBroaden) {
+    return prefixMatches;
+  }
+
+  const usedIdentifiers = new Set(prefixMatches.map((result) => result.identifier));
+  const containsMatches = companySearchResults.filter((result) => {
+    if (usedIdentifiers.has(result.identifier)) {
+      return false;
+    }
+
+    return isContainsCompanyMatch(rawQuery, result) || isFallbackTokenPrefixMatch(fallbackQueries, result);
+  });
+
+  return [...prefixMatches, ...containsMatches];
+}
+
+function splitTickerFirstCompanySearchResults(rawQuery, companySearchResults = []) {
+  const strongMatches = companySearchResults.filter((result) => isStrongTickerLikeCompanyMatch(rawQuery, result));
+  const usedIdentifiers = new Set(strongMatches.map((result) => result.identifier));
+  const looseMatches = companySearchResults.filter((result) => {
+    if (usedIdentifiers.has(result.identifier)) {
+      return false;
+    }
+
+    return isTickerLooseCompanyMatch(rawQuery, result);
+  });
+
+  return {
+    strongMatches,
+    looseMatches,
+  };
+}
+
+function normalizeNameSearchResultList(rawQuery, searchResults, tickerFirstQuery, options = {}) {
+  const normalizedResults = normalizeCompanySearchResults(searchResults);
+
+  return filterCompanySearchResults(rawQuery, normalizedResults, {
+    mode: tickerFirstQuery ? "ticker-first" : "name-first",
+    fallbackQueries: options.fallbackQueries || [],
+  });
+}
+
+function normalizeTickerFirstNameSearchResultGroups(rawQuery, searchResults) {
+  const normalizedResults = normalizeCompanySearchResults(searchResults);
+  const { strongMatches, looseMatches } = splitTickerFirstCompanySearchResults(rawQuery, normalizedResults);
+
+  return [
+    {
+      source: "name",
+      results: applySearchTier(strongMatches, SEARCH_RESULT_TIERS.tickerStrongName),
+    },
+    {
+      source: "name-loose",
+      results: applySearchTier(looseMatches, SEARCH_RESULT_TIERS.tickerLooseName),
+    },
+  ].filter((group) => group.results.length > 0);
+}
+
+async function runSearch(rawQuery) {
+  const uppercaseQuery = rawQuery.toUpperCase();
+  const tickerFirstQuery = isTickerFirstQuery(rawQuery);
+  const companyNameSearchQuery = tickerFirstQuery ? uppercaseQuery : rawQuery;
+  const searchTasks = [
+    {
+      source: "name",
+      promise: roicService.searchRoicByCompanyName(companyNameSearchQuery),
+    },
+    {
+      source: "exact",
+      promise: searchRoicByExactTicker(uppercaseQuery),
+    },
+  ];
+
+  if (tickerFirstQuery) {
+    searchTasks.push({
+      source: "variant",
+      promise: searchRoicByTickerVariants(uppercaseQuery),
+    });
+  }
+
+  const settledSearchResults = await Promise.allSettled(
+    searchTasks.map((searchTask) => searchTask.promise),
+  );
+
+  const successfulResultLists = settledSearchResults
+    .map((searchResult, index) => ({ searchResult, searchTask: searchTasks[index] }))
+    .filter(({ searchResult }) => searchResult.status === "fulfilled")
+    .flatMap(({ searchResult, searchTask }) => {
+      if (searchTask.source === "name") {
+        if (tickerFirstQuery) {
+          return normalizeTickerFirstNameSearchResultGroups(rawQuery, searchResult.value);
+        }
+
+        return {
+          source: searchTask.source,
+          results: normalizeNameSearchResultList(rawQuery, searchResult.value, tickerFirstQuery),
+        };
+      }
+
+      const searchTier =
+        searchTask.source === "exact"
+          ? SEARCH_RESULT_TIERS.exact
+          : searchTask.source === "variant"
+            ? SEARCH_RESULT_TIERS.variant
+            : undefined;
+
+      return {
+        source: searchTask.source,
+        results: applySearchTier(searchResult.value, searchTier),
+      };
+    });
+
+  const rejectedResults = settledSearchResults
+    .map((searchResult, index) => ({ searchResult, searchTask: searchTasks[index] }))
+    .filter(({ searchResult }) => searchResult.status === "rejected");
+
+  let mergedResults = mergeSearchResults(
+    rawQuery,
+    successfulResultLists.map((resultList) => resultList.results),
+    {
+      maxResults: Number.POSITIVE_INFINITY,
+    },
+  );
+  let diagnosticResults = mergeSearchResults(rawQuery, successfulResultLists, {
+    includeSources: true,
+    maxResults: Number.POSITIVE_INFINITY,
+  });
+  let rankedMergedResults = await fetchLatestPriceDataForResults(mergedResults);
+
+  if (!tickerFirstQuery && countUsablePricedResults(rankedMergedResults) < MIN_PREFIX_RESULTS_BEFORE_BROADEN) {
+    const fallbackQueries = buildWordSearchFallbackQueries(rawQuery);
+
+    if (fallbackQueries.length > 0) {
+      const fallbackSearchResults = await Promise.allSettled(
+        fallbackQueries.map((fallbackQuery) => roicService.searchRoicByCompanyName(fallbackQuery)),
+      );
+
+      fallbackSearchResults.forEach((fallbackSearchResult) => {
+        if (fallbackSearchResult.status === "fulfilled") {
+          successfulResultLists.push({
+            source: "name-fallback",
+          results: normalizeNameSearchResultList(rawQuery, fallbackSearchResult.value, false, {
+            fallbackQueries: fallbackQueries,
+          }),
+        });
+        return;
+      }
+
+        rejectedResults.push({
+          searchResult: fallbackSearchResult,
+          searchTask: {
+            source: "name-fallback",
+          },
+        });
+      });
+
+      mergedResults = mergeSearchResults(
+        rawQuery,
+        successfulResultLists.map((resultList) => resultList.results),
+        {
+          maxResults: Number.POSITIVE_INFINITY,
+        },
+      );
+      diagnosticResults = mergeSearchResults(rawQuery, successfulResultLists, {
+        includeSources: true,
+        maxResults: Number.POSITIVE_INFINITY,
+      });
+      rankedMergedResults = await fetchLatestPriceDataForResults(mergedResults);
+    }
+  }
+
+  if (rankedMergedResults.length === 0) {
+    const hasAnySuccessfulRows = successfulResultLists.some((resultList) => resultList.results.length > 0);
+    if (!hasAnySuccessfulRows && rejectedResults.length > 0) {
+      const firstError = rejectedResults[0]?.searchResult?.reason;
+      const error = new Error(`Unable to search stocks for "${rawQuery}".`);
+      error.statusCode = firstError?.response?.status || 502;
+      error.details = firstError?.response?.data || firstError?.message || "ROIC search request failed.";
+      throw error;
+    }
+  }
+
+  const rankedResults = sortResultsWithPricePreference(rawQuery, rankedMergedResults)
+    .slice(0, MAX_SEARCH_RESULTS)
+    .map(stripPriceMetadata);
+  const rankedResultOrder = buildResultOrderMap(rankedResults);
+  const rankedDiagnosticResults = [...diagnosticResults]
+    .sort((left, right) => {
+      const leftOrder = rankedResultOrder.get(left.identifier);
+      const rightOrder = rankedResultOrder.get(right.identifier);
+
+      if (leftOrder !== undefined || rightOrder !== undefined) {
+        if (leftOrder === undefined) {
+          return 1;
+        }
+
+        if (rightOrder === undefined) {
+          return -1;
+        }
+
+        return leftOrder - rightOrder;
+      }
+
+      return String(left.identifier || "").localeCompare(String(right.identifier || ""));
+    })
+    .slice(0, MAX_SEARCH_RESULTS)
+    .map(stripPriceMetadata);
+
+  return {
+    query: rawQuery,
+    queryType: tickerFirstQuery ? "ticker-or-name" : "name",
+    results: rankedResults,
+    diagnosticResults: rankedDiagnosticResults,
+  };
+}
+
+async function searchStocks(rawQuery) {
+  const searchSummary = await runSearch(rawQuery);
+
+  return {
+    query: searchSummary.query,
+    queryType: searchSummary.queryType,
+    results: searchSummary.results,
+  };
+}
+
+async function searchStocksWithDiagnostics(rawQuery) {
+  const searchSummary = await runSearch(rawQuery);
+
+  return {
+    query: searchSummary.query,
+    queryType: searchSummary.queryType,
+    results: searchSummary.diagnosticResults,
+  };
+}
+
+async function enrichResultsWithLatestPrices(results = []) {
+  return fetchLatestPriceDataForResults(results);
+}
+
 module.exports = {
   COMMON_TICKER_SUFFIXES,
   buildTickerVariantCandidates,
   buildTickerConfirmedSearchResult,
   buildWordSearchFallbackQueries,
   countPreferredBroadResults,
+  countUsablePricedResults,
   enrichResultsWithLatestPrices,
   filterCompanySearchResults,
+  fetchLatestPriceDataForResults,
   isPreferredBroadResultType,
+  isTickerLooseCompanyMatch,
   isStrongTickerLikeCompanyMatch,
   isTickerFirstQuery,
   isTickerLikeQuery,
@@ -690,4 +883,6 @@ module.exports = {
   searchStocksWithDiagnostics,
   searchRoicByExactTicker,
   searchRoicByTickerVariants,
+  splitTickerFirstCompanySearchResults,
+  sortResultsWithPricePreference,
 };

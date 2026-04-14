@@ -5,7 +5,7 @@ const BASE_URL = "https://api.roic.ai/v2";
 const API_KEY = process.env.ROIC_API_KEY;
 const COMPANY_NAME_SEARCH_URL = `${BASE_URL}/tickers/search/name`;
 const STOCK_PRICES_URL = `${BASE_URL}/stock-prices`;
-const MAX_SEARCH_RESULTS = 10;
+const MAX_SEARCH_RESULTS = 25;
 const MONTH_STRING_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
  
 // Helper: ROIC's current API documentation uses an `apikey` query parameter
