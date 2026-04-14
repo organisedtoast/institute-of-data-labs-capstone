@@ -1,6 +1,6 @@
 {
-  "name": "miniproject3",
-  "version": "1.0.0",
+  "name": "stockgossipmonitor",
+  "version": "0.8.0",
   "description": "",
   "main": "server.js",
   "scripts": {
