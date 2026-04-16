@@ -5,43 +5,52 @@ const MAX_SEARCH_RESULTS = 10;
 const MIN_PREFIX_RESULTS_BEFORE_BROADEN = 10;
 const MIN_FUZZY_QUERY_LENGTH = 3;
 const EXCLUDED_BROAD_RESULT_NAME_PATTERN = /\b(warrant|warrants|right|rights|unit|units)\b/i;
+// Verified against ROIC.ai quote/catalog pages on 2026-04-16.
+// Note: ROIC's Taiwan labeling is inconsistent across quote pages. The `.TW`
+// suffix is commented based on how ROIC currently labels `.TW` quote pages.
 const COMMON_TICKER_SUFFIXES = [
-  ".AX",
-  ".AS",
-  ".L",
-  ".TO",
-  ".NZ",
-  ".HK",
-  ".T",
-  ".KS",
-  ".V",
-  ".NE",
-  ".NS",
-  ".BO",
-  ".SZ",
-  ".SS",
-  ".TW",
-  ".SI",
-  ".SA",
-  ".JO",
-  ".PA",
-  ".BR",
-  ".DE",
-  ".F",
-  ".SW",
-  ".ST",
-  ".HE",
-  ".CO",
-  ".OL",
-  ".MC",
-  ".MI",
-  ".WA",
+  ".AX", // ASX (Australian Securities Exchange)
+  ".AS", // Euronext Amsterdam
+  ".L", // London Stock Exchange
+  ".TO", // TSX (Toronto Stock Exchange)
+  ".NZ", // NZX / NZE (New Zealand Exchange)
+  ".HK", // Hong Kong Stock Exchange
+  ".T", // Tokyo Stock Exchange / JPX
+  ".KS", // Korea Exchange
+  ".V", // TSXV (TSX Venture Exchange)
+  ".NE", // NEO Exchange
+  ".NS", // NSE (National Stock Exchange of India)
+  ".BO", // BSE (Bombay Stock Exchange)
+  ".SZ", // Shenzhen Stock Exchange
+  ".SS", // Shanghai Stock Exchange
+  ".TW", // Taiwan listings; ROIC currently labels `.TW` quote pages as Taipei Exchange
+  ".SI", // Singapore Exchange
+  ".SA", // B3 S.A. (Brazil)
+  ".JO", // Johannesburg Stock Exchange
+  ".PA", // Euronext Paris
+  ".BR", // Euronext Brussels
+  ".DE", // XETRA
+  ".F", // Frankfurt Stock Exchange
+  ".SW", // Swiss Exchange
+  ".ST", // Stockholm Stock Exchange
+  ".HE", // Helsinki Stock Exchange / Nasdaq Helsinki
+  ".CO", // Copenhagen Stock Exchange / Nasdaq Copenhagen
+  ".OL", // Oslo Stock Exchange
+  ".MC", // Madrid Stock Exchange
+  ".MI", // Italian Stock Exchange / Borsa Italiana
+  ".WA", // Warsaw Stock Exchange
 ];
 
+// A "ticker-like" query looks like a stock symbol such as `AAPL`, `BHP.AX`,
+// or `0700.HK`. We use this to decide whether we should search like a symbol,
+// a company name, or both.
 function isTickerLikeQuery(searchQuery) {
   return typeof searchQuery === "string" && TICKER_PATTERN.test(searchQuery.toUpperCase());
 }
 
+// We treat all-uppercase symbol-shaped input as "ticker first".
+// Example: `BHP` should prioritize symbol matching, while `Bhp` or `BHP Ltd`
+// should behave more like a name search.
 function isTickerFirstQuery(searchQuery) {
   const query = String(searchQuery || "").trim();
   if (!query) {
@@ -51,6 +60,8 @@ function isTickerFirstQuery(searchQuery) {
   return query === query.toUpperCase() && isTickerLikeQuery(query);
 }
 
+// ROIC responses are not guaranteed to have the same field names everywhere,
+// so we normalize them into one shape used by the rest of this file.
 function buildSearchResult(searchResult = {}, metadata = {}) {
   return {
     identifier: searchResult.symbol || searchResult.identifier || "",
@@ -72,6 +83,9 @@ function normalizeCompanySearchResults(searchResults = []) {
   );
 }
 
+// These helpers build extra "nearby" word variants for name searches.
+// Example: `industries` may also try `industry`, and `holding` may also try
+// `hold`. This gives us a second chance when ROIC returns too few strong hits.
 function normalizeWordQuery(rawQuery) {
   return String(rawQuery || "")
     .trim()
@@ -131,6 +145,8 @@ function buildWordSearchFallbackQueries(rawQuery) {
   return [...variants];
 }
 
+// Higher scores float the best ticker/name matches to the top after we merge
+// results from multiple search strategies.
 function getTickerMatchScore(rawQuery, normalizedResult) {
   const query = String(rawQuery || "").trim().toUpperCase();
   const identifier = String(normalizedResult.identifier || "").trim().toUpperCase();
@@ -167,6 +183,8 @@ function getTickerMatchScore(rawQuery, normalizedResult) {
   return 0;
 }
 
+// Some names are better than others. If we can get the company name from the
+// company profile, that is usually stronger than a search-result fallback.
 function getNameSourcePriority(result = {}) {
   const source = result.nameSource || "";
 
@@ -205,6 +223,9 @@ function choosePreferredResult(currentResult, candidateResult) {
   return currentResult;
 }
 
+// We can get the same stock from several search paths. This merge step removes
+// duplicates, keeps the preferred name data, sorts by relevance, and limits the
+// final list to the top results we want to show users.
 function mergeTickerSearchResults(rawQuery, ...searchResultLists) {
   const mergedResultsMap = new Map();
 
@@ -240,6 +261,8 @@ function mergeTickerSearchResults(rawQuery, ...searchResultLists) {
     .slice(0, MAX_SEARCH_RESULTS);
 }
 
+// Same merge as above, but keeps a `sources` array so diagnostic endpoints can
+// explain where each result came from (`name`, `exact`, `variant`, etc.).
 function mergeTickerSearchResultsWithSources(rawQuery, searchResultGroups = []) {
   const mergedResultsMap = new Map();
 
@@ -299,11 +322,15 @@ function buildTickerVariantCandidates(rawQuery) {
   return COMMON_TICKER_SUFFIXES.map((suffix) => `${uppercaseQuery}${suffix}`);
 }
 
+// ROIC company profile responses can be sparse, so we keep the extraction
+// logic tiny and explicit.
 function getProfileCompanyName(profile = {}) {
   const companyName = typeof profile.company_name === "string" ? profile.company_name.trim() : "";
   return companyName;
 }
 
+// A ticker is considered "confirmed" only if ROIC can return at least one
+// price row for it. That helps us avoid showing made-up symbol variants.
 async function buildTickerConfirmedSearchResult(tickerSymbol) {
   const priceRows = await roicService.fetchStockPrices(tickerSymbol, {
     order: "DESC",
@@ -357,6 +384,8 @@ async function searchRoicByExactTicker(tickerSymbol) {
   return result ? [result] : [];
 }
 
+// We try many exchange-specific versions of the same ticker in parallel and
+// keep only the ones ROIC successfully confirms.
 async function searchRoicByTickerVariants(rawQuery) {
   const candidateSymbols = buildTickerVariantCandidates(rawQuery);
 
@@ -373,6 +402,9 @@ async function searchRoicByTickerVariants(rawQuery) {
     .map((result) => result.value);
 }
 
+// In ticker-first mode we are intentionally strict. If someone typed `BHP`,
+// we mostly want matches that clearly start with that ticker, not loose name
+// matches buried deep inside a company title.
 function isStrongTickerLikeCompanyMatch(rawQuery, normalizedResult) {
   const query = String(rawQuery || "").trim().toUpperCase();
   const identifier = String(normalizedResult.identifier || "").trim().toUpperCase();
@@ -428,6 +460,8 @@ function tokenizeSearchText(value) {
     .filter(Boolean);
 }
 
+// When the original name search is too narrow, we try fallback word variants
+// and accept a result if any token starts with one of those fallback words.
 function isFallbackTokenPrefixMatch(fallbackQueries = [], normalizedResult = {}) {
   if (fallbackQueries.length === 0) {
     return false;
@@ -467,6 +501,9 @@ function countPreferredBroadResults(results = []) {
   return results.filter((result) => isPreferredBroadResultType(result)).length;
 }
 
+// This is the main filter for raw company-name search results.
+// In name-first mode we prefer prefix matches first, then broaden to contains
+// matches if we still do not have enough useful results.
 function filterCompanySearchResults(rawQuery, companySearchResults = [], options = {}) {
   const {
     mode = "name-first",
@@ -504,6 +541,13 @@ function normalizeNameSearchResultList(rawQuery, searchResults, tickerFirstQuery
   });
 }
 
+// Main search flow:
+// 1. Try the company-name endpoint.
+// 2. Try the exact ticker directly.
+// 3. If the input looks like a ticker, also try exchange-suffixed variants.
+// 4. Merge, rank, and deduplicate everything.
+// 5. If this was a name search and the results are still weak, try fallback
+//    word variants such as singular/plural/stemmed forms.
 async function runSearch(rawQuery) {
   const uppercaseQuery = rawQuery.toUpperCase();
   const tickerFirstQuery = isTickerFirstQuery(rawQuery);
@@ -611,6 +655,7 @@ async function runSearch(rawQuery) {
   };
 }
 
+// Public endpoint shape for normal app use.
 async function searchStocks(rawQuery) {
   const searchSummary = await runSearch(rawQuery);
 
@@ -621,6 +666,8 @@ async function searchStocks(rawQuery) {
   };
 }
 
+// Diagnostic version of the same search. This returns the same stocks, but
+// includes source-tracing data so we can inspect how each result was found.
 async function searchStocksWithDiagnostics(rawQuery) {
   const searchSummary = await runSearch(rawQuery);
 
@@ -631,6 +678,8 @@ async function searchStocksWithDiagnostics(rawQuery) {
   };
 }
 
+// Adds the latest available close price to already-selected results. Failures on
+// one stock do not fail the whole batch because each lookup is settled safely.
 async function enrichResultsWithLatestPrices(results = []) {
   const settledResults = await Promise.allSettled(
     results.map(async (result) => {
