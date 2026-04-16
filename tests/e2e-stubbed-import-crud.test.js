@@ -1,5 +1,5 @@
 // This test verifies the full end-to-end flow of importing a ticker from the ROIC API, 
-// through normalization, into MongoDB, and then exercising the CRUD routes on the imported document.
+// through normalization, into MongoDB and then exercising the CRUD routes on the imported document.
 //
 // The ROIC service is stubbed to return fixed data immediately, which makes this
 // test stable and repeatable without relying on the live ROIC API. 
@@ -12,11 +12,6 @@
 // 1. Make sure your local MongoDB is running.
 // 2. Run this test file with Node.js by executing in terminal
 //    node tests/e2e-stubbed-import-crud.test.js
-
-
-
-
-
 
 // Load the same environment variables the app uses in normal development.
 // Even though the ROIC responses are stubbed in this test, we still use the
@@ -187,6 +182,10 @@ const stubbedRoicService = {
   async fetchEarningsCalls() {
     return buildEarningsRows();
   },
+
+  async searchRoicByCompanyName() {
+    return [];
+  },
 };
 
 // The import controller requires roicService at module-load time.
@@ -251,6 +250,42 @@ async function deleteIfPresent() {
   }
 }
 
+// The stock lookup routes should stay read-only.
+// This helper proves a user can preview live stock data without silently
+// creating a MongoDB watchlist document.
+async function assertLookupRoutesStayReadOnly() {
+  const getBeforeLookup = await requestJson(`/api/watchlist/${TEST_TICKER}`);
+  assert.equal(
+    getBeforeLookup.status,
+    404,
+    buildFailureMessage("Pre-lookup watchlist absence", getBeforeLookup)
+  );
+
+  const searchResponse = await requestJson(`/api/stocks/search?q=${TEST_TICKER}`);
+  assert.equal(
+    searchResponse.status,
+    200,
+    buildFailureMessage("Lookup search route", searchResponse)
+  );
+  assert.equal(searchResponse.body.query, TEST_TICKER);
+
+  const priceResponse = await requestJson(`/api/stock-prices/${TEST_TICKER}`);
+  assert.equal(
+    priceResponse.status,
+    200,
+    buildFailureMessage("Lookup price route", priceResponse)
+  );
+  assert.equal(priceResponse.body.identifier, TEST_TICKER);
+  assert.ok(Array.isArray(priceResponse.body.prices), "Expected lookup price route to return a prices array.");
+
+  const getAfterLookup = await requestJson(`/api/watchlist/${TEST_TICKER}`);
+  assert.equal(
+    getAfterLookup.status,
+    404,
+    buildFailureMessage("Post-lookup watchlist absence", getAfterLookup)
+  );
+}
+
 // This test verifies the full import + CRUD flow using:
 // - stubbed ROIC data
 // - real normalization
@@ -270,6 +305,7 @@ test("stubbed ROIC import flows through normalization, MongoDB upsert, and follo
 
     // Start from a clean database state for this dedicated ticker.
     await deleteIfPresent();
+    await assertLookupRoutesStayReadOnly();
 
     // This import call goes through the real route and controller, but the
     // controller's upstream ROIC fetches are now deterministic stubs.
@@ -297,6 +333,7 @@ test("stubbed ROIC import flows through normalization, MongoDB upsert, and follo
     assert.equal(importedDoc.sourceMeta.importRangeYears, TEST_YEARS);
     assert.ok(importedDoc.sourceMeta.lastImportedAt, "Expected sourceMeta.lastImportedAt to be populated.");
     assert.deepEqual(importedDoc.sourceMeta.roicEndpointsUsed, EXPECTED_ROIC_ENDPOINTS);
+    assert.equal(importedDoc.priceCurrency, "USD");
     assert.ok(Array.isArray(importedDoc.annualData), "Expected annualData to be an array.");
     assert.equal(importedDoc.annualData.length, TEST_YEARS);
 
@@ -311,6 +348,8 @@ test("stubbed ROIC import flows through normalization, MongoDB upsert, and follo
     // represent the most recent fiscal year from our stub data.
     const firstAnnualEntry = importedDoc.annualData[0];
     assert.equal(firstAnnualEntry.fiscalYear, 2024);
+    const lastAnnualEntry = importedDoc.annualData[importedDoc.annualData.length - 1];
+    assert.equal(lastAnnualEntry.fiscalYear, 2015);
 
     // These checks prove normalization preserved the expected overridable-field
     // object structure for the yearly metrics.
@@ -414,6 +453,27 @@ test("stubbed ROIC import flows through normalization, MongoDB upsert, and follo
       patchCompanyResponse.body.companyName.lastOverriddenAt,
       "Expected PATCH companyName to stamp lastOverriddenAt."
     );
+
+    // Refresh should pull fresh ROIC-backed values while leaving the user's
+    // companyName override in place.
+    const refreshResponse = await requestJson(`/api/watchlist/${TEST_TICKER}/refresh`, {
+      method: "POST",
+    });
+    assert.equal(
+      refreshResponse.status,
+      200,
+      buildFailureMessage("Refresh imported ticker", refreshResponse)
+    );
+    assert.ok(
+      refreshResponse.body.sourceMeta.lastRefreshAt,
+      "Expected refresh to stamp sourceMeta.lastRefreshAt."
+    );
+    assert.equal(typeof refreshResponse.body.companyName, "object");
+    assert.equal(refreshResponse.body.companyName.userValue, TEST_COMPANY_OVERRIDE);
+    assert.equal(refreshResponse.body.companyName.effectiveValue, TEST_COMPANY_OVERRIDE);
+    assert.equal(refreshResponse.body.companyName.sourceOfTruth, "user");
+    assert.equal(refreshResponse.body.annualData[0].stockPrice.sourceOfTruth, "roic");
+    assert.equal(refreshResponse.body.annualData[0].marketCap.sourceOfTruth, "derived");
 
     // DELETE proves the record can be removed cleanly after all prior steps.
     const deleteResponse = await requestJson(`/api/watchlist/${TEST_TICKER}`, {

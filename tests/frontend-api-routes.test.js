@@ -5,16 +5,16 @@
 // client input, handles errors from the service layer appropriately, and
 // returns the expected HTTP status codes and response formats to the client.
 
-// These tests do not require a real MongoDB instance because the routes being
-// tested do not interact with the database directly. Instead, we stub out the
-// database connection functions to prevent the app from trying to connect to a
-// real database when the server starts up for testing.
- 
 // The service layer is also stubbed in each test to control the data returned to the route handlers
 
 // Does this test connect to the real ROIC API? No, it does not. 
 // The service methods that would normally call the ROIC API are replaced with stub functions that return hardcoded data or throw errors as needed for each test case.
 // This allows us to test the route handlers in isolation without relying on external APIs or network calls.
+
+// Does this test connect to the real MongoDB database? No, it does not.
+// The database connection functions are replaced with empty async functions that do nothing,
+// so the server can start up without trying to connect to a real database. 
+// This is possible because the stock lookup routes being tested do not interact with the database directly.
 
 
 // Load environment variables from .env before the server is imported.
@@ -128,6 +128,35 @@ test("GET /api/stock-prices/:ticker returns normalized prices and forwards optio
   });
 });
 
+test("GET /api/stock-prices/:ticker uses DESC when no custom date range is provided", async () => {
+  let capturedArgs = null;
+
+  roicService.fetchStockPrices = async (ticker, options) => {
+    capturedArgs = { ticker, options };
+    return [
+      { date: "2024-01-31", close: 187.25 },
+      { date: "2024-02-29", close: 192.5 },
+    ];
+  };
+
+  const response = await requestJson("/api/stock-prices/aapl");
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.identifier, "AAPL");
+  assert.deepEqual(response.body.prices, [
+    { date: "2024-01-31", close: 187.25 },
+    { date: "2024-02-29", close: 192.5 },
+  ]);
+  assert.deepEqual(capturedArgs, {
+    ticker: "AAPL",
+    options: {
+      startDate: "",
+      endDate: "",
+      order: "DESC",
+    },
+  });
+});
+
 test("GET /api/stock-prices/:ticker validates month filters, rejects blank tickers, and surfaces upstream failures", async () => {
   // In this test we force the service call to fail so we can confirm the
   // route returns the correct error response to the client.
@@ -185,6 +214,7 @@ test("GET /api/stocks/search validates input, ranks ticker matches first, de-dup
 
   const successResponse = await requestJson("/api/stocks/search?q=aapl");
   assert.equal(successResponse.status, 200);
+  assert.equal(successResponse.body.query, "aapl");
   assert.equal(successResponse.body.queryType, "ticker-or-name");
   assert.deepEqual(successResponse.body.results, [
     { identifier: "AAPL", name: "Apple Inc.", exchange: "NASDAQ", exchangeName: "NASDAQ", type: "stock", nameSource: "profile", isFallbackName: false },

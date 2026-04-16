@@ -8,7 +8,10 @@ const express = require('express');
 const { connectDB, disconnectDB } = require('./config/db');
 
 // Import routes and middleware
-const frontendRoutes = require("./routes/frontendRoutes");
+// The stock lookup routes are the read-only live market-data boundary.
+// They do not create MongoDB records; they only validate input and proxy the
+// normalized ROIC lookup responses used by search and preview flows.
+const stockLookupRoutes = require("./routes/stockLookupRoutes");
 const watchlistRoutes = require("./routes/watchlistRoutes");
 const errorHandler = require("./middleware/errorHandler");
 
@@ -32,8 +35,10 @@ app.get("/", (req, res) => {
   res.send("API is running");
 });
 
-// Mount frontend-support routes directly under /api
-app.use("/api", frontendRoutes);
+// Mount live stock lookup routes directly under /api.
+// Keeping them separate from watchlist routes makes the "lookup vs persist"
+// boundary much easier to understand for a new developer.
+app.use("/api", stockLookupRoutes);
  
 // Mount watchlist routes under /api/watchlist
 app.use("/api/watchlist", watchlistRoutes);

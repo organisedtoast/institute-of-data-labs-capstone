@@ -11,6 +11,9 @@
     "preview": "vite preview",
     "search:live": "node scripts/live-stock-search-cli.js",
     "test": "echo \"Error: no test specified\" && exit 1",
+    "test:stock-search": "node --test tests/stock-search-service.test.js",
+    "test:stock-lookup-routes": "node --test tests/frontend-api-routes.test.js",
+    "test:backend": "node --test tests/stock-search-service.test.js tests/frontend-api-routes.test.js",
     "test:e2e-stubbed": "node --test tests/e2e-stubbed-import-crud.test.js",
     "test:e2e-live": "node --test tests/e2e-live-import-crud.test.js",
     "start": "nodemon server.js"

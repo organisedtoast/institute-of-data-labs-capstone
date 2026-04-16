@@ -11,6 +11,17 @@
 // 3. Run this test file with Node: node --test tests/e2e-live-import-crud.test.js
 
 
+// The difference betwen this test and scripts\live-stock-search-cli.js is that this test is automated.
+// It verifies the full import and CRUD flow into MongoDB with assertions and a defined pass/fail outcome.
+
+// Meanwhile, the live-stock-search-cli.js script is meant for manual, interactive use and allows for ad-hoc testing of the stock search functionality with real API data.
+// It does not have a defined pass/fail outcome. It does not test the import/ CRUD flows. Instead, its purpose is to check the quality of the live search algorithm and verify the ROIC API integration for the search service.
+
+// The similarity is that both this test and the live-stock-search-cli.js script connect to the real ROIC API to fetch live data
+// So both allow us to verify the actual integration with the ROIC API and see how our app handles real responses.
+
+
+
 // Because this test uses a real live ticker (AAPL), it includes safety checks
 // to avoid accidentally deleting or overwriting a record that belongs to the user.
 // If you want to run the test against a different ticker, change the TEST_TICKER
@@ -344,6 +355,48 @@ test("live ROIC import flows through normalization, MongoDB upsert, and follow-u
       patchCompanyResponse.body.companyName.lastOverriddenAt,
       "Expected PATCH companyName to stamp lastOverriddenAt."
     );
+
+    // Refresh should re-fetch live ROIC data while preserving any user
+    // overrides already applied to the document.
+    const refreshResponse = await requestJson(`/api/watchlist/${TEST_TICKER}/refresh`, {
+      method: "POST",
+    });
+    assert.equal(
+      refreshResponse.status,
+      200,
+      buildFailureMessage("Refresh imported ticker", refreshResponse)
+    );
+    assert.ok(
+      refreshResponse.body.sourceMeta.lastRefreshAt,
+      "Expected sourceMeta.lastRefreshAt to be populated after refresh."
+    );
+    assert.equal(typeof refreshResponse.body.companyName, "object");
+    assert.equal(refreshResponse.body.companyName.userValue, TEST_COMPANY_OVERRIDE);
+    assert.equal(refreshResponse.body.companyName.effectiveValue, TEST_COMPANY_OVERRIDE);
+    assert.equal(refreshResponse.body.companyName.sourceOfTruth, "user");
+
+    const refreshedFirstAnnualEntry = refreshResponse.body.annualData[0];
+    for (const fieldName of [
+      "marketAnchorDate",
+      "stockPrice",
+      "sharesOutstanding",
+      "marketCap",
+      "returnOnInvestedCapital",
+    ]) {
+      assert.equal(
+        typeof refreshedFirstAnnualEntry[fieldName],
+        "object",
+        `Expected refreshed annualData[0].${fieldName} to preserve the overridable-field shape.`
+      );
+      assert.ok(
+        Object.prototype.hasOwnProperty.call(refreshedFirstAnnualEntry[fieldName], "effectiveValue"),
+        `Expected refreshed annualData[0].${fieldName} to include effectiveValue.`
+      );
+      assert.ok(
+        Object.prototype.hasOwnProperty.call(refreshedFirstAnnualEntry[fieldName], "sourceOfTruth"),
+        `Expected refreshed annualData[0].${fieldName} to include sourceOfTruth.`
+      );
+    }
 
     // DELETE should remove the imported record from MongoDB.
     const deleteResponse = await requestJson(`/api/watchlist/${TEST_TICKER}`, {

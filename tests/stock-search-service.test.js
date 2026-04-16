@@ -6,6 +6,28 @@ const test = require("node:test");
 const roicService = require("../services/roicService");
 const stockSearchService = require("../services/stockSearchService");
 
+// This file tests the backend stock-search service in isolation.
+// The goal is to prove that stockSearchService can:
+// - classify a search as ticker-first or name-first
+// - confirm exact tickers and exchange-suffixed ticker variants
+// - merge and rank search results from several ROIC lookup branches
+// - broaden sparse company-name searches with fallback word variants
+// - tolerate partial upstream failures without losing all results
+// - enrich already-chosen results with the latest price for diagnostics
+//
+// IMPORTANT:
+// We do NOT call the real ROIC API in these tests. Instead, each test replaces
+// roicService functions with tiny fake responses so we can focus on one rule at
+// a time and keep the tests deterministic.
+//
+// Ticker guide used in this file:
+// - Exact + suffix confirmation: FLT, FLT.AX, GNC.AX, ABC, ABC.V, 9888.HK
+// - Ticker-first ranking and loose fills: 9988.HK, BABA, GNC.AX, GNCP, AGNC
+// - Name-first searches and broadening: GOOGL, AAA-AAJ, ALPHX, FROG, FROG.NS, BFRG, LFAC, LFACW, UHN, 6018.T, 6022.T, XTRM
+// - Price enrichment / diagnostics: AAPL, MSFT
+// - Error / partial-failure scenarios: NVDA and synthetic rows such as AAA, BBB, CCC, DDD, XYZ, XZZ, BNKA, BNKZ
+// - Large suffix candidate generation example: WTC plus many exchange variants such as WTC.AX and WTC.TO
+
 const originalMethods = {
   fetchCompanyProfile: roicService.fetchCompanyProfile,
   fetchStockPrices: roicService.fetchStockPrices,
@@ -16,6 +38,9 @@ test.afterEach(() => {
   Object.assign(roicService, originalMethods);
 });
 
+// These first tests cover the "ticker confirmation" side of the service:
+// exact ticker hits, exchange-suffixed variants, and what to do when profile
+// naming is missing or weaker than another ROIC source.
 test("searchStocks uses ROIC profile names for exact and suffix ticker matches", async () => {
   roicService.fetchStockPrices = async (ticker, options) => {
     assert.deepEqual(options, {
@@ -255,6 +280,9 @@ test("query classification uses ticker-first only for clearly all-caps ticker in
   assert.equal(stockSearchService.isTickerFirstQuery(""), false);
 });
 
+// This section checks ticker-first behavior:
+// when a query looks like a symbol, the service should probe common exchange
+// suffixes and keep strong ticker-style matches above looser company-name fills.
 test("buildTickerVariantCandidates includes the expanded deterministic suffix set", () => {
   assert.deepEqual(stockSearchService.buildTickerVariantCandidates("WTC"), [
     "WTC.AX",
@@ -527,6 +555,49 @@ test("searchStocks skips suffix variant probing for name-first queries", async (
   ]);
 });
 
+test("searchStocks normalizes lowercase dotted tickers through the exact ticker branch", async () => {
+  const priceLookupTickers = [];
+
+  roicService.fetchStockPrices = async (ticker) => {
+    priceLookupTickers.push(ticker);
+
+    if (ticker === "BHP.AX") {
+      return [{ date: "2026-04-15", close: 42.5 }];
+    }
+
+    return [];
+  };
+
+  roicService.fetchCompanyProfile = async (ticker) => {
+    if (ticker === "BHP.AX") {
+      return {
+        company_name: "BHP Group Limited",
+        exchange_short_name: "ASX",
+        exchange: "Australian Securities Exchange",
+      };
+    }
+
+    throw new Error(`Unexpected profile lookup for ${ticker}`);
+  };
+
+  roicService.searchRoicByCompanyName = async () => [];
+
+  const response = await stockSearchService.searchStocks("bhp.ax");
+
+  assert.equal(priceLookupTickers[0], "BHP.AX");
+  assert.deepEqual(response.results, [
+    {
+      identifier: "BHP.AX",
+      name: "BHP Group Limited",
+      exchange: "ASX",
+      exchangeName: "Australian Securities Exchange",
+      type: "stock",
+      nameSource: "profile",
+      isFallbackName: false,
+    },
+  ]);
+});
+
 test("countPreferredBroadResults counts stocks and funds but excludes warrants and units from the fill threshold", () => {
   assert.equal(
     stockSearchService.countPreferredBroadResults([
@@ -539,6 +610,9 @@ test("countPreferredBroadResults counts stocks and funds but excludes warrants a
   );
 });
 
+// These tests cover name-first search broadening.
+// If a normal company-name search is too sparse, the service tries nearby word
+// variants like plurals or stems so users can still find likely matches.
 test("searchStocks broadens sparse word queries with fallback ROIC searches", async () => {
   const capturedQueries = [];
 
@@ -763,6 +837,9 @@ test("countUsablePricedResults counts only successful latest-price lookups", () 
   );
 });
 
+// These tests focus on the ranking helpers after raw search results already
+// exist. The service combines text relevance, search tier, and price-status
+// metadata to decide which rows should appear first.
 test("name-first filtering uses prefix first and broadens to contains when fewer than 10 prefix matches", () => {
   const filteredResults = stockSearchService.filterCompanySearchResults(
     "Alpha",
@@ -943,6 +1020,17 @@ test("searchStocks throws a formatted error only when every upstream branch fail
   );
 });
 
+test("searchStocks returns an empty result set when every branch succeeds with no matches", async () => {
+  roicService.fetchStockPrices = async () => [];
+  roicService.searchRoicByCompanyName = async () => [];
+
+  const response = await stockSearchService.searchStocks("NoMatchesHere");
+
+  assert.equal(response.query, "NoMatchesHere");
+  assert.equal(response.queryType, "name");
+  assert.deepEqual(response.results, []);
+});
+
 test("searchStocksWithDiagnostics preserves branch provenance and naming metadata", async () => {
   roicService.fetchStockPrices = async (ticker) => {
     if (ticker === "FLT" || ticker === "FLT.AX") {
@@ -1017,6 +1105,56 @@ test("searchStocksWithDiagnostics preserves branch provenance and naming metadat
   ]);
 });
 
+test("searchStocksWithDiagnostics keeps the same result order as the ranked main search output", async () => {
+  roicService.fetchStockPrices = async (ticker) => {
+    if (ticker === "9988.HK" || ticker === "BABA") {
+      return [{ date: "2026-04-15", close: 100 }];
+    }
+
+    return [];
+  };
+
+  roicService.fetchCompanyProfile = async (ticker) => {
+    if (ticker === "9988.HK") {
+      return {
+        company_name: "Alibaba Group Holding Limited",
+        exchange_short_name: "HKEX",
+        exchange: "Hong Kong Exchange",
+      };
+    }
+
+    throw new Error(`Unexpected profile lookup for ${ticker}`);
+  };
+
+  roicService.searchRoicByCompanyName = async () => [
+    {
+      symbol: "9988.HK",
+      name: "Alibaba Group Holding Limited",
+      exchange: "HKEX",
+      exchange_name: "Hong Kong Exchange",
+      type: "stock",
+    },
+    {
+      symbol: "BABA",
+      name: "Alibaba 9988 ADR",
+      exchange: "NYSE",
+      exchange_name: "New York Stock Exchange",
+      type: "stock",
+    },
+  ];
+
+  const mainResponse = await stockSearchService.searchStocks("9988");
+  const diagnosticResponse = await stockSearchService.searchStocksWithDiagnostics("9988");
+
+  assert.deepEqual(
+    diagnosticResponse.results.map((result) => result.identifier),
+    mainResponse.results.map((result) => result.identifier),
+  );
+});
+
+// Finally, the enrichment tests verify the helper used by the CLI and other
+// debugging tools. It should add latest-price details without losing partial
+// results when one ticker lookup fails.
 test("enrichResultsWithLatestPrices returns latest date and close for successful lookups", async () => {
   roicService.fetchStockPrices = async (ticker, options) => {
     assert.deepEqual(options, {
@@ -1089,4 +1227,30 @@ test("enrichResultsWithLatestPrices keeps partial results when one price lookup 
       priceError: "upstream unavailable",
     },
   ]);
+});
+
+test("enrichResultsWithLatestPrices preserves the caller's original result order", async () => {
+  roicService.fetchStockPrices = async (ticker) => {
+    if (ticker === "MSFT") {
+      return [{ date: "2024-02-29", close: 410.2 }];
+    }
+
+    if (ticker === "AAPL") {
+      return [{ date: "2024-02-29", close: 192.5 }];
+    }
+
+    return [];
+  };
+
+  const response = await stockSearchService.enrichResultsWithLatestPrices([
+    { identifier: "MSFT", name: "Microsoft Corporation", sources: ["name"] },
+    { identifier: "AAPL", name: "Apple Inc.", sources: ["name"] },
+  ]);
+
+  assert.deepEqual(
+    response.map((result) => result.identifier),
+    ["MSFT", "AAPL"],
+  );
+  assert.equal(response[0].priceStatus, "ok");
+  assert.equal(response[1].priceStatus, "ok");
 });

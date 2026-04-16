@@ -1,8 +1,20 @@
 // This script implements a command-line interface (CLI) for 
 // live stock searching.
 
-// To run this script, use the command: npm run search:live
+// Think of it as a manual test tool for the stock search service. 
+// It allows you to type in a ticker or company name and see the search results with live price data, all in the terminal. 
+// It's a great way to quickly test the functionality of the stock search service without needing to set up a frontend 
+// or make HTTP requests.
 
+// The difference between this script and tests\stock-search-service.test.js is that this script is meant for manual, 
+// interactive use and connects to the real ROIC API to fetch live data.
+
+// The tests\stock-search-service.test.js file contains automated tests that use stubs to simulate the ROIC API responses,
+// so they do not connect to the real API and do not require an API key.
+
+
+
+// To run this script, use the command: npm run search:live
 
 // Load environment variables from the .env file so we can access API keys and config
 require("dotenv").config();
