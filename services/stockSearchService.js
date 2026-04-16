@@ -8,37 +8,52 @@ const EXCLUDED_BROAD_RESULT_NAME_PATTERN = /\b(warrant|warrants|right|rights|uni
 // Verified against ROIC.ai quote/catalog pages on 2026-04-16.
 // Note: ROIC's Taiwan labeling is inconsistent across quote pages. The `.TW`
 // suffix is commented based on how ROIC currently labels `.TW` quote pages.
+//
+// These ranking constants let the service rank search results in layers.
+// We first prefer stronger search branches, and only then use price lookups
+// to break ties between otherwise similar candidates.
+const LATEST_PRICE_LOOKUP_OPTIONS = {
+  order: "DESC",
+  limit: 1,
+};
+const SEARCH_RESULT_TIERS = {
+  exact: 1,
+  variant: 2,
+  tickerStrongName: 3,
+  tickerLooseName: 4,
+};
+const DEFAULT_SEARCH_TIER_PRIORITY = Number.MAX_SAFE_INTEGER;
 const COMMON_TICKER_SUFFIXES = [
-  ".AX", // ASX (Australian Securities Exchange)
-  ".AS", // Euronext Amsterdam
-  ".L", // London Stock Exchange
-  ".TO", // TSX (Toronto Stock Exchange)
-  ".NZ", // NZX / NZE (New Zealand Exchange)
-  ".HK", // Hong Kong Stock Exchange
-  ".T", // Tokyo Stock Exchange / JPX
-  ".KS", // Korea Exchange
-  ".V", // TSXV (TSX Venture Exchange)
-  ".NE", // NEO Exchange
-  ".NS", // NSE (National Stock Exchange of India)
-  ".BO", // BSE (Bombay Stock Exchange)
-  ".SZ", // Shenzhen Stock Exchange
-  ".SS", // Shanghai Stock Exchange
-  ".TW", // Taiwan listings; ROIC currently labels `.TW` quote pages as Taipei Exchange
-  ".SI", // Singapore Exchange
-  ".SA", // B3 S.A. (Brazil)
-  ".JO", // Johannesburg Stock Exchange
-  ".PA", // Euronext Paris
-  ".BR", // Euronext Brussels
-  ".DE", // XETRA
-  ".F", // Frankfurt Stock Exchange
-  ".SW", // Swiss Exchange
-  ".ST", // Stockholm Stock Exchange
-  ".HE", // Helsinki Stock Exchange / Nasdaq Helsinki
-  ".CO", // Copenhagen Stock Exchange / Nasdaq Copenhagen
-  ".OL", // Oslo Stock Exchange
-  ".MC", // Madrid Stock Exchange
-  ".MI", // Italian Stock Exchange / Borsa Italiana
-  ".WA", // Warsaw Stock Exchange
+  ".AX",
+  ".AS",
+  ".L",
+  ".TO",
+  ".NZ",
+  ".HK",
+  ".T",
+  ".KS",
+  ".V",
+  ".NE",
+  ".NS",
+  ".BO",
+  ".SZ",
+  ".SS",
+  ".TW",
+  ".SI",
+  ".SA",
+  ".JO",
+  ".PA",
+  ".BR",
+  ".DE",
+  ".F",
+  ".SW",
+  ".ST",
+  ".HE",
+  ".CO",
+  ".OL",
+  ".MC",
+  ".MI",
+  ".WA",
 ];
 
 // A "ticker-like" query looks like a stock symbol such as `AAPL`, `BHP.AX`,
@@ -71,6 +86,7 @@ function buildSearchResult(searchResult = {}, metadata = {}) {
     type: searchResult.type || "stock",
     nameSource: metadata.nameSource || "company-search",
     isFallbackName: Boolean(metadata.isFallbackName),
+    searchTier: metadata.searchTier ?? searchResult.searchTier,
   };
 }
 
@@ -203,9 +219,15 @@ function getNameSourcePriority(result = {}) {
   return 0;
 }
 
+// The same ticker can arrive from several ROIC branches. We keep one row per
+// identifier, but we still allow later rows to improve the stored name or tier
+// when they are clearly better than what we already have.
 function choosePreferredResult(currentResult, candidateResult) {
   const currentPriority = getNameSourcePriority(currentResult);
   const candidatePriority = getNameSourcePriority(candidateResult);
+  const currentTier = Number.isFinite(currentResult.searchTier) ? currentResult.searchTier : Number.POSITIVE_INFINITY;
+  const candidateTier = Number.isFinite(candidateResult.searchTier) ? candidateResult.searchTier : Number.POSITIVE_INFINITY;
+  const preferredTier = Math.min(currentTier, candidateTier);
 
   if (candidatePriority > currentPriority) {
     const preferredResult = {
@@ -217,7 +239,18 @@ function choosePreferredResult(currentResult, candidateResult) {
       preferredResult.sources = currentResult.sources;
     }
 
+    if (Number.isFinite(preferredTier)) {
+      preferredResult.searchTier = preferredTier;
+    }
+
     return preferredResult;
+  }
+
+  if (Number.isFinite(preferredTier) && preferredTier < currentTier) {
+    return {
+      ...currentResult,
+      searchTier: preferredTier,
+    };
   }
 
   return currentResult;
@@ -227,47 +260,56 @@ function choosePreferredResult(currentResult, candidateResult) {
 // duplicates, keeps the preferred name data, sorts by relevance, and limits the
 // final list to the top results we want to show users.
 function mergeTickerSearchResults(rawQuery, ...searchResultLists) {
-  const mergedResultsMap = new Map();
-
-  searchResultLists.flat().forEach((searchResult) => {
-    const normalizedResult = buildSearchResult(searchResult, {
-      nameSource: searchResult.nameSource,
-      isFallbackName: searchResult.isFallbackName,
-    });
-    if (!normalizedResult.identifier) {
-      return;
-    }
-
-    if (!mergedResultsMap.has(normalizedResult.identifier)) {
-      mergedResultsMap.set(normalizedResult.identifier, normalizedResult);
-      return;
-    }
-
-    mergedResultsMap.set(
-      normalizedResult.identifier,
-      choosePreferredResult(mergedResultsMap.get(normalizedResult.identifier), normalizedResult),
-    );
-  });
-
-  return [...mergedResultsMap.values()]
-    .sort((left, right) => {
-      const scoreDifference = getTickerMatchScore(rawQuery, right) - getTickerMatchScore(rawQuery, left);
-      if (scoreDifference !== 0) {
-        return scoreDifference;
-      }
-
-      return left.identifier.localeCompare(right.identifier);
-    })
-    .slice(0, MAX_SEARCH_RESULTS);
+  return mergeSearchResults(rawQuery, searchResultLists);
 }
 
 // Same merge as above, but keeps a `sources` array so diagnostic endpoints can
 // explain where each result came from (`name`, `exact`, `variant`, etc.).
 function mergeTickerSearchResultsWithSources(rawQuery, searchResultGroups = []) {
+  return mergeSearchResults(rawQuery, searchResultGroups, {
+    includeSources: true,
+  });
+}
+
+function mergeSearchResults(rawQuery, searchResultLists = [], options = {}) {
+  const {
+    includeSources = false,
+    maxResults = MAX_SEARCH_RESULTS,
+  } = options;
   const mergedResultsMap = new Map();
 
-  searchResultGroups.forEach(({ source, results = [] }) => {
-    results.forEach((searchResult) => {
+  if (includeSources) {
+    searchResultLists.forEach(({ source, results = [] }) => {
+      results.forEach((searchResult) => {
+        const normalizedResult = buildSearchResult(searchResult, {
+          nameSource: searchResult.nameSource,
+          isFallbackName: searchResult.isFallbackName,
+        });
+        if (!normalizedResult.identifier) {
+          return;
+        }
+
+        if (!mergedResultsMap.has(normalizedResult.identifier)) {
+          mergedResultsMap.set(normalizedResult.identifier, {
+            ...normalizedResult,
+            sources: [source],
+          });
+          return;
+        }
+
+        const existingResult = mergedResultsMap.get(normalizedResult.identifier);
+        if (!existingResult.sources.includes(source)) {
+          existingResult.sources.push(source);
+        }
+
+        mergedResultsMap.set(
+          normalizedResult.identifier,
+          choosePreferredResult(existingResult, normalizedResult),
+        );
+      });
+    });
+  } else {
+    searchResultLists.flat().forEach((searchResult) => {
       const normalizedResult = buildSearchResult(searchResult, {
         nameSource: searchResult.nameSource,
         isFallbackName: searchResult.isFallbackName,
@@ -277,26 +319,18 @@ function mergeTickerSearchResultsWithSources(rawQuery, searchResultGroups = []) 
       }
 
       if (!mergedResultsMap.has(normalizedResult.identifier)) {
-        mergedResultsMap.set(normalizedResult.identifier, {
-          ...normalizedResult,
-          sources: [source],
-        });
+        mergedResultsMap.set(normalizedResult.identifier, normalizedResult);
         return;
-      }
-
-      const existingResult = mergedResultsMap.get(normalizedResult.identifier);
-      if (!existingResult.sources.includes(source)) {
-        existingResult.sources.push(source);
       }
 
       mergedResultsMap.set(
         normalizedResult.identifier,
-        choosePreferredResult(existingResult, normalizedResult),
+        choosePreferredResult(mergedResultsMap.get(normalizedResult.identifier), normalizedResult),
       );
     });
-  });
+  }
 
-  return [...mergedResultsMap.values()]
+  const mergedResults = [...mergedResultsMap.values()]
     .sort((left, right) => {
       const scoreDifference = getTickerMatchScore(rawQuery, right) - getTickerMatchScore(rawQuery, left);
       if (scoreDifference !== 0) {
@@ -304,12 +338,19 @@ function mergeTickerSearchResultsWithSources(rawQuery, searchResultGroups = []) 
       }
 
       return left.identifier.localeCompare(right.identifier);
-    })
-    .slice(0, MAX_SEARCH_RESULTS)
-    .map((result) => ({
-      ...result,
-      sources: [...result.sources].sort(),
-    }));
+    });
+
+  const limitedResults =
+    Number.isFinite(maxResults) ? mergedResults.slice(0, maxResults) : mergedResults;
+
+  if (!includeSources) {
+    return limitedResults;
+  }
+
+  return limitedResults.map((result) => ({
+    ...result,
+    sources: [...result.sources].sort(),
+  }));
 }
 
 function buildTickerVariantCandidates(rawQuery) {
@@ -332,10 +373,7 @@ function getProfileCompanyName(profile = {}) {
 // A ticker is considered "confirmed" only if ROIC can return at least one
 // price row for it. That helps us avoid showing made-up symbol variants.
 async function buildTickerConfirmedSearchResult(tickerSymbol) {
-  const priceRows = await roicService.fetchStockPrices(tickerSymbol, {
-    order: "DESC",
-    limit: 1,
-  });
+  const priceRows = await roicService.fetchStockPrices(tickerSymbol, LATEST_PRICE_LOOKUP_OPTIONS);
 
   if (priceRows.length === 0) {
     return null;
@@ -501,192 +539,100 @@ function countPreferredBroadResults(results = []) {
   return results.filter((result) => isPreferredBroadResultType(result)).length;
 }
 
-// This is the main filter for raw company-name search results.
-// In name-first mode we prefer prefix matches first, then broaden to contains
-// matches if we still do not have enough useful results.
-function filterCompanySearchResults(rawQuery, companySearchResults = [], options = {}) {
-  const {
-    mode = "name-first",
-    minimumPrefixResultsBeforeBroaden = MIN_PREFIX_RESULTS_BEFORE_BROADEN,
-    fallbackQueries = [],
-  } = options;
-
-  if (mode === "ticker-first") {
-    return companySearchResults.filter((result) => isStrongTickerLikeCompanyMatch(rawQuery, result));
+// Search tiers are the first ranking rule we apply.
+// Lower numbers are stronger:
+// 1. exact ticker hits
+// 2. confirmed suffix variants
+// 3. strong ticker-like company-name matches
+// 4. loose company-name fill matches
+function applySearchTier(results = [], searchTier) {
+  if (!Number.isFinite(searchTier)) {
+    return results;
   }
 
-  const prefixMatches = companySearchResults.filter((result) => isPrefixCompanyMatch(rawQuery, result));
-  if (prefixMatches.length >= minimumPrefixResultsBeforeBroaden) {
-    return prefixMatches;
-  }
-
-  const usedIdentifiers = new Set(prefixMatches.map((result) => result.identifier));
-  const containsMatches = companySearchResults.filter((result) => {
-    if (usedIdentifiers.has(result.identifier)) {
-      return false;
-    }
-
-    return isContainsCompanyMatch(rawQuery, result) || isFallbackTokenPrefixMatch(fallbackQueries, result);
-  });
-
-  return [...prefixMatches, ...containsMatches];
+  return results.map((result) => ({
+    ...result,
+    searchTier,
+  }));
 }
 
-function normalizeNameSearchResultList(rawQuery, searchResults, tickerFirstQuery, options = {}) {
-  const normalizedResults = normalizeCompanySearchResults(searchResults);
-
-  return filterCompanySearchResults(rawQuery, normalizedResults, {
-    mode: tickerFirstQuery ? "ticker-first" : "name-first",
-    fallbackQueries: options.fallbackQueries || [],
-  });
-}
-
-// Main search flow:
-// 1. Try the company-name endpoint.
-// 2. Try the exact ticker directly.
-// 3. If the input looks like a ticker, also try exchange-suffixed variants.
-// 4. Merge, rank, and deduplicate everything.
-// 5. If this was a name search and the results are still weak, try fallback
-//    word variants such as singular/plural/stemmed forms.
-async function runSearch(rawQuery) {
-  const uppercaseQuery = rawQuery.toUpperCase();
-  const tickerFirstQuery = isTickerFirstQuery(rawQuery);
-  const companyNameSearchQuery = tickerFirstQuery ? uppercaseQuery : rawQuery;
-  const searchTasks = [
-    {
-      source: "name",
-      promise: roicService.searchRoicByCompanyName(companyNameSearchQuery),
-    },
-    {
-      source: "exact",
-      promise: searchRoicByExactTicker(uppercaseQuery),
-    },
+// Loose ticker-first matches are still useful, but only as backup suggestions
+// after stronger exact and prefix-style matches have been considered.
+function isTickerLooseCompanyMatch(rawQuery, normalizedResult) {
+  const query = String(rawQuery || "").trim().toUpperCase();
+  const resultTokens = [
+    ...tokenizeSearchText(normalizedResult.identifier),
+    ...tokenizeSearchText(normalizedResult.name),
   ];
 
-  if (tickerFirstQuery) {
-    searchTasks.push({
-      source: "variant",
-      promise: searchRoicByTickerVariants(uppercaseQuery),
-    });
+  if (!query || resultTokens.length === 0) {
+    return false;
   }
 
-  const settledSearchResults = await Promise.allSettled(
-    searchTasks.map((searchTask) => searchTask.promise),
-  );
+  return resultTokens.some((token) => token.startsWith(query));
+}
 
-  const successfulResultLists = settledSearchResults
-    .map((searchResult, index) => ({ searchResult, searchTask: searchTasks[index] }))
-    .filter(({ searchResult }) => searchResult.status === "fulfilled")
-    .map(({ searchResult, searchTask }) => {
-      if (searchTask.source === "name") {
-        return {
-          source: searchTask.source,
-          results: normalizeNameSearchResultList(rawQuery, searchResult.value, tickerFirstQuery),
-        };
-      }
+function getPriceStatusPriority(result = {}) {
+  return result.priceStatus === "ok" ? 1 : 0;
+}
 
-      return {
-        source: searchTask.source,
-        results: searchResult.value,
-      };
-    });
+function getSearchTierPriority(result = {}) {
+  return Number.isFinite(result.searchTier) ? result.searchTier : DEFAULT_SEARCH_TIER_PRIORITY;
+}
 
-  const rejectedResults = settledSearchResults
-    .map((searchResult, index) => ({ searchResult, searchTask: searchTasks[index] }))
-    .filter(({ searchResult }) => searchResult.status === "rejected");
-
-  let mergedResults = mergeTickerSearchResults(
-    rawQuery,
-    ...successfulResultLists.map((resultList) => resultList.results),
-  );
-  let diagnosticResults = mergeTickerSearchResultsWithSources(rawQuery, successfulResultLists);
-
-  if (!tickerFirstQuery && countPreferredBroadResults(mergedResults) < MIN_PREFIX_RESULTS_BEFORE_BROADEN) {
-    const fallbackQueries = buildWordSearchFallbackQueries(rawQuery);
-
-    if (fallbackQueries.length > 0) {
-      const fallbackSearchResults = await Promise.allSettled(
-        fallbackQueries.map((fallbackQuery) => roicService.searchRoicByCompanyName(fallbackQuery)),
-      );
-
-      fallbackSearchResults.forEach((fallbackSearchResult) => {
-        if (fallbackSearchResult.status === "fulfilled") {
-          successfulResultLists.push({
-            source: "name-fallback",
-          results: normalizeNameSearchResultList(rawQuery, fallbackSearchResult.value, false, {
-            fallbackQueries: fallbackQueries,
-          }),
-        });
-        return;
-      }
-
-        rejectedResults.push({
-          searchResult: fallbackSearchResult,
-          searchTask: {
-            source: "name-fallback",
-          },
-        });
-      });
-
-      mergedResults = mergeTickerSearchResults(
-        rawQuery,
-        ...successfulResultLists.map((resultList) => resultList.results),
-      );
-      diagnosticResults = mergeTickerSearchResultsWithSources(rawQuery, successfulResultLists);
+// This sort order is intentional: a weak fill match must never jump ahead of a
+// stronger ticker hit just because the weak result happened to have price data.
+function sortResultsWithPricePreference(rawQuery, results = []) {
+  return [...results].sort((left, right) => {
+    const tierDifference = getSearchTierPriority(left) - getSearchTierPriority(right);
+    if (tierDifference !== 0) {
+      return tierDifference;
     }
-  }
 
-  if (mergedResults.length === 0) {
-    const hasAnySuccessfulRows = successfulResultLists.some((resultList) => resultList.results.length > 0);
-    if (!hasAnySuccessfulRows && rejectedResults.length > 0) {
-      const firstError = rejectedResults[0]?.searchResult?.reason;
-      const error = new Error(`Unable to search stocks for "${rawQuery}".`);
-      error.statusCode = firstError?.response?.status || 502;
-      error.details = firstError?.response?.data || firstError?.message || "ROIC search request failed.";
-      throw error;
+    const scoreDifference = getTickerMatchScore(rawQuery, right) - getTickerMatchScore(rawQuery, left);
+    if (scoreDifference !== 0) {
+      return scoreDifference;
     }
-  }
 
-  return {
-    query: rawQuery,
-    queryType: tickerFirstQuery ? "ticker-or-name" : "name",
-    results: mergedResults,
-    diagnosticResults,
-  };
+    const pricePriorityDifference = getPriceStatusPriority(right) - getPriceStatusPriority(left);
+    if (pricePriorityDifference !== 0) {
+      return pricePriorityDifference;
+    }
+
+    return String(left.identifier || "").localeCompare(String(right.identifier || ""));
+  });
 }
 
-// Public endpoint shape for normal app use.
-async function searchStocks(rawQuery) {
-  const searchSummary = await runSearch(rawQuery);
-
-  return {
-    query: searchSummary.query,
-    queryType: searchSummary.queryType,
-    results: searchSummary.results,
-  };
+function countUsablePricedResults(results = []) {
+  return results.filter((result) => result.priceStatus === "ok").length;
 }
 
-// Diagnostic version of the same search. This returns the same stocks, but
-// includes source-tracing data so we can inspect how each result was found.
-async function searchStocksWithDiagnostics(rawQuery) {
-  const searchSummary = await runSearch(rawQuery);
-
-  return {
-    query: searchSummary.query,
-    queryType: searchSummary.queryType,
-    results: searchSummary.diagnosticResults,
-  };
+function buildResultOrderMap(results = []) {
+  return new Map(results.map((result, index) => [result.identifier, index]));
 }
 
-// Adds the latest available close price to already-selected results. Failures on
-// one stock do not fail the whole batch because each lookup is settled safely.
-async function enrichResultsWithLatestPrices(results = []) {
+// The internal search pipeline uses temporary metadata such as latest-price
+// lookups and search tiers. We strip that helper-only data before returning
+// the normal search response shape.
+function stripPriceMetadata(result = {}) {
+  const {
+    latestPrice,
+    priceStatus,
+    priceError,
+    searchTier,
+    ...searchResult
+  } = result;
+
+  return searchResult;
+}
+
+// This helper adds the latest known close to already-selected results without
+// changing the caller's order. That makes it safe for diagnostics and the CLI,
+// where we want extra visibility without changing the base search contract.
+async function fetchLatestPriceDataForResults(results = []) {
   const settledResults = await Promise.allSettled(
     results.map(async (result) => {
-      const priceRows = await roicService.fetchStockPrices(result.identifier, {
-        order: "DESC",
-        limit: 1,
-      });
+      const priceRows = await roicService.fetchStockPrices(result.identifier, LATEST_PRICE_LOOKUP_OPTIONS);
       const latestPrice = priceRows[0] || null;
 
       return {
@@ -719,15 +665,296 @@ async function enrichResultsWithLatestPrices(results = []) {
   });
 }
 
+// The same ROIC company-name endpoint is filtered differently depending on the
+// user's intent. Ticker-first searches stay strict, while name-first searches
+// can broaden into contains and fallback matches when the first pass is sparse.
+function filterCompanySearchResults(rawQuery, companySearchResults = [], options = {}) {
+  const {
+    mode = "name-first",
+    minimumPrefixResultsBeforeBroaden = MIN_PREFIX_RESULTS_BEFORE_BROADEN,
+    fallbackQueries = [],
+  } = options;
+
+  if (mode === "ticker-first") {
+    const { strongMatches, looseMatches } = splitTickerFirstCompanySearchResults(rawQuery, companySearchResults);
+    return [...strongMatches, ...looseMatches];
+  }
+
+  const prefixMatches = companySearchResults.filter((result) => isPrefixCompanyMatch(rawQuery, result));
+  if (prefixMatches.length >= minimumPrefixResultsBeforeBroaden) {
+    return prefixMatches;
+  }
+
+  const usedIdentifiers = new Set(prefixMatches.map((result) => result.identifier));
+  const containsMatches = companySearchResults.filter((result) => {
+    if (usedIdentifiers.has(result.identifier)) {
+      return false;
+    }
+
+    return isContainsCompanyMatch(rawQuery, result) || isFallbackTokenPrefixMatch(fallbackQueries, result);
+  });
+
+  return [...prefixMatches, ...containsMatches];
+}
+
+// Ticker-first searches deliberately split strong and loose matches so the main
+// ranking pipeline can keep exact-style hits above broader "mentions the text"
+// results that are only useful as backup suggestions.
+function splitTickerFirstCompanySearchResults(rawQuery, companySearchResults = []) {
+  const strongMatches = companySearchResults.filter((result) => isStrongTickerLikeCompanyMatch(rawQuery, result));
+  const usedIdentifiers = new Set(strongMatches.map((result) => result.identifier));
+  const looseMatches = companySearchResults.filter((result) => {
+    if (usedIdentifiers.has(result.identifier)) {
+      return false;
+    }
+
+    return isTickerLooseCompanyMatch(rawQuery, result);
+  });
+
+  return {
+    strongMatches,
+    looseMatches,
+  };
+}
+
+// Name-search normalization reuses the same filter helper in two modes.
+// Ticker-first mode is strict, while name-first mode is allowed to broaden.
+function normalizeNameSearchResultList(rawQuery, searchResults, tickerFirstQuery, options = {}) {
+  const normalizedResults = normalizeCompanySearchResults(searchResults);
+
+  return filterCompanySearchResults(rawQuery, normalizedResults, {
+    mode: tickerFirstQuery ? "ticker-first" : "name-first",
+    fallbackQueries: options.fallbackQueries || [],
+  });
+}
+
+// In ticker-first mode we store strong and loose company-name matches as
+// separate groups so the final ranking stage can give them different priority.
+function normalizeTickerFirstNameSearchResultGroups(rawQuery, searchResults) {
+  const normalizedResults = normalizeCompanySearchResults(searchResults);
+  const { strongMatches, looseMatches } = splitTickerFirstCompanySearchResults(rawQuery, normalizedResults);
+
+  return [
+    {
+      source: "name",
+      results: applySearchTier(strongMatches, SEARCH_RESULT_TIERS.tickerStrongName),
+    },
+    {
+      source: "name-loose",
+      results: applySearchTier(looseMatches, SEARCH_RESULT_TIERS.tickerLooseName),
+    },
+  ].filter((group) => group.results.length > 0);
+}
+
+// Main search flow:
+// 1. Classify the query as ticker-first or name-first.
+// 2. Ask ROIC for company-name matches and exact ticker confirmation.
+// 3. If the query looks like a ticker, also probe exchange-suffixed variants.
+// 4. Normalize every branch into the same result shape.
+// 5. Merge duplicates while keeping the strongest name source and tier.
+// 6. Enrich the merged rows with latest-price status so ranking can prefer
+//    usable rows when text relevance is otherwise tied.
+// 7. For sparse name-first searches, broaden using fallback word variants.
+// 8. Return a plain result list and a diagnostic list with source provenance.
+async function runSearch(rawQuery) {
+  const uppercaseQuery = rawQuery.toUpperCase();
+  const tickerFirstQuery = isTickerFirstQuery(rawQuery);
+  const companyNameSearchQuery = tickerFirstQuery ? uppercaseQuery : rawQuery;
+  const searchTasks = [
+    {
+      source: "name",
+      promise: roicService.searchRoicByCompanyName(companyNameSearchQuery),
+    },
+    {
+      source: "exact",
+      promise: searchRoicByExactTicker(uppercaseQuery),
+    },
+  ];
+
+  if (tickerFirstQuery) {
+    searchTasks.push({
+      source: "variant",
+      promise: searchRoicByTickerVariants(uppercaseQuery),
+    });
+  }
+
+  const settledSearchResults = await Promise.allSettled(
+    searchTasks.map((searchTask) => searchTask.promise),
+  );
+
+  const successfulResultLists = settledSearchResults
+    .map((searchResult, index) => ({ searchResult, searchTask: searchTasks[index] }))
+    .filter(({ searchResult }) => searchResult.status === "fulfilled")
+    .flatMap(({ searchResult, searchTask }) => {
+      if (searchTask.source === "name") {
+        if (tickerFirstQuery) {
+          return normalizeTickerFirstNameSearchResultGroups(rawQuery, searchResult.value);
+        }
+
+        return {
+          source: searchTask.source,
+          results: normalizeNameSearchResultList(rawQuery, searchResult.value, tickerFirstQuery),
+        };
+      }
+
+      const searchTier =
+        searchTask.source === "exact"
+          ? SEARCH_RESULT_TIERS.exact
+          : searchTask.source === "variant"
+            ? SEARCH_RESULT_TIERS.variant
+            : undefined;
+
+      return {
+        source: searchTask.source,
+        results: applySearchTier(searchResult.value, searchTier),
+      };
+    });
+
+  const rejectedResults = settledSearchResults
+    .map((searchResult, index) => ({ searchResult, searchTask: searchTasks[index] }))
+    .filter(({ searchResult }) => searchResult.status === "rejected");
+
+  let mergedResults = mergeSearchResults(
+    rawQuery,
+    successfulResultLists.map((resultList) => resultList.results),
+    {
+      maxResults: Number.POSITIVE_INFINITY,
+    },
+  );
+  let diagnosticResults = mergeSearchResults(rawQuery, successfulResultLists, {
+    includeSources: true,
+    maxResults: Number.POSITIVE_INFINITY,
+  });
+  let rankedMergedResults = await fetchLatestPriceDataForResults(mergedResults);
+
+  if (!tickerFirstQuery && countUsablePricedResults(rankedMergedResults) < MIN_PREFIX_RESULTS_BEFORE_BROADEN) {
+    const fallbackQueries = buildWordSearchFallbackQueries(rawQuery);
+
+    if (fallbackQueries.length > 0) {
+      const fallbackSearchResults = await Promise.allSettled(
+        fallbackQueries.map((fallbackQuery) => roicService.searchRoicByCompanyName(fallbackQuery)),
+      );
+
+      fallbackSearchResults.forEach((fallbackSearchResult) => {
+        if (fallbackSearchResult.status === "fulfilled") {
+          successfulResultLists.push({
+            source: "name-fallback",
+            results: normalizeNameSearchResultList(rawQuery, fallbackSearchResult.value, false, {
+              fallbackQueries,
+            }),
+          });
+          return;
+        }
+
+        rejectedResults.push({
+          searchResult: fallbackSearchResult,
+          searchTask: {
+            source: "name-fallback",
+          },
+        });
+      });
+
+      mergedResults = mergeSearchResults(
+        rawQuery,
+        successfulResultLists.map((resultList) => resultList.results),
+        {
+          maxResults: Number.POSITIVE_INFINITY,
+        },
+      );
+      diagnosticResults = mergeSearchResults(rawQuery, successfulResultLists, {
+        includeSources: true,
+        maxResults: Number.POSITIVE_INFINITY,
+      });
+      rankedMergedResults = await fetchLatestPriceDataForResults(mergedResults);
+    }
+  }
+
+  if (rankedMergedResults.length === 0) {
+    const hasAnySuccessfulRows = successfulResultLists.some((resultList) => resultList.results.length > 0);
+    if (!hasAnySuccessfulRows && rejectedResults.length > 0) {
+      const firstError = rejectedResults[0]?.searchResult?.reason;
+      const error = new Error(`Unable to search stocks for "${rawQuery}".`);
+      error.statusCode = firstError?.response?.status || 502;
+      error.details = firstError?.response?.data || firstError?.message || "ROIC search request failed.";
+      throw error;
+    }
+  }
+
+  const rankedResults = sortResultsWithPricePreference(rawQuery, rankedMergedResults)
+    .slice(0, MAX_SEARCH_RESULTS)
+    .map(stripPriceMetadata);
+  const rankedResultOrder = buildResultOrderMap(rankedResults);
+  const rankedDiagnosticResults = [...diagnosticResults]
+    .sort((left, right) => {
+      const leftOrder = rankedResultOrder.get(left.identifier);
+      const rightOrder = rankedResultOrder.get(right.identifier);
+
+      if (leftOrder !== undefined || rightOrder !== undefined) {
+        if (leftOrder === undefined) {
+          return 1;
+        }
+
+        if (rightOrder === undefined) {
+          return -1;
+        }
+
+        return leftOrder - rightOrder;
+      }
+
+      return String(left.identifier || "").localeCompare(String(right.identifier || ""));
+    })
+    .slice(0, MAX_SEARCH_RESULTS)
+    .map(stripPriceMetadata);
+
+  return {
+    query: rawQuery,
+    queryType: tickerFirstQuery ? "ticker-or-name" : "name",
+    results: rankedResults,
+    diagnosticResults: rankedDiagnosticResults,
+  };
+}
+
+// Public endpoint shape for normal app use.
+async function searchStocks(rawQuery) {
+  const searchSummary = await runSearch(rawQuery);
+
+  return {
+    query: searchSummary.query,
+    queryType: searchSummary.queryType,
+    results: searchSummary.results,
+  };
+}
+
+// Diagnostic version of the same search. This returns the same stocks, but
+// includes source-tracing data so we can inspect how each result was found.
+async function searchStocksWithDiagnostics(rawQuery) {
+  const searchSummary = await runSearch(rawQuery);
+
+  return {
+    query: searchSummary.query,
+    queryType: searchSummary.queryType,
+    results: searchSummary.diagnosticResults,
+  };
+}
+
+// This public helper exists for the CLI and debugging tools. It adds price
+// metadata, but it deliberately keeps the caller's input order unchanged.
+async function enrichResultsWithLatestPrices(results = []) {
+  return fetchLatestPriceDataForResults(results);
+}
+
 module.exports = {
   COMMON_TICKER_SUFFIXES,
   buildTickerVariantCandidates,
   buildTickerConfirmedSearchResult,
   buildWordSearchFallbackQueries,
   countPreferredBroadResults,
+  countUsablePricedResults,
   enrichResultsWithLatestPrices,
   filterCompanySearchResults,
+  fetchLatestPriceDataForResults,
   isPreferredBroadResultType,
+  isTickerLooseCompanyMatch,
   isStrongTickerLikeCompanyMatch,
   isTickerFirstQuery,
   isTickerLikeQuery,
@@ -739,4 +966,6 @@ module.exports = {
   searchStocksWithDiagnostics,
   searchRoicByExactTicker,
   searchRoicByTickerVariants,
+  splitTickerFirstCompanySearchResults,
+  sortResultsWithPricePreference,
 };
