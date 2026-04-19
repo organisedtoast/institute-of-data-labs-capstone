@@ -269,12 +269,12 @@ test("live ROIC import flows through normalization, MongoDB upsert, and follow-u
 
     // We inspect the first annual entry to make sure the important yearly
     // metrics were also normalized into the same overridable-field structure.
-    // marketAnchorDate is now a hybrid field:
+    // earningsReleaseDate is now a hybrid field:
     // - earnings-call date when ROIC has it
     // - otherwise the annual period-end date fallback
     const firstAnnualEntry = importedDoc.annualData[0];
     for (const fieldName of [
-      "marketAnchorDate",
+      "earningsReleaseDate",
       "stockPrice",
       "sharesOutstanding",
       "marketCap",
@@ -377,7 +377,7 @@ test("live ROIC import flows through normalization, MongoDB upsert, and follow-u
 
     const refreshedFirstAnnualEntry = refreshResponse.body.annualData[0];
     for (const fieldName of [
-      "marketAnchorDate",
+      "earningsReleaseDate",
       "stockPrice",
       "sharesOutstanding",
       "marketCap",

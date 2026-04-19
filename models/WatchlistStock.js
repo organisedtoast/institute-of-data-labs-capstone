@@ -14,7 +14,7 @@ const overridableField = {
 const annualDataSchema = new mongoose.Schema({
   fiscalYear:               { type: Number, required: true },
   fiscalYearEndDate:        { type: String },
-  marketAnchorDate:         overridableField,
+  earningsReleaseDate:      overridableField,
   stockPrice:               overridableField,
   sharesOutstanding:        overridableField,
   marketCap:                overridableField,

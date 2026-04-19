@@ -50,7 +50,7 @@ async function refreshStock(req, res, next) {
         // Update only roicValue for each metric
         for (const metric of [
           "stockPrice", "sharesOutstanding",
-          "returnOnInvestedCapital", "marketAnchorDate",
+          "returnOnInvestedCapital", "earningsReleaseDate",
         ]) {
           existing[metric].roicValue = freshYear[metric].roicValue;
           const resolved = resolveEffectiveValue(existing[metric]);

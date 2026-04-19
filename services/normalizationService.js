@@ -200,7 +200,7 @@ function getFiscalYear(row) {
 }
 
 // Fiscal year end dates are stored on the annualData row itself and also serve
-// as the fallback market anchor when no earnings-call date exists for a year.
+// as the fallback earnings release date when no earnings-call date exists for a year.
 function getFiscalYearEndDate(row) {
   const rawDate = pickFirstDefined(row, [
     "fiscalYearEndDate",
@@ -333,12 +333,12 @@ function normalizeEarningsCalls(earningsPayload) {
     .sort((left, right) => left.date.localeCompare(right.date));
 }
 
-// This helper chooses the best available post-fiscal-year anchor date.
+// This helper chooses the best available post-fiscal-year earnings release date.
 // 1. Prefer a real earnings-call date on or after the fiscal year end.
 // 2. Otherwise fall back to a call whose year matches the fiscal year label.
 // 3. If the earnings-call dataset has no suitable row, fall back to the annual
-//    period-end date so the app still has a consistent anchor for price lookup.
-function selectMarketAnchorDate({ fiscalYear, fiscalYearEndDate, normalizedCalls }) {
+//    period-end date so the app still has a consistent earnings release date for price lookup.
+function selectEarningsReleaseDate({ fiscalYear, fiscalYearEndDate, normalizedCalls }) {
   if (fiscalYearEndDate) {
     const matchAfterYearEnd = normalizedCalls.find((call) => call.date >= fiscalYearEndDate);
     if (matchAfterYearEnd) {
@@ -383,14 +383,14 @@ function buildAnnualEntry({
     ? getReturnOnInvestedCapital(profitabilityRow)
     : null;
 
-  const marketAnchorDate = selectMarketAnchorDate({
+  const earningsReleaseDate = selectEarningsReleaseDate({
     fiscalYear,
     fiscalYearEndDate,
     normalizedCalls,
   });
 
-  const stockPrice = marketAnchorDate
-    ? selectPriceAfterAnchorDate(marketAnchorDate, normalizedPrices)
+  const stockPrice = earningsReleaseDate
+    ? selectPriceAfterAnchorDate(earningsReleaseDate, normalizedPrices)
     : null;
 
   const marketCap = sharesOutstanding !== null && stockPrice !== null
@@ -400,7 +400,7 @@ function buildAnnualEntry({
   return {
     fiscalYear,
     fiscalYearEndDate,
-    marketAnchorDate: wrapImportedValue(marketAnchorDate),
+    earningsReleaseDate: wrapImportedValue(earningsReleaseDate),
     stockPrice: wrapImportedValue(stockPrice),
     sharesOutstanding: wrapImportedValue(sharesOutstanding),
     marketCap: wrapImportedValue(marketCap, marketCap !== null ? "derived" : "roic"),

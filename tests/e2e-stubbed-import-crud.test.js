@@ -117,7 +117,7 @@ function buildProfitabilityRows() {
 
 // This helper creates daily stock-price rows in ascending date order.
 // Normalization uses this dataset to find the stock price that should be paired
-// with each chosen market anchor date.
+// with each chosen earnings release date.
 function buildPriceRows() {
   return [
     { date: "2015-10-29", close: 100 },
@@ -354,7 +354,7 @@ test("stubbed ROIC import flows through normalization, MongoDB upsert, and follo
     // These checks prove normalization preserved the expected overridable-field
     // object structure for the yearly metrics.
     for (const fieldName of [
-      "marketAnchorDate",
+      "earningsReleaseDate",
       "stockPrice",
       "sharesOutstanding",
       "marketCap",
@@ -378,9 +378,9 @@ test("stubbed ROIC import flows through normalization, MongoDB upsert, and follo
     // These specific values prove the normalization logic produced the numbers
     // we expect from the stubbed upstream data.
     //
-    // 2024 has no earnings-call row in the stub, so marketAnchorDate should
+    // 2024 has no earnings-call row in the stub, so earningsReleaseDate should
     // fall back to the annual period-end date from the annual fundamentals.
-    assert.equal(firstAnnualEntry.marketAnchorDate.effectiveValue, "2024-09-28");
+    assert.equal(firstAnnualEntry.earningsReleaseDate.effectiveValue, "2024-09-28");
     assert.equal(firstAnnualEntry.stockPrice.effectiveValue, 190);
     assert.equal(firstAnnualEntry.sharesOutstanding.effectiveValue, 1000);
     assert.equal(firstAnnualEntry.marketCap.effectiveValue, 190000);
@@ -392,7 +392,7 @@ test("stubbed ROIC import flows through normalization, MongoDB upsert, and follo
     // use that real post-year-end date instead of the fiscal-year-end fallback.
     const secondAnnualEntry = importedDoc.annualData[1];
     assert.equal(secondAnnualEntry.fiscalYear, 2023);
-    assert.equal(secondAnnualEntry.marketAnchorDate.effectiveValue, "2023-11-03");
+    assert.equal(secondAnnualEntry.earningsReleaseDate.effectiveValue, "2023-11-03");
 
     // GET by ticker proves the imported record is readable through the normal
     // CRUD route after being written to MongoDB.
