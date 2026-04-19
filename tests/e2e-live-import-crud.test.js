@@ -270,8 +270,8 @@ test("live ROIC import flows through normalization, MongoDB upsert, and follow-u
     // We inspect the first annual entry to make sure the important yearly
     // metrics were also normalized into the same overridable-field structure.
     // earningsReleaseDate is now a hybrid field:
-    // - earnings-call date when ROIC has it
-    // - otherwise the annual period-end date fallback
+    // - earnings-call date when ROIC has a qualifying one
+    // - otherwise fiscal year end plus 90 calendar days
     const firstAnnualEntry = importedDoc.annualData[0];
     for (const fieldName of [
       "earningsReleaseDate",

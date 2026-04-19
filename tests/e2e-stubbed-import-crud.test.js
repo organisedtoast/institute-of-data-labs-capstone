@@ -139,7 +139,7 @@ function buildPriceRows() {
 // Why omit it?
 // This lets the test prove the new hybrid behavior:
 // - 2023 can still use a real earnings-call date
-// - 2024 must fall back to the annual period-end date
+// - 2024 must fall back to fiscal year end plus 90 calendar days
 // That mixed coverage is exactly the real-world problem we want to handle.
 function buildEarningsRows() {
   return [
@@ -378,18 +378,18 @@ test("stubbed ROIC import flows through normalization, MongoDB upsert, and follo
     // These specific values prove the normalization logic produced the numbers
     // we expect from the stubbed upstream data.
     //
-    // 2024 has no earnings-call row in the stub, so earningsReleaseDate should
-    // fall back to the annual period-end date from the annual fundamentals.
-    assert.equal(firstAnnualEntry.earningsReleaseDate.effectiveValue, "2024-09-28");
-    assert.equal(firstAnnualEntry.stockPrice.effectiveValue, 190);
+    // 2024 has no qualifying earnings-call row in the stub, so
+    // earningsReleaseDate should fall back to fiscal year end plus 90 days.
+    assert.equal(firstAnnualEntry.earningsReleaseDate.effectiveValue, "2024-12-27");
+    assert.equal(firstAnnualEntry.stockPrice.effectiveValue, null);
     assert.equal(firstAnnualEntry.sharesOutstanding.effectiveValue, 1000);
-    assert.equal(firstAnnualEntry.marketCap.effectiveValue, 190000);
-    assert.equal(firstAnnualEntry.marketCap.sourceOfTruth, "derived");
+    assert.equal(firstAnnualEntry.marketCap.effectiveValue, null);
+    assert.equal(firstAnnualEntry.marketCap.sourceOfTruth, "roic");
     assert.equal(firstAnnualEntry.returnOnInvestedCapital.effectiveValue, 0.31);
     assert.equal(firstAnnualEntry.returnOnInvestedCapital.sourceOfTruth, "roic");
 
     // The second row still has an earnings-call record available, so it should
-    // use that real post-year-end date instead of the fiscal-year-end fallback.
+    // use that real post-year-end date instead of the 90-day fallback.
     const secondAnnualEntry = importedDoc.annualData[1];
     assert.equal(secondAnnualEntry.fiscalYear, 2023);
     assert.equal(secondAnnualEntry.earningsReleaseDate.effectiveValue, "2023-11-03");
@@ -473,7 +473,7 @@ test("stubbed ROIC import flows through normalization, MongoDB upsert, and follo
     assert.equal(refreshResponse.body.companyName.effectiveValue, TEST_COMPANY_OVERRIDE);
     assert.equal(refreshResponse.body.companyName.sourceOfTruth, "user");
     assert.equal(refreshResponse.body.annualData[0].stockPrice.sourceOfTruth, "roic");
-    assert.equal(refreshResponse.body.annualData[0].marketCap.sourceOfTruth, "derived");
+    assert.equal(refreshResponse.body.annualData[0].marketCap.sourceOfTruth, "roic");
 
     // DELETE proves the record can be removed cleanly after all prior steps.
     const deleteResponse = await requestJson(`/api/watchlist/${TEST_TICKER}`, {

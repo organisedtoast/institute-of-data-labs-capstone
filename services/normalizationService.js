@@ -293,6 +293,24 @@ function normalizeDateString(value) {
   return parsed.toISOString().slice(0, 10);
 }
 
+// When ROIC does not provide a usable earnings-call date, we estimate a
+// fallback earnings release date by moving 90 calendar days past the fiscal
+// year end. This keeps the rule explicit and easy for beginners to follow.
+function addDaysToDateString(dateString, daysToAdd) {
+  const normalizedDate = normalizeDateString(dateString);
+  if (!normalizedDate) {
+    return null;
+  }
+
+  const parsed = new Date(`${normalizedDate}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  parsed.setUTCDate(parsed.getUTCDate() + daysToAdd);
+  return parsed.toISOString().slice(0, 10);
+}
+
 // Price selection depends on the history being in ascending order with numeric
 // close values. We build that exact shape before calling the shared utility.
 function normalizePriceHistory(pricesPayload) {
@@ -307,8 +325,8 @@ function normalizePriceHistory(pricesPayload) {
     .sort((left, right) => left.date.localeCompare(right.date));
 }
 
-// Earnings calls need slightly richer normalization because the matching logic
-// uses both the date itself and, as a fallback, the fiscal-year label.
+// Earnings calls need slightly richer normalization because later code needs a
+// clean date list for choosing the imported earnings release date.
 function normalizeEarningsCalls(earningsPayload) {
   const rows = extractEarningsRows(earningsPayload);
 
@@ -333,12 +351,14 @@ function normalizeEarningsCalls(earningsPayload) {
     .sort((left, right) => left.date.localeCompare(right.date));
 }
 
-// This helper chooses the best available post-fiscal-year earnings release date.
+// This helper chooses the imported earnings release date for one fiscal year.
 // 1. Prefer a real earnings-call date on or after the fiscal year end.
-// 2. Otherwise fall back to a call whose year matches the fiscal year label.
-// 3. If the earnings-call dataset has no suitable row, fall back to the annual
-//    period-end date so the app still has a consistent earnings release date for price lookup.
+// 2. If ROIC has no qualifying earnings-call date, estimate the release date as
+//    fiscal year end plus 90 calendar days.
+// 3. If we do not even have a fiscal year end date, return null.
 function selectEarningsReleaseDate({ fiscalYear, fiscalYearEndDate, normalizedCalls }) {
+  void fiscalYear;
+
   if (fiscalYearEndDate) {
     const matchAfterYearEnd = normalizedCalls.find((call) => call.date >= fiscalYearEndDate);
     if (matchAfterYearEnd) {
@@ -346,20 +366,7 @@ function selectEarningsReleaseDate({ fiscalYear, fiscalYearEndDate, normalizedCa
     }
   }
 
-  const sameYearMatch = normalizedCalls.find((call) => {
-    if (call.fiscalYear !== null && call.fiscalYear === fiscalYear) {
-      return true;
-    }
-
-    const callYear = Number(call.date.slice(0, 4));
-    return callYear === fiscalYear;
-  });
-
-  if (sameYearMatch) {
-    return sameYearMatch.date;
-  }
-
-  return fiscalYearEndDate || null;
+  return addDaysToDateString(fiscalYearEndDate, 90);
 }
 
 // We keep yearly rows sorted newest-first so a years=10 limit returns the most
