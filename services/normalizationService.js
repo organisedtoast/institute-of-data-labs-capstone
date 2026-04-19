@@ -1,34 +1,20 @@
-// This service translates raw ROIC responses into the exact document shape
-// expected by the WatchlistStock Mongoose model.
-//
-// The most important design goal here is resilience:
-// ROIC payload shapes can vary by endpoint or plan, so we isolate "guessy"
-// field-name assumptions into small helper functions rather than scattering
-// them across the transformation flow.
-//
-// That way, when you get real sample payloads later, you should only need to
-// adjust a few extractors instead of rewriting the whole service.
-
+const {
+  ROIC_ENDPOINTS_USED,
+} = require("../catalog/fieldCatalog");
+const {
+  createEmptyAnalystRevisions,
+  createEmptyAnnualEntry,
+  createEmptyForecastBucket,
+  createEmptyGrowthForecasts,
+} = require("../utils/documentFactory");
+const { assignMetricValue, createMetricField } = require("../utils/metricField");
+const { recalculateDerived } = require("../utils/derivedCalc");
 const { selectPriceAfterAnchorDate } = require("../utils/priceSelector");
 
-// These are the endpoint names we want to record in sourceMeta so imported
-// documents show exactly which upstream datasets were used to construct them.
-const ROIC_ENDPOINTS_USED = [
-  "company/profile",
-  "annual/per-share",
-  "annual/profitability",
-  "stock-prices",
-  "earnings-calls",
-];
-
-// This helper safely checks whether a value is a plain object.
-// We use it throughout the service when payloads may be arrays, null, or nested.
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-// ROIC commonly returns number-like strings such as "2.45" or "103000000".
-// Converting them once at the edge keeps the rest of the code predictable.
 function coerceNumber(value) {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -39,12 +25,11 @@ function coerceNumber(value) {
   }
 
   if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (trimmed === "") {
+    const normalized = value.trim().replace(/,/g, "");
+    if (normalized === "") {
       return null;
     }
 
-    const normalized = trimmed.replace(/,/g, "");
     const numericValue = Number(normalized);
     return Number.isNaN(numericValue) ? null : numericValue;
   }
@@ -52,8 +37,6 @@ function coerceNumber(value) {
   return null;
 }
 
-// Some imported values should stay as strings or dates instead of being forced
-// into numbers. This helper centralizes the "null out empty values" behavior.
 function coerceScalar(value) {
   if (value === undefined || value === null || value === "") {
     return null;
@@ -62,212 +45,6 @@ function coerceScalar(value) {
   return value;
 }
 
-// Every user-overridable field in the schema shares the same internal shape.
-// Normalization always starts with ROIC data as the source of truth.
-function wrapImportedValue(value, sourceOfTruth = "roic") {
-  return {
-    roicValue: value,
-    userValue: null,
-    effectiveValue: value,
-    sourceOfTruth,
-    lastOverriddenAt: null,
-  };
-}
-
-// Because we do not yet have confirmed ROIC payload samples, this
-// helper looks for the "most likely" annual array using a few common key names.
-// If the endpoint already returns an array, we use it directly.
-function extractAnnualRows(payload) {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-
-  if (!isObject(payload)) {
-    return [];
-  }
-
-  const candidateKeys = [
-    "data",
-    "results",
-    "annual",
-    "annualData",
-    "rows",
-    "items",
-  ];
-
-  for (const key of candidateKeys) {
-    if (Array.isArray(payload[key])) {
-      return payload[key];
-    }
-  }
-
-  for (const value of Object.values(payload)) {
-    if (Array.isArray(value)) {
-      return value;
-    }
-  }
-
-  return [];
-}
-
-// Similar to the annual-array helper above, this function extracts the most
-// likely list of price rows from the stock-prices payload.
-function extractPriceRows(payload) {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-
-  if (!isObject(payload)) {
-    return [];
-  }
-
-  const candidateKeys = ["prices", "data", "results", "rows", "items"];
-
-  for (const key of candidateKeys) {
-    if (Array.isArray(payload[key])) {
-      return payload[key];
-    }
-  }
-
-  for (const value of Object.values(payload)) {
-    if (Array.isArray(value)) {
-      return value;
-    }
-  }
-
-  return [];
-}
-
-// Earnings-call payloads can also be top-level arrays or wrapped in a "data"
-// object. We normalize them separately because they need date-specific parsing.
-function extractEarningsRows(payload) {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-
-  if (!isObject(payload)) {
-    return [];
-  }
-
-  const candidateKeys = ["earnings", "calls", "data", "results", "rows", "items"];
-
-  for (const key of candidateKeys) {
-    if (Array.isArray(payload[key])) {
-      return payload[key];
-    }
-  }
-
-  for (const value of Object.values(payload)) {
-    if (Array.isArray(value)) {
-      return value;
-    }
-  }
-
-  return [];
-}
-
-// This small utility tries a list of possible field names and returns the first
-// non-empty value. It keeps field-name assumptions readable and easy to update.
-function pickFirstDefined(source, keys) {
-  if (!isObject(source)) {
-    return undefined;
-  }
-
-  for (const key of keys) {
-    const value = source[key];
-    if (value !== undefined && value !== null && value !== "") {
-      return value;
-    }
-  }
-
-  return undefined;
-}
-
-// Fiscal-year alignment is the heart of the normalization service.
-// We always match rows by fiscal year label rather than by array position.
-function getFiscalYear(row) {
-  const rawYear = pickFirstDefined(row, [
-    "fiscalYear",
-    "fiscal_year",
-    "year",
-    "calendarYear",
-    "calendar_year",
-    "fy",
-  ]);
-
-  const numericYear = Number(rawYear);
-  return Number.isInteger(numericYear) ? numericYear : null;
-}
-
-// Fiscal year end dates are stored on the annualData row itself and also serve
-// as the fallback earnings release date when no earnings-call date exists for a year.
-function getFiscalYearEndDate(row) {
-  const rawDate = pickFirstDefined(row, [
-    "fiscalYearEndDate",
-    "fiscal_year_end_date",
-    "fiscalYearEnd",
-    "fiscal_year_end",
-    "periodEndDate",
-    "period_end_date",
-    "date",
-  ]);
-
-  return normalizeDateString(rawDate);
-}
-
-// ROIC may label shares-outstanding differently depending on the endpoint.
-// We prefer the most explicit field names first.
-function getSharesOutstanding(row) {
-  return coerceNumber(pickFirstDefined(row, [
-    "bs_sh_out",
-    "sharesOutstanding",
-    "shares_outstanding",
-    "is_avg_num_sh_for_eps",
-    "is_sh_for_diluted_eps",
-    "weightedAverageShsOut",
-    "weighted_average_shares_outstanding",
-    "weightedAverageSharesOutstanding",
-    "shareCount",
-    "share_count",
-  ]));
-}
-
-// Same idea for ROIC: we only keep the approved metric that belongs in the model.
-function getReturnOnInvestedCapital(row) {
-  return coerceNumber(pickFirstDefined(row, [
-    "return_on_inv_capital",
-    "returnOnInvestedCapital",
-    "return_on_invested_capital",
-    "roic",
-    "roicPercent",
-    "roic_percent",
-  ]));
-}
-
-// Company profile endpoints often include different name keys.
-function getCompanyName(profile) {
-  return coerceScalar(pickFirstDefined(profile, [
-    "companyName",
-    "company_name",
-    "name",
-    "displayName",
-    "display_name",
-  ]));
-}
-
-// Currency may also arrive under several aliases.
-function getPriceCurrency(profile) {
-  return coerceScalar(pickFirstDefined(profile, [
-    "priceCurrency",
-    "price_currency",
-    "currency",
-    "reportedCurrency",
-    "reported_currency",
-  ]));
-}
-
-// We store dates as strings in this project, but still want them in a stable
-// YYYY-MM-DD format whenever the input is parseable.
 function normalizeDateString(value) {
   if (value === undefined || value === null || value === "") {
     return null;
@@ -293,9 +70,6 @@ function normalizeDateString(value) {
   return parsed.toISOString().slice(0, 10);
 }
 
-// When ROIC does not provide a usable earnings-call date, we estimate a
-// fallback earnings release date by moving 90 calendar days past the fiscal
-// year end. This keeps the rule explicit and easy for beginners to follow.
 function addDaysToDateString(dateString, daysToAdd) {
   const normalizedDate = normalizeDateString(dateString);
   if (!normalizedDate) {
@@ -311,8 +85,145 @@ function addDaysToDateString(dateString, daysToAdd) {
   return parsed.toISOString().slice(0, 10);
 }
 
-// Price selection depends on the history being in ascending order with numeric
-// close values. We build that exact shape before calling the shared utility.
+function pickFirstDefined(source, keys) {
+  if (!isObject(source)) {
+    return undefined;
+  }
+
+  for (const key of keys) {
+    const value = source[key];
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function extractAnnualRows(payload) {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (!isObject(payload)) {
+    return [];
+  }
+
+  const candidateKeys = ["data", "results", "annual", "annualData", "rows", "items"];
+  for (const key of candidateKeys) {
+    if (Array.isArray(payload[key])) {
+      return payload[key];
+    }
+  }
+
+  for (const value of Object.values(payload)) {
+    if (Array.isArray(value)) {
+      return value;
+    }
+  }
+
+  return [];
+}
+
+function extractPriceRows(payload) {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (!isObject(payload)) {
+    return [];
+  }
+
+  const candidateKeys = ["prices", "data", "results", "rows", "items"];
+  for (const key of candidateKeys) {
+    if (Array.isArray(payload[key])) {
+      return payload[key];
+    }
+  }
+
+  for (const value of Object.values(payload)) {
+    if (Array.isArray(value)) {
+      return value;
+    }
+  }
+
+  return [];
+}
+
+function extractEarningsRows(payload) {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (!isObject(payload)) {
+    return [];
+  }
+
+  const candidateKeys = ["earnings", "calls", "data", "results", "rows", "items"];
+  for (const key of candidateKeys) {
+    if (Array.isArray(payload[key])) {
+      return payload[key];
+    }
+  }
+
+  for (const value of Object.values(payload)) {
+    if (Array.isArray(value)) {
+      return value;
+    }
+  }
+
+  return [];
+}
+
+function getFiscalYear(row) {
+  const rawYear = pickFirstDefined(row, [
+    "fiscalYear",
+    "fiscal_year",
+    "fiscal_year_label",
+    "year",
+    "calendarYear",
+    "calendar_year",
+    "fy",
+  ]);
+
+  const numericYear = Number(rawYear);
+  return Number.isInteger(numericYear) ? numericYear : null;
+}
+
+function getFiscalYearEndDate(row) {
+  const rawDate = pickFirstDefined(row, [
+    "fiscalYearEndDate",
+    "fiscal_year_end_date",
+    "fiscalYearEnd",
+    "fiscal_year_end",
+    "periodEndDate",
+    "period_end_date",
+    "date",
+  ]);
+
+  return normalizeDateString(rawDate);
+}
+
+function getCompanyName(profile) {
+  return coerceScalar(pickFirstDefined(profile, [
+    "companyName",
+    "company_name",
+    "name",
+    "displayName",
+    "display_name",
+  ]));
+}
+
+function getPriceCurrency(profile) {
+  return coerceScalar(pickFirstDefined(profile, [
+    "priceCurrency",
+    "price_currency",
+    "currency",
+    "reportedCurrency",
+    "reported_currency",
+  ]));
+}
+
 function normalizePriceHistory(pricesPayload) {
   const rows = extractPriceRows(pricesPayload);
 
@@ -325,14 +236,12 @@ function normalizePriceHistory(pricesPayload) {
     .sort((left, right) => left.date.localeCompare(right.date));
 }
 
-// Earnings calls need slightly richer normalization because later code needs a
-// clean date list for choosing the imported earnings release date.
 function normalizeEarningsCalls(earningsPayload) {
   const rows = extractEarningsRows(earningsPayload);
 
   return rows
-    .map((row) => {
-      const callDate = normalizeDateString(pickFirstDefined(row, [
+    .map((row) => ({
+      date: normalizeDateString(pickFirstDefined(row, [
         "date",
         "callDate",
         "call_date",
@@ -340,25 +249,14 @@ function normalizeEarningsCalls(earningsPayload) {
         "earnings_call_date",
         "reportDate",
         "report_date",
-      ]));
-
-      return {
-        date: callDate,
-        fiscalYear: getFiscalYear(row),
-      };
-    })
+      ])),
+      fiscalYear: getFiscalYear(row),
+    }))
     .filter((row) => row.date)
     .sort((left, right) => left.date.localeCompare(right.date));
 }
 
-// This helper chooses the imported earnings release date for one fiscal year.
-// 1. Prefer a real earnings-call date on or after the fiscal year end.
-// 2. If ROIC has no qualifying earnings-call date, estimate the release date as
-//    fiscal year end plus 90 calendar days.
-// 3. If we do not even have a fiscal year end date, return null.
-function selectEarningsReleaseDate({ fiscalYear, fiscalYearEndDate, normalizedCalls }) {
-  void fiscalYear;
-
+function selectEarningsReleaseDate({ fiscalYearEndDate, normalizedCalls }) {
   if (fiscalYearEndDate) {
     const matchAfterYearEnd = normalizedCalls.find((call) => call.date >= fiscalYearEndDate);
     if (matchAfterYearEnd) {
@@ -369,54 +267,316 @@ function selectEarningsReleaseDate({ fiscalYear, fiscalYearEndDate, normalizedCa
   return addDaysToDateString(fiscalYearEndDate, 90);
 }
 
-// We keep yearly rows sorted newest-first so a years=10 limit returns the most
-// recent ten fiscal years rather than the oldest ten.
+function getSharesOnIssue(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "bs_sh_out",
+    "sharesOutstanding",
+    "shares_outstanding",
+    "is_avg_num_sh_for_eps",
+    "is_sh_for_diluted_eps",
+    "weightedAverageShsOut",
+    "weighted_average_shares_outstanding",
+    "weightedAverageSharesOutstanding",
+    "shareCount",
+    "share_count",
+  ]));
+}
+
+function getReturnOnInvestedCapital(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "return_on_inv_capital",
+    "returnOnInvestedCapital",
+    "return_on_invested_capital",
+    "roic",
+    "roicPercent",
+    "roic_percent",
+  ]));
+}
+
+function getCash(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "bs_c_and_ce_and_sti_detailed",
+    "bs_cash_near_cash_item",
+    "cash",
+    "cashAndEquivalents",
+  ]));
+}
+
+function sumCandidateNumbers(row, keys) {
+  const numericValues = keys
+    .map((key) => coerceNumber(row?.[key]))
+    .filter((value) => value !== null);
+
+  if (numericValues.length === 0) {
+    return null;
+  }
+
+  return numericValues.reduce((sum, value) => sum + value, 0);
+}
+
+function getDebt(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "short_and_long_term_debt",
+    "total_debt",
+    "debt",
+    "bs_tot_debt",
+  ])) ?? sumCandidateNumbers(row, [
+    "bs_st_debt",
+    "bs_lt_borrow",
+    "short_term_debt",
+    "long_term_debt",
+  ]);
+}
+
+function getAssets(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "bs_tot_asset",
+    "assets",
+    "total_assets",
+  ]));
+}
+
+function getLiabilities(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "bs_tot_liab",
+    "liabilities",
+    "total_liabilities",
+  ]));
+}
+
+function getEquity(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "bs_total_equity",
+    "equity",
+    "total_equity",
+  ]));
+}
+
+function getRevenue(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "is_sales_revenue_turnover",
+    "revenue",
+    "salesRevenue",
+    "sales_revenue",
+  ]));
+}
+
+function getGrossProfit(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "is_gross_profit",
+    "gross_profit",
+    "grossProfit",
+  ]));
+}
+
+function getEbitda(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "ebitda",
+    "EBITDA",
+  ]));
+}
+
+function getDepreciationAndAmortization(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "depreciation_and_amortization",
+    "depreciationAndAmortization",
+    "cf_dep_amort",
+    "da",
+  ]));
+}
+
+function getEbit(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "is_oper_income",
+    "operating_income",
+    "oper_income",
+    "ebit",
+  ]));
+}
+
+function getNetInterestExpense(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "net_interest_expense",
+    "interest_expense_net",
+    "is_int_expense_net_of_int_inc",
+    "interestExpenseNet",
+  ]));
+}
+
+function getNpbt(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "pretax_income",
+    "income_before_tax",
+    "npbt",
+    "is_income_before_tax",
+  ]));
+}
+
+function getIncomeTaxExpense(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "income_tax_expense",
+    "tax_expense",
+    "is_income_tax",
+    "incomeTaxExpense",
+  ]));
+}
+
+function getNpat(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "is_net_income",
+    "net_income",
+    "npat",
+    "netIncome",
+  ]));
+}
+
+function getCapitalExpenditures(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "cf_cap_expenditures",
+    "capital_expenditures",
+    "capex",
+    "ttm_cap_expend",
+  ]));
+}
+
+function getFreeCashFlow(row) {
+  const directValue = coerceNumber(pickFirstDefined(row, [
+    "free_cash_flow",
+    "fcf",
+    "ttm_free_cash_flow",
+  ]));
+
+  if (directValue !== null) {
+    return directValue;
+  }
+
+  const operatingCashFlow = coerceNumber(pickFirstDefined(row, [
+    "cf_cash_from_operating_activities",
+    "cash_from_operating_activities",
+    "operating_cash_flow",
+    "ttm_cash_from_oper",
+  ]));
+  const capex = getCapitalExpenditures(row);
+
+  if (operatingCashFlow !== null && capex !== null) {
+    return operatingCashFlow - capex;
+  }
+
+  return null;
+}
+
+function getPeTrailing(row) {
+  return coerceNumber(pickFirstDefined(row, [
+    "pe_ratio",
+    "pe",
+    "price_earnings_ratio",
+  ]));
+}
+
+function getTangibleBookValuePerShare(perShareRow, multiplesRow) {
+  return coerceNumber(pickFirstDefined(multiplesRow, [
+    "tangible_book_value_per_share",
+    "tbv_per_share",
+  ])) ?? coerceNumber(pickFirstDefined(perShareRow, [
+    "tangible_book_val_per_share",
+    "book_val_per_sh",
+  ]));
+}
+
+function getEpsTrailing(perShareRow, incomeRow) {
+  return coerceNumber(pickFirstDefined(perShareRow, [
+    "eps",
+    "diluted_eps",
+  ])) ?? coerceNumber(pickFirstDefined(incomeRow, [
+    "eps",
+    "diluted_eps",
+  ]));
+}
+
+function getDpsTrailing(perShareRow) {
+  return coerceNumber(pickFirstDefined(perShareRow, [
+    "div_per_shr",
+    "dps",
+    "dividend_per_share",
+  ]));
+}
+
 function sortYearsDescending(years) {
   return [...years].sort((left, right) => right - left);
 }
 
-// This function builds one annualData row using only the fields approved by the
-// schema. Everything else from ROIC is intentionally dropped here.
+function buildYearMap(rows) {
+  const map = new Map();
+  for (const row of extractAnnualRows(rows)) {
+    const fiscalYear = getFiscalYear(row);
+    if (fiscalYear !== null && !map.has(fiscalYear)) {
+      map.set(fiscalYear, row);
+    }
+  }
+
+  return map;
+}
+
+function setMetric(target, path, value, sourceOfTruth = "roic") {
+  const parts = path.split(".");
+  let current = target;
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    current = current[parts[index]];
+  }
+
+  assignMetricValue(current[parts[parts.length - 1]], value, sourceOfTruth);
+}
+
 function buildAnnualEntry({
   fiscalYear,
   fiscalYearEndDate,
-  perShareRow,
-  profitabilityRow,
   normalizedPrices,
   normalizedCalls,
+  perShareRow,
+  profitabilityRow,
+  balanceSheetRow,
+  incomeRow,
+  cashFlowRow,
+  multiplesRow,
 }) {
-  const sharesOutstanding = perShareRow ? getSharesOutstanding(perShareRow) : null;
-  const returnOnInvestedCapital = profitabilityRow
-    ? getReturnOnInvestedCapital(profitabilityRow)
-    : null;
-
+  const annualEntry = createEmptyAnnualEntry(fiscalYear, fiscalYearEndDate);
   const earningsReleaseDate = selectEarningsReleaseDate({
-    fiscalYear,
     fiscalYearEndDate,
     normalizedCalls,
   });
 
-  const stockPrice = earningsReleaseDate
-    ? selectPriceAfterAnchorDate(earningsReleaseDate, normalizedPrices)
-    : null;
+  annualEntry.earningsReleaseDate = createMetricField(earningsReleaseDate, earningsReleaseDate ? "roic" : "system");
+  setMetric(annualEntry, "base.sharePrice", earningsReleaseDate ? selectPriceAfterAnchorDate(earningsReleaseDate, normalizedPrices) : null, "roic");
+  setMetric(annualEntry, "base.sharesOnIssue", getSharesOnIssue(perShareRow), "roic");
+  setMetric(annualEntry, "base.returnOnInvestedCapital", getReturnOnInvestedCapital(profitabilityRow), "roic");
 
-  const marketCap = sharesOutstanding !== null && stockPrice !== null
-    ? sharesOutstanding * stockPrice
-    : null;
+  setMetric(annualEntry, "balanceSheet.cash", getCash(balanceSheetRow), "roic");
+  setMetric(annualEntry, "balanceSheet.debt", getDebt(balanceSheetRow), "roic");
+  setMetric(annualEntry, "balanceSheet.assets", getAssets(balanceSheetRow), "roic");
+  setMetric(annualEntry, "balanceSheet.liabilities", getLiabilities(balanceSheetRow), "roic");
+  setMetric(annualEntry, "balanceSheet.equity", getEquity(balanceSheetRow), "roic");
 
-  return {
-    fiscalYear,
-    fiscalYearEndDate,
-    earningsReleaseDate: wrapImportedValue(earningsReleaseDate),
-    stockPrice: wrapImportedValue(stockPrice),
-    sharesOutstanding: wrapImportedValue(sharesOutstanding),
-    marketCap: wrapImportedValue(marketCap, marketCap !== null ? "derived" : "roic"),
-    returnOnInvestedCapital: wrapImportedValue(returnOnInvestedCapital),
-  };
+  setMetric(annualEntry, "incomeStatement.revenue", getRevenue(incomeRow), "roic");
+  setMetric(annualEntry, "incomeStatement.grossProfit", getGrossProfit(incomeRow), "roic");
+  setMetric(annualEntry, "incomeStatement.ebitda", getEbitda(incomeRow), "roic");
+  setMetric(annualEntry, "incomeStatement.depreciationAndAmortization", getDepreciationAndAmortization(incomeRow), "roic");
+  setMetric(annualEntry, "incomeStatement.ebit", getEbit(incomeRow), "roic");
+  setMetric(annualEntry, "incomeStatement.netInterestExpense", getNetInterestExpense(incomeRow), "roic");
+  setMetric(annualEntry, "incomeStatement.npbt", getNpbt(incomeRow), "roic");
+  setMetric(annualEntry, "incomeStatement.incomeTaxExpense", getIncomeTaxExpense(incomeRow), "roic");
+  setMetric(annualEntry, "incomeStatement.npat", getNpat(incomeRow), "roic");
+  setMetric(annualEntry, "incomeStatement.capitalExpenditures", getCapitalExpenditures(cashFlowRow), "roic");
+  setMetric(annualEntry, "incomeStatement.fcf", getFreeCashFlow(cashFlowRow), "roic");
+
+  setMetric(annualEntry, "sharesAndMarketCap.sharesOnIssueDetailed", getSharesOnIssue(perShareRow), "roic");
+  setMetric(annualEntry, "valuationMultiples.peTrailing", getPeTrailing(multiplesRow), "roic");
+  setMetric(annualEntry, "valuationMultiples.tangibleBookValuePerShare", getTangibleBookValuePerShare(perShareRow, multiplesRow), "roic");
+  setMetric(annualEntry, "epsAndDividends.epsTrailing", getEpsTrailing(perShareRow, incomeRow), "roic");
+  setMetric(annualEntry, "epsAndDividends.dpsTrailing", getDpsTrailing(perShareRow), "roic");
+
+  return annualEntry;
 }
 
-// Public API: controllers call this to convert raw ROIC payloads into a plain
-// object that can be passed straight into Mongoose.
 function buildStockDocument({
   tickerSymbol,
   profile,
@@ -424,64 +584,73 @@ function buildStockDocument({
   profitability,
   prices,
   earnings,
+  incomeStatement,
+  balanceSheet,
+  cashFlow,
+  creditRatios,
+  enterpriseValue,
+  multiples,
   years = 10,
-  investmentCategory = "",
+  investmentCategory,
 }) {
+  void creditRatios;
+  void enterpriseValue;
+
   const normalizedTicker = String(tickerSymbol || "").toUpperCase().trim();
   const normalizedYearLimit = Math.max(Number(years) || 10, 0);
-  const perShareRows = extractAnnualRows(perShare);
-  const profitabilityRows = extractAnnualRows(profitability);
   const normalizedPrices = normalizePriceHistory(prices);
   const normalizedCalls = normalizeEarningsCalls(earnings);
 
-  // Build lookup maps keyed by fiscal year so annual rows can be matched even
-  // when the two ROIC endpoints return different lengths or orders.
-  const perShareByYear = new Map();
-  for (const row of perShareRows) {
-    const fiscalYear = getFiscalYear(row);
-    if (fiscalYear !== null && !perShareByYear.has(fiscalYear)) {
-      perShareByYear.set(fiscalYear, row);
-    }
-  }
+  const perShareByYear = buildYearMap(perShare);
+  const profitabilityByYear = buildYearMap(profitability);
+  const incomeByYear = buildYearMap(incomeStatement);
+  const balanceSheetByYear = buildYearMap(balanceSheet);
+  const cashFlowByYear = buildYearMap(cashFlow);
+  const multiplesByYear = buildYearMap(multiples);
 
-  const profitabilityByYear = new Map();
-  for (const row of profitabilityRows) {
-    const fiscalYear = getFiscalYear(row);
-    if (fiscalYear !== null && !profitabilityByYear.has(fiscalYear)) {
-      profitabilityByYear.set(fiscalYear, row);
-    }
-  }
-
-  // Use the union of years from both annual endpoints.
-  // This ensures a year is still imported even if one endpoint is missing it.
   const fiscalYears = sortYearsDescending([
     ...new Set([
       ...perShareByYear.keys(),
       ...profitabilityByYear.keys(),
+      ...incomeByYear.keys(),
+      ...balanceSheetByYear.keys(),
+      ...cashFlowByYear.keys(),
+      ...multiplesByYear.keys(),
     ]),
   ]).slice(0, normalizedYearLimit);
 
   const annualData = fiscalYears.map((fiscalYear) => {
     const perShareRow = perShareByYear.get(fiscalYear) || null;
     const profitabilityRow = profitabilityByYear.get(fiscalYear) || null;
+    const incomeRow = incomeByYear.get(fiscalYear) || null;
+    const balanceSheetRow = balanceSheetByYear.get(fiscalYear) || null;
+    const cashFlowRow = cashFlowByYear.get(fiscalYear) || null;
+    const multiplesRow = multiplesByYear.get(fiscalYear) || null;
 
     const fiscalYearEndDate = getFiscalYearEndDate(perShareRow)
+      || getFiscalYearEndDate(incomeRow)
+      || getFiscalYearEndDate(balanceSheetRow)
+      || getFiscalYearEndDate(cashFlowRow)
       || getFiscalYearEndDate(profitabilityRow);
 
     return buildAnnualEntry({
       fiscalYear,
       fiscalYearEndDate,
-      perShareRow,
-      profitabilityRow,
       normalizedPrices,
       normalizedCalls,
+      perShareRow,
+      profitabilityRow,
+      balanceSheetRow,
+      incomeRow,
+      cashFlowRow,
+      multiplesRow,
     });
   });
 
-  return {
+  const stockDocument = {
     tickerSymbol: normalizedTicker,
-    companyName: wrapImportedValue(getCompanyName(profile)),
-    investmentCategory: investmentCategory || "",
+    companyName: createMetricField(getCompanyName(profile), "roic"),
+    investmentCategory,
     priceCurrency: getPriceCurrency(profile) || "USD",
     sourceMeta: {
       lastImportedAt: new Date(),
@@ -489,10 +658,19 @@ function buildStockDocument({
       roicEndpointsUsed: ROIC_ENDPOINTS_USED,
     },
     annualData,
+    forecastData: {
+      fy1: createEmptyForecastBucket(),
+      fy2: createEmptyForecastBucket(),
+      fy3: createEmptyForecastBucket(),
+    },
+    growthForecasts: createEmptyGrowthForecasts(),
+    analystRevisions: createEmptyAnalystRevisions(),
   };
+
+  recalculateDerived(stockDocument);
+  return stockDocument;
 }
 
 module.exports = {
   buildStockDocument,
 };
-

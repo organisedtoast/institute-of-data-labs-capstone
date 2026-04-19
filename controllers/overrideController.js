@@ -1,52 +1,158 @@
-// This controller file handles user overrides at the annual metric level.
+// Override routes let a user correct any metric path the backend stores.
+// We keep separate routes for annual rows, forecast buckets, and top-level
+// placeholders so the request path itself tells a beginner which part of the
+// document is being edited.
 
-// It provides an endpoint to set an override for a specific metric in a given fiscal year.
-// When an override is set, it updates the userValue and lastOverriddenAt fields,
-// then recalculates the effectiveValue and sourceOfTruth using the resolveEffectiveValue utility.
-// Finally, it saves the document back to MongoDB and returns the updated stock data.
-
-
+const {
+  FORECAST_RELATIVE_METRIC_PATHS,
+  TOP_LEVEL_METRIC_PATHS,
+} = require("../catalog/fieldCatalog");
 const WatchlistStock = require("../models/WatchlistStock");
-const { resolveEffectiveValue } = require("../utils/effectiveValue");
 const { recalculateDerived } = require("../utils/derivedCalc");
- 
-// PATCH /api/watchlist/:ticker/annual/:fiscalYear/overrides
+const { flattenObjectPaths, getNestedValue } = require("../utils/pathUtils");
+const { resolveEffectiveValue } = require("../utils/effectiveValue");
+
+function applyMetricOverrides(target, allowedPaths, payload) {
+  const flattened = flattenObjectPaths(payload);
+  const unsupportedPaths = flattened
+    .map((entry) => entry.path)
+    .filter((path) => !allowedPaths.includes(path));
+
+  if (unsupportedPaths.length > 0) {
+    const error = new Error(`Unsupported override field(s): ${unsupportedPaths.join(", ")}`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  for (const { path, value } of flattened) {
+    const metricField = getNestedValue(target, path);
+    if (!metricField) {
+      const error = new Error(`Unknown override field: ${path}`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    metricField.userValue = value;
+    metricField.lastOverriddenAt = new Date();
+    const resolved = resolveEffectiveValue(metricField, metricField.sourceOfTruth || "system");
+    metricField.effectiveValue = resolved.effectiveValue;
+    metricField.sourceOfTruth = resolved.sourceOfTruth;
+  }
+}
+
 async function setAnnualOverride(req, res, next) {
   try {
     const ticker = req.params.ticker.toUpperCase();
-    const fiscalYear = parseInt(req.params.fiscalYear);
-    const allowedMetrics = [
-      "stockPrice", "sharesOutstanding",
-      "returnOnInvestedCapital", "earningsReleaseDate",
-    ];
- 
+    const fiscalYear = parseInt(req.params.fiscalYear, 10);
     const stock = await WatchlistStock.findOne({ tickerSymbol: ticker });
-    if (!stock) return res.status(404).json({ error: "Stock not found" });
- 
-    const yearEntry = stock.annualData.find(
-      (y) => y.fiscalYear === fiscalYear
-    );
-    if (!yearEntry) return res.status(404).json({ error: "Year not found" });
- 
-    // Apply each override from the request body
-    for (const metric of allowedMetrics) {
-      if (req.body[metric] !== undefined) {
-        yearEntry[metric].userValue = req.body[metric];
-        yearEntry[metric].lastOverriddenAt = new Date();
-        
-        // Recalculate effective value
-        const resolved = resolveEffectiveValue(yearEntry[metric]);
-        yearEntry[metric].effectiveValue = resolved.effectiveValue;
-        yearEntry[metric].sourceOfTruth = resolved.sourceOfTruth;
-      }
+    if (!stock) {
+      return res.status(404).json({ error: "Stock not found" });
     }
- 
-    // Recalculate derived values (marketCap)
-    recalculateDerived(yearEntry);
- 
+
+    const annualEntry = stock.annualData.find((row) => row.fiscalYear === fiscalYear);
+    if (!annualEntry) {
+      return res.status(404).json({ error: "Year not found" });
+    }
+
+    const allowedPaths = [
+      "earningsReleaseDate",
+      "base.sharePrice",
+      "base.sharesOnIssue",
+      "base.marketCap",
+      "base.returnOnInvestedCapital",
+      "balanceSheet.cash",
+      "balanceSheet.nonCashInvestments",
+      "balanceSheet.debt",
+      "balanceSheet.netDebtOrCash",
+      "balanceSheet.netDebtToEbitda",
+      "balanceSheet.ebitInterestCoverage",
+      "balanceSheet.assets",
+      "balanceSheet.liabilities",
+      "balanceSheet.equity",
+      "balanceSheet.leverageRatio",
+      "balanceSheet.enterpriseValueTrailing",
+      "incomeStatement.revenue",
+      "incomeStatement.grossProfit",
+      "incomeStatement.codb",
+      "incomeStatement.ebitda",
+      "incomeStatement.depreciationAndAmortization",
+      "incomeStatement.ebit",
+      "incomeStatement.netInterestExpense",
+      "incomeStatement.npbt",
+      "incomeStatement.incomeTaxExpense",
+      "incomeStatement.npat",
+      "incomeStatement.capitalExpenditures",
+      "incomeStatement.fcf",
+      "ownerEarningsBridge.deemedMaintenanceCapex",
+      "ownerEarningsBridge.ownerEarnings",
+      "sharesAndMarketCap.changeInShares",
+      "sharesAndMarketCap.sharesOnIssueDetailed",
+      "sharesAndMarketCap.marketCapDetailed",
+      "valuationMultiples.evSalesTrailing",
+      "valuationMultiples.ebitdaMarginTrailing",
+      "valuationMultiples.ebitMarginTrailing",
+      "valuationMultiples.npatMarginTrailing",
+      "valuationMultiples.evEbitTrailing",
+      "valuationMultiples.peTrailing",
+      "valuationMultiples.tangibleBookValuePerShare",
+      "valuationMultiples.priceToNta",
+      "valuationMultiples.dividendPayout",
+      "epsAndDividends.epsTrailing",
+      "epsAndDividends.dyTrailing",
+      "epsAndDividends.dpsTrailing",
+    ];
+
+    applyMetricOverrides(annualEntry, allowedPaths, req.body);
+    recalculateDerived(stock);
     await stock.save();
     res.json(stock);
-  } catch (err) { next(err); }
+  } catch (error) {
+    next(error);
+  }
 }
- 
-module.exports = { setAnnualOverride };
+
+async function setForecastOverride(req, res, next) {
+  try {
+    const ticker = req.params.ticker.toUpperCase();
+    const bucket = req.params.bucket.toLowerCase();
+    const stock = await WatchlistStock.findOne({ tickerSymbol: ticker });
+    if (!stock) {
+      return res.status(404).json({ error: "Stock not found" });
+    }
+
+    const forecastBucket = stock.forecastData?.[bucket];
+    if (!forecastBucket) {
+      return res.status(404).json({ error: "Forecast bucket not found" });
+    }
+
+    applyMetricOverrides(forecastBucket, FORECAST_RELATIVE_METRIC_PATHS, req.body);
+    recalculateDerived(stock);
+    await stock.save();
+    res.json(stock);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function setTopLevelMetricOverride(req, res, next) {
+  try {
+    const ticker = req.params.ticker.toUpperCase();
+    const stock = await WatchlistStock.findOne({ tickerSymbol: ticker });
+    if (!stock) {
+      return res.status(404).json({ error: "Stock not found" });
+    }
+
+    applyMetricOverrides(stock, TOP_LEVEL_METRIC_PATHS, req.body);
+    recalculateDerived(stock);
+    await stock.save();
+    res.json(stock);
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = {
+  setAnnualOverride,
+  setForecastOverride,
+  setTopLevelMetricOverride,
+};

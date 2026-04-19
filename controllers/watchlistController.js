@@ -1,14 +1,17 @@
-// This controller file handles basic CRUD operations for the watchlist stocks.
-
-// It uses the WatchlistStock model to interact with MongoDB and provides endpoints to:
-// - Create a new stock (manual shell creation without ROIC data)
-// - Read get all stocks in the watchlist
-// - Read get a single stock by ticker symbol
-// - Update an existing stock's investment category or company name
-// - Delete a stock from the watchlist
-
+// Basic watchlist CRUD remains intentionally small:
+// - create a placeholder stock manually
+// - read one or many stocks
+// - update category or company name
+// - delete a stock
 
 const WatchlistStock = require("../models/WatchlistStock");
+const { assertActiveLensName } = require("../services/lensService");
+const {
+  createEmptyAnalystRevisions,
+  createEmptyForecastBucket,
+  createEmptyGrowthForecasts,
+} = require("../utils/documentFactory");
+const { createMetricField } = require("../utils/metricField");
 
 function buildCompanyNameOverride(existingField, companyName) {
   const trimmedName = companyName.trim();
@@ -22,43 +25,60 @@ function buildCompanyNameOverride(existingField, companyName) {
   };
 }
 
-// POST /api/watchlist (manual shell creation)
 async function createStock(req, res, next) {
   try {
+    await assertActiveLensName(req.body.investmentCategory);
+
     const doc = await WatchlistStock.create({
       tickerSymbol: req.body.tickerSymbol,
-      investmentCategory: req.body.investmentCategory || "",
+      investmentCategory: req.body.investmentCategory.trim(),
+      companyName: createMetricField(null, "system"),
+      forecastData: {
+        fy1: createEmptyForecastBucket(),
+        fy2: createEmptyForecastBucket(),
+        fy3: createEmptyForecastBucket(),
+      },
+      growthForecasts: createEmptyGrowthForecasts(),
+      analystRevisions: createEmptyAnalystRevisions(),
     });
+
     res.status(201).json(doc);
-  } catch (err) { next(err); }
+  } catch (error) {
+    next(error);
+  }
 }
 
-// GET /api/watchlist
 async function getAllStocks(req, res, next) {
   try {
     const stocks = await WatchlistStock.find();
     res.json(stocks);
-  } catch (err) { next(err); }
+  } catch (error) {
+    next(error);
+  }
 }
- 
-// GET /api/watchlist/:ticker
+
 async function getOneStock(req, res, next) {
   try {
     const stock = await WatchlistStock.findOne({
       tickerSymbol: req.params.ticker.toUpperCase(),
     });
-    if (!stock) return res.status(404).json({ error: "Stock not found" });
+    if (!stock) {
+      return res.status(404).json({ error: "Stock not found" });
+    }
+
     res.json(stock);
-  } catch (err) { next(err); }
+  } catch (error) {
+    next(error);
+  }
 }
- 
-// PATCH /api/watchlist/:ticker
+
 async function updateStock(req, res, next) {
   try {
     const updates = {};
 
     if (req.body.investmentCategory !== undefined) {
-      updates.investmentCategory = req.body.investmentCategory;
+      await assertActiveLensName(req.body.investmentCategory);
+      updates.investmentCategory = req.body.investmentCategory.trim();
     }
 
     if (req.body.companyName !== undefined) {
@@ -89,20 +109,30 @@ async function updateStock(req, res, next) {
       updates,
       { returnDocument: "after", runValidators: true }
     );
-    if (!doc) return res.status(404).json({ error: "Stock not found" });
+
+    if (!doc) {
+      return res.status(404).json({ error: "Stock not found" });
+    }
+
     res.json(doc);
-  } catch (err) { next(err); }
+  } catch (error) {
+    next(error);
+  }
 }
- 
-// DELETE /api/watchlist/:ticker
+
 async function deleteStock(req, res, next) {
   try {
     const doc = await WatchlistStock.findOneAndDelete({
       tickerSymbol: req.params.ticker.toUpperCase(),
     });
-    if (!doc) return res.status(404).json({ error: "Stock not found" });
+    if (!doc) {
+      return res.status(404).json({ error: "Stock not found" });
+    }
+
     res.json({ message: "Deleted", tickerSymbol: doc.tickerSymbol });
-  } catch (err) { next(err); }
+  } catch (error) {
+    next(error);
+  }
 }
- 
-module.exports = { createStock, getAllStocks, getOneStock, updateStock, deleteStock };
+
+module.exports = { createStock, deleteStock, getAllStocks, getOneStock, updateStock };

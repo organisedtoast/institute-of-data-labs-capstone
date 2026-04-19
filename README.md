@@ -51,6 +51,9 @@ npm run dev
 - `npm run search:live`  
   Starts the interactive live stock search CLI for querying the ROIC-backed search flow from the terminal.
 
+- `npm run docs:schema`
+  Regenerates the compact developer-facing schema reference from `catalog/fieldCatalog.js`.
+
 - `npm run test:stock-search`  
   Runs the fast service-level backend test suite for `stockSearchService`.
 
@@ -65,6 +68,19 @@ npm run dev
 
 - `npm run test:e2e-live`  
   Runs the live end-to-end backend test against the real ROIC API and real MongoDB. Use this as a manual confidence check.
+
+- `npm run test:docs`
+  Runs the lightweight sanity test for the generated schema reference tool.
+
+## Schema Reference
+
+Use [docs/schema-reference.md](docs/schema-reference.md) when you want a compact map of the current stock document shape without reading the catalog source code.
+
+The file is generated from `catalog/fieldCatalog.js`, so the source of truth stays in code:
+
+```bash
+npm run docs:schema
+```
 
 ## Backend Tests
 

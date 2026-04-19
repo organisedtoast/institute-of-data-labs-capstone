@@ -3,6 +3,7 @@ require('dotenv').config();
 
 // Set up the Express server
 const express = require('express');
+const mongoose = require("mongoose");
 
 // Connect to the database using the connection function defined in config/db.js
 const { connectDB, disconnectDB } = require('./config/db');
@@ -14,6 +15,7 @@ const { connectDB, disconnectDB } = require('./config/db');
 const stockLookupRoutes = require("./routes/stockLookupRoutes");
 const watchlistRoutes = require("./routes/watchlistRoutes");
 const errorHandler = require("./middleware/errorHandler");
+const { ensureDefaultLenses } = require("./services/lensService");
 
 // Create an Express application instance
 const app = express();
@@ -60,6 +62,13 @@ async function startServer() {
 
   const PORT = process.env.PORT || 3000;
   await connectDB();
+
+  // Some fast route tests intentionally stub the DB connection so they can
+  // focus on HTTP behavior without spinning up MongoDB. We only seed default
+  // lenses after Mongoose reports a real connected state.
+  if (mongoose.connection.readyState === 1) {
+    await ensureDefaultLenses();
+  }
 
   // app.listen() uses a callback-based API, so we wrap it in a Promise
   // to make startup easy to `await` from tests and harness scripts.

@@ -1,14 +1,12 @@
-// This controller file re-fetches data from ROIC without destroying user overrides.
+// Refresh re-fetches ROIC-backed fields without destroying user overrides.
+// It updates imported/default values, then reruns backend formulas so derived
+// fields stay in sync with any user-entered corrections.
 
-// The critical rule: refresh updates roicValue but never touches userValue. 
-// Then effectiveValue is recalculated.
-// This allows users to keep their overrides intact while still benefiting from updated ROIC data.
- 
 const roicService = require("../services/roicService");
 const normalize = require("../services/normalizationService");
 const WatchlistStock = require("../models/WatchlistStock");
-const { resolveEffectiveValue } = require("../utils/effectiveValue");
 const { recalculateDerived } = require("../utils/derivedCalc");
+const { mergeAnnualEntry } = require("../services/stockMergeService");
 
 async function fetchWithContext(label, fetcher, tickerSymbol) {
   try {
@@ -18,53 +16,85 @@ async function fetchWithContext(label, fetcher, tickerSymbol) {
     throw error;
   }
 }
- 
+
 async function refreshStock(req, res, next) {
   try {
     const ticker = req.params.ticker.toUpperCase();
     const stock = await WatchlistStock.findOne({ tickerSymbol: ticker });
-    if (!stock) return res.status(404).json({ error: "Stock not found" });
- 
-    // Fetch fresh data from ROIC
-    const [profile, perShare, profitability, prices, earnings] =
-      await Promise.all([
-        fetchWithContext("company profile", roicService.fetchCompanyProfile, ticker),
-        fetchWithContext("annual per-share", roicService.fetchAnnualPerShare, ticker),
-        fetchWithContext("annual profitability", roicService.fetchAnnualProfitability, ticker),
-        fetchWithContext("historical prices", roicService.fetchStockPrices, ticker),
-        fetchWithContext("earnings calls", roicService.fetchEarningsCalls, ticker),
-      ]);
- 
+    if (!stock) {
+      return res.status(404).json({ error: "Stock not found" });
+    }
+
+    const [
+      profile,
+      perShare,
+      profitability,
+      prices,
+      earnings,
+      incomeStatement,
+      balanceSheet,
+      cashFlow,
+      creditRatios,
+      enterpriseValue,
+      multiples,
+    ] = await Promise.all([
+      fetchWithContext("company profile", roicService.fetchCompanyProfile, ticker),
+      fetchWithContext("annual per-share", roicService.fetchAnnualPerShare, ticker),
+      fetchWithContext("annual profitability", roicService.fetchAnnualProfitability, ticker),
+      fetchWithContext("historical prices", roicService.fetchStockPrices, ticker),
+      fetchWithContext("earnings calls", roicService.fetchEarningsCalls, ticker),
+      fetchWithContext("annual income statement", roicService.fetchAnnualIncomeStatement, ticker),
+      fetchWithContext("annual balance sheet", roicService.fetchAnnualBalanceSheet, ticker),
+      fetchWithContext("annual cash flow", roicService.fetchAnnualCashFlow, ticker),
+      fetchWithContext("annual credit ratios", roicService.fetchAnnualCreditRatios, ticker),
+      fetchWithContext("annual enterprise value", roicService.fetchAnnualEnterpriseValue, ticker),
+      fetchWithContext("annual multiples", roicService.fetchAnnualMultiples, ticker),
+    ]);
+
     const freshData = normalize.buildStockDocument({
-      tickerSymbol: ticker, profile, perShare,
-      profitability, prices, earnings,
+      tickerSymbol: ticker,
+      profile,
+      perShare,
+      profitability,
+      prices,
+      earnings,
+      incomeStatement,
+      balanceSheet,
+      cashFlow,
+      creditRatios,
+      enterpriseValue,
+      multiples,
       years: stock.sourceMeta.importRangeYears,
+      investmentCategory: stock.investmentCategory,
     });
- 
-    // Merge: update roicValue, preserve userValue
+
+    stock.companyName.roicValue = freshData.companyName.roicValue;
+    if (!stock.companyName.userValue) {
+      stock.companyName.effectiveValue = freshData.companyName.effectiveValue;
+      stock.companyName.sourceOfTruth = freshData.companyName.sourceOfTruth;
+    }
+
+    stock.priceCurrency = freshData.priceCurrency;
+    stock.sourceMeta.roicEndpointsUsed = freshData.sourceMeta.roicEndpointsUsed;
+
     for (const freshYear of freshData.annualData) {
-      const existing = stock.annualData.find(
-        (y) => y.fiscalYear === freshYear.fiscalYear
-      );
-      if (existing) {
-        // Update only roicValue for each metric
-        for (const metric of [
-          "stockPrice", "sharesOutstanding",
-          "returnOnInvestedCapital", "earningsReleaseDate",
-        ]) {
-          existing[metric].roicValue = freshYear[metric].roicValue;
-          const resolved = resolveEffectiveValue(existing[metric]);
-          existing[metric].effectiveValue = resolved.effectiveValue;
-          existing[metric].sourceOfTruth = resolved.sourceOfTruth;
-        }
-        recalculateDerived(existing);
+      const existingYear = stock.annualData.find((row) => row.fiscalYear === freshYear.fiscalYear);
+      if (existingYear) {
+        mergeAnnualEntry(existingYear, freshYear);
+      } else {
+        stock.annualData.push(freshYear);
       }
     }
- 
+
+    stock.annualData.sort((left, right) => right.fiscalYear - left.fiscalYear);
+    recalculateDerived(stock);
+
     stock.sourceMeta.lastRefreshAt = new Date();
     await stock.save();
     res.json(stock);
-  } catch (err) { next(err); }
+  } catch (error) {
+    next(error);
+  }
 }
- 
+
 module.exports = { refreshStock };

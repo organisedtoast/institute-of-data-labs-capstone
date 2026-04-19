@@ -16,6 +16,7 @@ const {
   validateTicker,
   validateCreateStock,
   validateUpdateStock,
+  validateFiscalYear,
 } = require("../middleware/validate");
  
 // Import all controllers
@@ -24,7 +25,11 @@ const {
   getAllStocks, getOneStock, createStock,
   updateStock, deleteStock,
 } = require("../controllers/watchlistController");
-const { setAnnualOverride } = require("../controllers/overrideController");
+const {
+  setAnnualOverride,
+  setForecastOverride,
+  setTopLevelMetricOverride,
+} = require("../controllers/overrideController");
 const { refreshStock } = require("../controllers/refreshController");
  
 // Import routes
@@ -38,7 +43,9 @@ router.patch("/:ticker", validateTicker, validateUpdateStock, updateStock);
 router.delete("/:ticker", validateTicker, deleteStock);
  
 // Override and refresh routes
-router.patch("/:ticker/annual/:fiscalYear/overrides", setAnnualOverride);
+router.patch("/:ticker/annual/:fiscalYear/overrides", validateTicker, validateFiscalYear, setAnnualOverride);
+router.patch("/:ticker/forecast/:bucket/overrides", validateTicker, setForecastOverride);
+router.patch("/:ticker/metrics/overrides", validateTicker, setTopLevelMetricOverride);
 router.post("/:ticker/refresh", refreshStock);
  
 module.exports = router;

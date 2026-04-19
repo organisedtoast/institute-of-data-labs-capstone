@@ -1,15 +1,15 @@
-// services/roicService.js
 const axios = require("axios");
- 
+
 const BASE_URL = "https://api.roic.ai/v2";
 const API_KEY = process.env.ROIC_API_KEY;
 const COMPANY_NAME_SEARCH_URL = `${BASE_URL}/tickers/search/name`;
 const STOCK_PRICES_URL = `${BASE_URL}/stock-prices`;
 const MAX_SEARCH_RESULTS = 25;
 const MONTH_STRING_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
- 
-// Helper: ROIC's current API documentation uses an `apikey` query parameter
-// rather than a Bearer token header, so every request shares this config.
+
+// ROIC uses the `apikey` query parameter across its API surface, so we keep
+// one helper for building request params instead of repeating that boilerplate
+// in every fetcher.
 const requestConfig = (extraParams = {}) => ({
   params: {
     apikey: API_KEY,
@@ -75,7 +75,19 @@ function convertMonthStringToEndDate(monthString) {
   return `${monthString}-${String(lastDayOfMonth).padStart(2, "0")}`;
 }
 
-// Fetch company profile (name, currency, etc.)
+// Most annual ROIC endpoints share the same period/order/limit arguments, so
+// one helper keeps those fetchers consistent and easier to scan.
+async function fetchAnnualEndpoint(endpointPath, ticker) {
+  const res = await axios.get(
+    `${BASE_URL}${endpointPath}/${ticker}`,
+    requestConfig({ period: "annual", order: "DESC", limit: 20 })
+  );
+
+  return res.data;
+}
+
+// Company profile provides identity-style fields such as company name and
+// price currency.
 async function fetchCompanyProfile(ticker) {
   const res = await axios.get(
     `${BASE_URL}/company/profile/${ticker}`,
@@ -83,26 +95,51 @@ async function fetchCompanyProfile(ticker) {
   );
   return Array.isArray(res.data) ? res.data[0] || {} : res.data;
 }
- 
-// Fetch annual per-share data (shares outstanding)
+
+// Per-share data currently feeds fiscal year end dates, share counts, EPS,
+// DPS, and tangible book value per share.
 async function fetchAnnualPerShare(ticker) {
-  const res = await axios.get(
-    `${BASE_URL}/fundamental/per-share/${ticker}`,
-    requestConfig({ period: "annual", order: "DESC", limit: 20 })
-  );
-  return res.data;
+  return fetchAnnualEndpoint("/fundamental/per-share", ticker);
 }
- 
-// Fetch annual profitability ratios (ROIC metric)
+
+// Profitability ratios feed ROIC plus several trailing margin-style metrics.
 async function fetchAnnualProfitability(ticker) {
-  const res = await axios.get(
-    `${BASE_URL}/fundamental/ratios/profitability/${ticker}`,
-    requestConfig({ period: "annual", order: "DESC", limit: 20 })
-  );
-  return res.data;
+  return fetchAnnualEndpoint("/fundamental/ratios/profitability", ticker);
 }
- 
-// Fetch historical stock prices
+
+// Income statement rows provide revenue, profitability, and expense lines.
+async function fetchAnnualIncomeStatement(ticker) {
+  return fetchAnnualEndpoint("/fundamental/income-statement", ticker);
+}
+
+// Balance sheet rows provide cash, debt, assets, liabilities, and equity.
+async function fetchAnnualBalanceSheet(ticker) {
+  return fetchAnnualEndpoint("/fundamental/balance-sheet", ticker);
+}
+
+// Cash flow rows provide capex and free-cash-flow style figures.
+async function fetchAnnualCashFlow(ticker) {
+  return fetchAnnualEndpoint("/fundamental/cash-flow", ticker);
+}
+
+// Credit ratios provide debt-to-EBITDA and interest-coverage style inputs.
+async function fetchAnnualCreditRatios(ticker) {
+  return fetchAnnualEndpoint("/fundamental/ratios/credit", ticker);
+}
+
+// Enterprise value rows can provide direct EV-related metrics, but the backend
+// still computes a fallback when those fields are absent.
+async function fetchAnnualEnterpriseValue(ticker) {
+  return fetchAnnualEndpoint("/fundamental/enterprise-value", ticker);
+}
+
+// Valuation multiples provide trailing PE and related valuation fields.
+async function fetchAnnualMultiples(ticker) {
+  return fetchAnnualEndpoint("/fundamental/multiples", ticker);
+}
+
+// Historical stock prices are used to select the first trading day after the
+// chosen earnings release date.
 async function fetchStockPrices(ticker, options = {}) {
   const { startDate, endDate, order = "ASC", limit = 100000 } = options;
   const res = await axios.get(
@@ -118,8 +155,9 @@ async function fetchStockPrices(ticker, options = {}) {
   const priceRows = Array.isArray(res.data) ? res.data : [];
   return sortPriceRowsByDateAscending(priceRows.map(normalizePriceRow));
 }
- 
-// Fetch earnings call dates
+
+// Earnings call dates are the preferred source for annual earnings release
+// dates, with backend fallbacks handling tickers where ROIC has gaps.
 async function fetchEarningsCalls(ticker) {
   const res = await axios.get(
     `${BASE_URL}/company/earnings-calls/list/${ticker}`,
@@ -137,13 +175,18 @@ async function searchRoicByCompanyName(searchQuery) {
   return Array.isArray(res.data) ? res.data : [];
 }
 
-// Export all service functions
 module.exports = {
-  isValidMonthString,
-  fetchCompanyProfile,
+  fetchAnnualBalanceSheet,
+  fetchAnnualCashFlow,
+  fetchAnnualCreditRatios,
+  fetchAnnualEnterpriseValue,
+  fetchAnnualIncomeStatement,
+  fetchAnnualMultiples,
   fetchAnnualPerShare,
   fetchAnnualProfitability,
-  fetchStockPrices,
+  fetchCompanyProfile,
   fetchEarningsCalls,
+  fetchStockPrices,
+  isValidMonthString,
   searchRoicByCompanyName,
 };

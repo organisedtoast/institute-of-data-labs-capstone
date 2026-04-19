@@ -1,20 +1,6 @@
-// This utility file resolves which value to use for any override-capable field.
+// This file keeps a small compatibility wrapper around the shared metric-field
+// helpers so older controller imports still read cleanly for a beginner.
 
-// Rule: if userValue exists, it wins. Otherwise, use roicValue.
- 
-function resolveEffectiveValue(field) {
-  if (field.userValue !== null && field.userValue !== undefined) {
-    return {
-      ...field,
-      effectiveValue: field.userValue,
-      sourceOfTruth: "user",
-    };
-  }
-  return {
-    ...field,
-    effectiveValue: field.roicValue,
-    sourceOfTruth: "roic",
-  };
-}
- 
+const { resolveEffectiveValue } = require("./metricField");
+
 module.exports = { resolveEffectiveValue };
