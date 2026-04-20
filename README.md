@@ -13,10 +13,12 @@ Create a `.env` file in the project root with:
 
 ```env
 MONGO_URI=your_mongodb_connection_string
+ROIC_API_KEY=your_roic_api_key
 PORT=3000
 ```
 
 `PORT` is optional. If it is not set, the API starts on `3000`.
+`ROIC_API_KEY` is required for live stock search and live stock price lookups.
 
 ### Install dependencies
 
@@ -62,6 +64,9 @@ npm run dev
 
 - `npm run test:stock-lookup-routes`  
   Runs the HTTP route/controller tests for the read-only stock lookup endpoints.
+
+- `npm run test:server-startup`
+  Confirms the API can still start and serve read-only stock search even if MongoDB is unavailable during boot.
 
 - `npm run test:backend`  
   Runs both of the fast backend suites together: stock search service tests and stock lookup route tests.
@@ -114,6 +119,12 @@ npm run test:stock-lookup-routes
 
 ```bash
 npm run test:backend
+```
+
+- If you changed startup behavior or read-only availability during Mongo outages, run:
+
+```bash
+npm run test:server-startup
 ```
 
 - If you changed import, normalization, refresh, or MongoDB persistence, run:
@@ -279,6 +290,41 @@ Example queries once the prompt is open:
 > Apple Inc
 > quit
 ```
+
+## Search Troubleshooting
+
+If typing `AAPL` into the navbar search shows a generic unavailable message, check the request path in this order:
+
+1. Start the backend API:
+
+```bash
+npm run server
+```
+
+2. Start the Vite frontend in a second terminal:
+
+```bash
+npm run dev
+```
+
+3. Confirm the backend route works directly before debugging the UI:
+
+```text
+http://localhost:3000/api/stocks/search?q=AAPL
+```
+
+Expected result:
+- a JSON payload with `query`, `queryType`, and `results`
+- or a specific JSON error message such as `ROIC API key is not configured.`
+
+4. If the browser cannot reach `/api/stocks/search`, confirm Vite is proxying `/api` to `http://localhost:3000` and that the backend is actually running on port `3000`.
+
+5. If the backend route responds with an authentication or upstream error, verify:
+- `ROIC_API_KEY` exists in `.env`
+- the API key is valid
+- outbound network access to `api.roic.ai` is allowed
+
+6. MongoDB is still needed for watchlist persistence, but the read-only stock search route should now start even if MongoDB is temporarily unavailable during boot.
 
 ## Frontend Branch Workflow
 

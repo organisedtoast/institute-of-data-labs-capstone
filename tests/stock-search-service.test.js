@@ -1012,9 +1012,80 @@ test("searchStocks throws a formatted error only when every upstream branch fail
   await assert.rejects(
     stockSearchService.searchStocks("Tesla Inc"),
     (error) => {
-      assert.equal(error.message, 'Unable to search stocks for "Tesla Inc".');
-      assert.equal(error.statusCode, 504);
-      assert.deepEqual(error.details, { message: "name search failed" });
+      assert.equal(error.message, "ROIC search service is unavailable right now.");
+      assert.equal(error.statusCode, 502);
+      assert.deepEqual(error.details, {
+        source: "roic",
+        reason: "upstream-unavailable",
+        status: 504,
+        upstreamMessage: "name failed",
+        upstream: { message: "name search failed" },
+      });
+      return true;
+    },
+  );
+});
+
+test("searchStocks reports upstream authentication failures as actionable API key errors", async () => {
+  roicService.fetchStockPrices = async () => {
+    const error = new Error("Request failed with status code 401");
+    error.response = {
+      status: 401,
+      data: { message: "invalid apikey" },
+    };
+    throw error;
+  };
+
+  roicService.searchRoicByCompanyName = async () => {
+    const error = new Error("Request failed with status code 401");
+    error.response = {
+      status: 401,
+      data: { message: "invalid apikey" },
+    };
+    throw error;
+  };
+
+  await assert.rejects(
+    stockSearchService.searchStocks("AAPL"),
+    (error) => {
+      assert.equal(error.message, "ROIC search authentication failed. Check ROIC_API_KEY.");
+      assert.equal(error.statusCode, 502);
+      assert.deepEqual(error.details, {
+        source: "roic",
+        reason: "authentication-failed",
+        status: 401,
+        upstreamMessage: "Request failed with status code 401",
+        upstream: { message: "invalid apikey" },
+      });
+      return true;
+    },
+  );
+});
+
+test("searchStocks reports low-level connectivity failures as ROIC network outages", async () => {
+  roicService.fetchStockPrices = async () => {
+    const error = new Error("connect EACCES api.roic.ai");
+    error.code = "EACCES";
+    throw error;
+  };
+
+  roicService.searchRoicByCompanyName = async () => {
+    const error = new Error("connect EACCES api.roic.ai");
+    error.code = "EACCES";
+    throw error;
+  };
+
+  await assert.rejects(
+    stockSearchService.searchStocks("AAPL"),
+    (error) => {
+      assert.equal(error.message, "Unable to reach the ROIC search service right now.");
+      assert.equal(error.statusCode, 503);
+      assert.deepEqual(error.details, {
+        source: "roic",
+        reason: "network-unavailable",
+        code: "EACCES",
+        upstreamMessage: "connect EACCES api.roic.ai",
+      });
       return true;
     },
   );

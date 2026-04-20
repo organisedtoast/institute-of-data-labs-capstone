@@ -7,15 +7,32 @@ const STOCK_PRICES_URL = `${BASE_URL}/stock-prices`;
 const MAX_SEARCH_RESULTS = 25;
 const MONTH_STRING_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 
+function buildMissingApiKeyError() {
+  const error = new Error("ROIC API key is not configured.");
+  error.statusCode = 503;
+  error.details = {
+    source: "roic",
+    reason: "missing-api-key",
+    envVar: "ROIC_API_KEY",
+  };
+  return error;
+}
+
 // ROIC uses the `apikey` query parameter across its API surface, so we keep
 // one helper for building request params instead of repeating that boilerplate
 // in every fetcher.
-const requestConfig = (extraParams = {}) => ({
-  params: {
-    apikey: API_KEY,
-    ...extraParams,
-  },
-});
+const requestConfig = (extraParams = {}) => {
+  if (!API_KEY) {
+    throw buildMissingApiKeyError();
+  }
+
+  return {
+    params: {
+      apikey: API_KEY,
+      ...extraParams,
+    },
+  };
+};
 
 function convertToNumberIfPossible(value) {
   if (value === null || value === undefined || value === "") {
@@ -176,6 +193,7 @@ async function searchRoicByCompanyName(searchQuery) {
 }
 
 module.exports = {
+  buildMissingApiKeyError,
   fetchAnnualBalanceSheet,
   fetchAnnualCashFlow,
   fetchAnnualCreditRatios,

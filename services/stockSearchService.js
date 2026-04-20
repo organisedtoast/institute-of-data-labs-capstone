@@ -56,6 +56,17 @@ const COMMON_TICKER_SUFFIXES = [
   ".WA",
 ];
 
+const NETWORK_ERROR_CODES = new Set([
+  "EACCES",
+  "ECONNABORTED",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "ERR_NETWORK",
+  "ETIMEDOUT",
+]);
+
 // A "ticker-like" query looks like a stock symbol such as `AAPL`, `BHP.AX`,
 // or `0700.HK`. We use this to decide whether we should search like a symbol,
 // a company name, or both.
@@ -873,9 +884,10 @@ async function runSearch(rawQuery) {
     const hasAnySuccessfulRows = successfulResultLists.some((resultList) => resultList.results.length > 0);
     if (!hasAnySuccessfulRows && rejectedResults.length > 0) {
       const firstError = rejectedResults[0]?.searchResult?.reason;
-      const error = new Error(`Unable to search stocks for "${rawQuery}".`);
-      error.statusCode = firstError?.response?.status || 502;
-      error.details = firstError?.response?.data || firstError?.message || "ROIC search request failed.";
+      const normalizedFailure = normalizeSearchFailure(firstError, rawQuery);
+      const error = new Error(normalizedFailure.message);
+      error.statusCode = normalizedFailure.statusCode;
+      error.details = normalizedFailure.details;
       throw error;
     }
   }
@@ -943,6 +955,92 @@ async function enrichResultsWithLatestPrices(results = []) {
   return fetchLatestPriceDataForResults(results);
 }
 
+function buildStructuredErrorDetails(error, extraDetails = {}) {
+  const responseData = error?.response?.data;
+  const details = {
+    source: "roic",
+    ...extraDetails,
+  };
+
+  if (error?.code) {
+    details.code = error.code;
+  }
+
+  if (error?.message) {
+    details.upstreamMessage = error.message;
+  }
+
+  if (responseData !== undefined) {
+    details.upstream = responseData;
+  }
+
+  return details;
+}
+
+function normalizeSearchFailure(error, rawQuery) {
+  if (error?.statusCode && error?.details) {
+    return {
+      message: error.message || `Unable to search stocks for "${rawQuery}".`,
+      statusCode: error.statusCode,
+      details: error.details,
+    };
+  }
+
+  if (error?.message === "ROIC API key is not configured.") {
+    return {
+      message: "ROIC API key is not configured.",
+      statusCode: error.statusCode || 503,
+      details: error.details || buildStructuredErrorDetails(error, {
+        reason: "missing-api-key",
+        envVar: "ROIC_API_KEY",
+      }),
+    };
+  }
+
+  const upstreamStatus = error?.response?.status;
+  if (upstreamStatus === 401 || upstreamStatus === 403) {
+    return {
+      message: "ROIC search authentication failed. Check ROIC_API_KEY.",
+      statusCode: 502,
+      details: buildStructuredErrorDetails(error, {
+        reason: "authentication-failed",
+        status: upstreamStatus,
+      }),
+    };
+  }
+
+  if (NETWORK_ERROR_CODES.has(error?.code)) {
+    return {
+      message: "Unable to reach the ROIC search service right now.",
+      statusCode: 503,
+      details: buildStructuredErrorDetails(error, {
+        reason: "network-unavailable",
+      }),
+    };
+  }
+
+  if (upstreamStatus >= 500) {
+    return {
+      message: "ROIC search service is unavailable right now.",
+      statusCode: 502,
+      details: buildStructuredErrorDetails(error, {
+        reason: "upstream-unavailable",
+        status: upstreamStatus,
+      }),
+    };
+  }
+
+  return {
+    message: `Unable to search stocks for "${rawQuery}".`,
+    statusCode: upstreamStatus || 502,
+    details:
+      error?.response?.data ||
+      buildStructuredErrorDetails(error, {
+        reason: "search-request-failed",
+      }),
+  };
+}
+
 module.exports = {
   COMMON_TICKER_SUFFIXES,
   buildTickerVariantCandidates,
@@ -968,4 +1066,5 @@ module.exports = {
   searchRoicByTickerVariants,
   splitTickerFirstCompanySearchResults,
   sortResultsWithPricePreference,
+  normalizeSearchFailure,
 };

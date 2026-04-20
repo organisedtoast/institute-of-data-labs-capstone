@@ -5,6 +5,46 @@ import axios from 'axios';
 import StockSearchContext from './stockSearchContext';
 
 const DEFAULT_IMPORT_CATEGORY = 'Firm Specific Turnaround';
+const STOCK_SEARCH_FALLBACK_MESSAGE = 'Search is unavailable right now. Please try again in a moment.';
+
+function isDevelopmentEnvironment() {
+  return Boolean(import.meta.env?.DEV);
+}
+
+function logRequestFailure(label, requestError) {
+  if (!isDevelopmentEnvironment()) {
+    return;
+  }
+
+  console.error(`[${label}]`, {
+    message: requestError?.message || '',
+    code: requestError?.code || '',
+    status: requestError?.response?.status,
+    data: requestError?.response?.data,
+  });
+}
+
+function resolveSearchFailureMessage(requestError) {
+  const backendMessage = requestError.response?.data?.message || requestError.response?.data?.error;
+  if (backendMessage) {
+    return backendMessage;
+  }
+
+  if (requestError.code === 'ECONNABORTED') {
+    return 'Search timed out before the backend replied. Please try again in a moment.';
+  }
+
+  if (
+    requestError.code === 'ERR_NETWORK' ||
+    requestError.code === 'ENOTFOUND' ||
+    requestError.code === 'ECONNREFUSED' ||
+    requestError.message === 'Network Error'
+  ) {
+    return 'The search service could not be reached. Make sure the backend API is running on http://localhost:3000.';
+  }
+
+  return STOCK_SEARCH_FALLBACK_MESSAGE;
+}
 
 function getApiErrorMessage(requestError, fallbackMessage) {
   return (
@@ -146,12 +186,8 @@ export function StockSearchProvider({ children }) {
     } catch (requestError) {
       setSearchResults([]);
       setSearchStatus('error');
-      setSearchError(
-        getApiErrorMessage(
-          requestError,
-          'Search is unavailable right now. Please try again in a moment.',
-        ),
-      );
+      logRequestFailure('stock-search', requestError);
+      setSearchError(resolveSearchFailureMessage(requestError));
       return false;
     }
   }, [searchText]);

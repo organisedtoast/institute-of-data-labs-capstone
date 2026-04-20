@@ -49,6 +49,7 @@ app.use("/api/watchlist", watchlistRoutes);
 app.use(errorHandler);
 
 let activeServer = null;
+let databaseStartupError = null;
 
 // Start the server programmatically so tests or scripts can reuse the same app
 // instance without forcing a second copy of the server to boot automatically.
@@ -61,13 +62,24 @@ async function startServer() {
   }
 
   const PORT = process.env.PORT || 3000;
-  await connectDB();
+  databaseStartupError = null;
+
+  try {
+    await connectDB();
+  } catch (error) {
+    databaseStartupError = error;
+    console.error(`Server startup warning: database unavailable (${error.message})`);
+  }
 
   // Some fast route tests intentionally stub the DB connection so they can
   // focus on HTTP behavior without spinning up MongoDB. We only seed default
   // lenses after Mongoose reports a real connected state.
   if (mongoose.connection.readyState === 1) {
-    await ensureDefaultLenses();
+    try {
+      await ensureDefaultLenses();
+    } catch (error) {
+      console.error(`Server startup warning: unable to seed default lenses (${error.message})`);
+    }
   }
 
   // app.listen() uses a callback-based API, so we wrap it in a Promise
@@ -89,6 +101,7 @@ async function stopServer() {
   // can safely run even if cleanup is triggered more than once.
   const serverToClose = activeServer;
   activeServer = null;
+  databaseStartupError = null;
 
   // Closing the HTTP server stops Express from accepting new requests.
   // If no server is running, we simply skip this step.
@@ -96,6 +109,10 @@ async function stopServer() {
     await new Promise((resolve, reject) => {
       serverToClose.close((error) => {
         if (error) {
+          if (error.code === "ERR_SERVER_NOT_RUNNING") {
+            resolve();
+            return;
+          }
           reject(error);
           return;
         }
@@ -118,4 +135,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, startServer, stopServer };
+module.exports = { app, startServer, stopServer, getDatabaseStartupError: () => databaseStartupError };

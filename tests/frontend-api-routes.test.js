@@ -259,3 +259,25 @@ test("GET /api/stocks/search fails only when every upstream search branch fails"
   assert.equal(response.body.message, 'Unable to search stocks for "TSLA".');
   assert.deepEqual(response.body.details, { message: "ticker search failed" });
 });
+
+test("GET /api/stocks/search preserves normalized authentication failures from the service layer", async () => {
+  stockSearchService.searchStocks = async () => {
+    const error = new Error("ROIC search authentication failed. Check ROIC_API_KEY.");
+    error.statusCode = 502;
+    error.details = {
+      source: "roic",
+      reason: "authentication-failed",
+      status: 401,
+    };
+    throw error;
+  };
+
+  const response = await requestJson("/api/stocks/search?q=AAPL");
+  assert.equal(response.status, 502);
+  assert.equal(response.body.message, "ROIC search authentication failed. Check ROIC_API_KEY.");
+  assert.deepEqual(response.body.details, {
+    source: "roic",
+    reason: "authentication-failed",
+    status: 401,
+  });
+});
