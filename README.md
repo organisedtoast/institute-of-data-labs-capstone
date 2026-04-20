@@ -48,6 +48,9 @@ npm run dev
 - `npm run preview`  
   Serves the built frontend locally so you can preview the production build.
 
+- `npm run check:frontend-branch-sync`
+  Fails unless local `frontend-branch` and `main` point to identical file trees. Use this before any manual merge that is meant to leave `main` unchanged.
+
 - `npm run search:live`  
   Starts the interactive live stock search CLI for querying the ROIC-backed search flow from the terminal.
 
@@ -276,3 +279,55 @@ Example queries once the prompt is open:
 > Apple Inc
 > quit
 ```
+
+## Frontend Branch Workflow
+
+The canonical repository is this repo. The old standalone frontend repo under
+`C:\Users\Daniel\Downloads\frontend\institute-of-data-labs-capstone` is archival reference only.
+
+`frontend-branch` is not a stripped-down frontend-only tree. It must carry the same tip tree as `main`
+whenever you want a later manual merge into `main` to be a true no-op.
+
+### Frontend-owned paths
+
+Treat these paths as frontend-owned on `frontend-branch`:
+
+- `src/`
+- `public/`
+- `index.html`
+- `vite.config.mjs`
+- frontend-related sections of `package.json` and `package-lock.json`
+- frontend UI tests under `src/**/__tests__` and `src/test/`
+
+### Out-of-scope paths for frontend work
+
+Do not modify these paths as part of frontend-only work on `frontend-branch`:
+
+- `server.js`
+- `routes/`
+- `controllers/`
+- `services/` except frontend-only code under `src/services/`
+- `models/`
+- `middleware/`
+- `config/`
+- `catalog/`
+- repo-root `utils/`
+- repo-root `tests/`
+- `docs/`
+- backend scripts outside frontend build tooling
+
+### No-op merge rule
+
+If you want `git merge frontend-branch` into `main` to change nothing:
+
+1. First merge any real frontend work from `frontend-branch` into `main` through the normal flow.
+2. Then reset or recreate `frontend-branch` from the new `main` tip.
+3. Run:
+
+```bash
+npm run check:frontend-branch-sync
+```
+
+4. Only perform the manual merge after that command reports that the two branches match.
+
+If `frontend-branch` is ahead of `main`, a manual merge is expected to change `main`.
