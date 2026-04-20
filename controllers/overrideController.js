@@ -86,8 +86,6 @@ async function setAnnualOverride(req, res, next) {
       "ownerEarningsBridge.deemedMaintenanceCapex",
       "ownerEarningsBridge.ownerEarnings",
       "sharesAndMarketCap.changeInShares",
-      "sharesAndMarketCap.sharesOnIssueDetailed",
-      "sharesAndMarketCap.marketCapDetailed",
       "valuationMultiples.evSalesTrailing",
       "valuationMultiples.ebitdaMarginTrailing",
       "valuationMultiples.ebitMarginTrailing",

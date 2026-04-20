@@ -18,7 +18,7 @@
     "test:stock-search": "node --test tests/stock-search-service.test.js",
     "test:stock-lookup-routes": "node --test tests/frontend-api-routes.test.js",
     "test:server-startup": "node --test tests/server-startup.test.js",
-    "test:backend": "node --test tests/stock-search-service.test.js tests/frontend-api-routes.test.js tests/server-startup.test.js tests/lens-visibility.test.js tests/inspect-lens-fields.test.js tests/schema-reference-generator.test.js",
+    "test:backend": "node --test tests/stock-search-service.test.js tests/frontend-api-routes.test.js tests/server-startup.test.js tests/lens-visibility.test.js tests/inspect-lens-fields.test.js tests/schema-reference-generator.test.js tests/import-range-behavior.test.js",
     "test:docs": "node --test tests/schema-reference-generator.test.js",
     "test:lenses": "node --test tests/lens-visibility.test.js tests/inspect-lens-fields.test.js",
     "test:e2e-stubbed": "node --test tests/e2e-stubbed-import-crud.test.js",

@@ -3,6 +3,7 @@
 // resulting document into MongoDB.
 
 const roicService = require("../services/roicService");
+const { parseRequestedImportRangeYears } = require("../services/importRangeService");
 const normalize = require("../services/normalizationService");
 const WatchlistStock = require("../models/WatchlistStock");
 const { assertActiveLensName } = require("../services/lensService");
@@ -18,7 +19,11 @@ async function fetchWithContext(label, fetcher, tickerSymbol) {
 
 async function importStock(req, res, next) {
   try {
-    const { tickerSymbol, investmentCategory, years = 10 } = req.body;
+    const { tickerSymbol, investmentCategory } = req.body;
+    const {
+      years,
+      importRangeYearsExplicit,
+    } = parseRequestedImportRangeYears(req.body.years);
 
     if (!tickerSymbol) {
       return res.status(400).json({ error: "tickerSymbol is required" });
@@ -72,6 +77,7 @@ async function importStock(req, res, next) {
       enterpriseValue,
       multiples,
       years,
+      importRangeYearsExplicit,
       investmentCategory: investmentCategory.trim(),
     });
 
@@ -83,6 +89,10 @@ async function importStock(req, res, next) {
 
     res.status(201).json(doc);
   } catch (error) {
+    if (error.statusCode === 400) {
+      return res.status(400).json({ error: error.message });
+    }
+
     next(error);
   }
 }

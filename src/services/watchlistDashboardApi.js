@@ -42,10 +42,9 @@ function normalizeAnnualMetrics(stockDocument) {
         fiscalYear: Number.isInteger(fiscalYear) ? fiscalYear : null,
         fiscalYearEndDate:
           typeof annualRow?.fiscalYearEndDate === 'string' ? annualRow.fiscalYearEndDate : null,
-        stockPrice: getEffectiveValue(annualRow?.base?.sharePrice),
-        sharesOutstanding: getEffectiveValue(annualRow?.base?.sharesOnIssue),
+        sharePrice: getEffectiveValue(annualRow?.base?.sharePrice),
+        sharesOnIssue: getEffectiveValue(annualRow?.base?.sharesOnIssue),
         marketCap: getEffectiveValue(annualRow?.base?.marketCap),
-        returnOnInvestedCapital: getEffectiveValue(annualRow?.base?.returnOnInvestedCapital),
       };
     })
     .sort((left, right) => {
@@ -54,6 +53,13 @@ function normalizeAnnualMetrics(stockDocument) {
 
       return leftDate.localeCompare(rightDate);
     });
+}
+
+function shouldUpgradeLegacyAnnualHistory(stockDocument) {
+  const importRangeYears = stockDocument?.sourceMeta?.importRangeYears;
+  const importRangeYearsExplicit = stockDocument?.sourceMeta?.importRangeYearsExplicit === true;
+
+  return importRangeYears === 10 && !importRangeYearsExplicit;
 }
 
 export function buildDashboardPayload(stockDocument, pricePayload, identifier) {
@@ -85,6 +91,16 @@ export async function fetchDashboardData(identifier, options = {}) {
     axios.get(`/api/watchlist/${normalizedIdentifier}`, requestOptions),
     axios.get(`/api/stock-prices/${normalizedIdentifier}`, requestOptions),
   ]);
+  let stockDocument = stockResponse.data;
 
-  return buildDashboardPayload(stockResponse.data, priceResponse.data, normalizedIdentifier);
+  if (shouldUpgradeLegacyAnnualHistory(stockDocument)) {
+    const refreshResponse = await axios.post(
+      `/api/watchlist/${normalizedIdentifier}/refresh`,
+      {},
+      requestOptions,
+    );
+    stockDocument = refreshResponse.data;
+  }
+
+  return buildDashboardPayload(stockDocument, priceResponse.data, normalizedIdentifier);
 }

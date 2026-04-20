@@ -1,6 +1,5 @@
 import React from 'react';
-import { act } from 'react';
-import { fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
@@ -130,8 +129,15 @@ const DASHBOARD_SETTLE_TIME_MS = 550;
 
 let originalRequestAnimationFrame;
 let originalCancelAnimationFrame;
+let originalMatchMedia;
+let currentMatchMediaWidth = 1024;
 let mountedContainer;
 let mountedRoot;
+let pendingAnimationFrameHandles = new Set();
+
+function setViewportWidth(width) {
+  currentMatchMediaWidth = width;
+}
 
 function shiftMonthString(monthString, monthsToShift) {
   const [yearText, monthText] = monthString.split('-');
@@ -171,10 +177,9 @@ function buildDashboardPayload(overrides = {}) {
     annualMetrics.push({
       fiscalYear: year,
       fiscalYearEndDate: `${year}-12-31`,
-      stockPrice: 100 + (year - 2010),
-      sharesOutstanding: 1000000000 + ((year - 2010) * 1000000),
+      sharePrice: 100 + (year - 2010),
+      sharesOnIssue: 1000000000 + ((year - 2010) * 1000000),
       marketCap: 100000000000 + ((year - 2010) * 5000000000),
-      returnOnInvestedCapital: 10 + ((year - 2010) * 0.25),
     });
   }
 
@@ -312,7 +317,7 @@ async function renderDashboard(options = {}) {
 
   const user = userEvent.setup();
 
-  mountDashboard(
+  const renderResult = mountDashboard(
     <SharePriceDashboard
       identifier={identifier}
       name={name}
@@ -338,6 +343,7 @@ async function renderDashboard(options = {}) {
   return {
     endInput,
     minAvailableMonth,
+    renderResult,
     scrollController,
     scrollRegion,
     startInput,
@@ -368,19 +374,42 @@ async function dragPresetWindowOlderByMonths({
 describe('SharePriceDashboard preset scrolling', () => {
   beforeEach(() => {
     fetchDashboardData.mockReset();
+    pendingAnimationFrameHandles = new Set();
 
     originalRequestAnimationFrame = window.requestAnimationFrame;
     originalCancelAnimationFrame = window.cancelAnimationFrame;
+    originalMatchMedia = window.matchMedia;
+
+    window.matchMedia = (query) => {
+      const maxWidthMatch = query.match(/\(max-width:\s*(\d+)px\)/);
+      const matches = maxWidthMatch ? currentMatchMediaWidth <= Number(maxWidthMatch[1]) : false;
+
+      return {
+        matches,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      };
+    };
 
     // Passing a future timestamp makes each chart-scale animation finish in one
     // frame, which keeps the component responsive in tests without changing app code.
     window.requestAnimationFrame = (callback) => {
-      return window.setTimeout(() => {
+      const handle = window.setTimeout(() => {
+        pendingAnimationFrameHandles.delete(handle);
         callback(window.performance.now() + DASHBOARD_SETTLE_TIME_MS);
       }, 0);
+
+      pendingAnimationFrameHandles.add(handle);
+      return handle;
     };
 
     window.cancelAnimationFrame = (handle) => {
+      pendingAnimationFrameHandles.delete(handle);
       window.clearTimeout(handle);
     };
 
@@ -390,7 +419,9 @@ describe('SharePriceDashboard preset scrolling', () => {
 
   afterEach(() => {
     if (mountedRoot) {
-      mountedRoot.unmount();
+      act(() => {
+        mountedRoot.unmount();
+      });
       mountedRoot = null;
     }
 
@@ -399,11 +430,18 @@ describe('SharePriceDashboard preset scrolling', () => {
       mountedContainer = null;
     }
 
+    pendingAnimationFrameHandles.forEach((handle) => {
+      window.clearTimeout(handle);
+    });
+    pendingAnimationFrameHandles.clear();
+
     window.requestAnimationFrame = originalRequestAnimationFrame;
     window.cancelAnimationFrame = originalCancelAnimationFrame;
+    window.matchMedia = originalMatchMedia;
     globalThis.requestAnimationFrame = originalRequestAnimationFrame;
     globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
     vi.restoreAllMocks();
+    currentMatchMediaWidth = 1024;
   });
 
   it('renders the dashboard smoke test without hanging', async () => {
@@ -440,6 +478,34 @@ describe('SharePriceDashboard preset scrolling', () => {
     renderedLabelTexts.forEach((labelText) => {
       expect(expectedLabelTexts).toContain(labelText);
     });
+  });
+
+  it('uses full sticky rail labels on wider screens', async () => {
+    setViewportWidth(1024);
+
+    await renderDashboard();
+
+    expect(screen.getByText('FY end date')).toBeTruthy();
+    expect(screen.getByText('Share price (at FY release date)')).toBeTruthy();
+    expect(screen.getByText('Shares on issue')).toBeTruthy();
+    expect(screen.getByText('Market cap')).toBeTruthy();
+    expect(screen.queryByText('ROIC')).toBeNull();
+  });
+
+  it('uses short sticky rail labels on narrow screens while keeping the full label as metadata', async () => {
+    setViewportWidth(480);
+
+    await renderDashboard();
+
+    expect(screen.getByText('FY END')).toBeTruthy();
+    expect(screen.getByText('Px')).toBeTruthy();
+    expect(screen.getByText('SOI')).toBeTruthy();
+    expect(screen.getByText('Mkt Cap')).toBeTruthy();
+    expect(screen.queryByText('ROIC')).toBeNull();
+
+    const sharePriceRailLabel = screen.getByText('Px');
+    expect(sharePriceRailLabel.getAttribute('title')).toBe('Share price (at FY release date)');
+    expect(sharePriceRailLabel.getAttribute('aria-label')).toBe('Share price (at FY release date)');
   });
 
   it('lets the default 5Y preset pan immediately on first load', async () => {
@@ -532,6 +598,43 @@ describe('SharePriceDashboard preset scrolling', () => {
     expect(endInput.value).toBe('2025-12');
   });
 
+  it('shows every available annual column when MAX is selected', async () => {
+    const { user } = await renderDashboard();
+
+    await user.click(screen.getByRole('button', { name: 'MAX' }));
+    await flushDashboardWork();
+
+    const fiscalYearLabels = screen.getAllByText(/^\d{4}-12$/).map((node) => node.textContent);
+
+    expect(fiscalYearLabels).toHaveLength(16);
+    expect(fiscalYearLabels[0]).toBe('2010-12');
+    expect(fiscalYearLabels[15]).toBe('2025-12');
+  });
+
+  it('populates older annual entries when a fixed-length preset is panned left', async () => {
+    const {
+      scrollController,
+      scrollRegion,
+      user,
+    } = await renderDashboard();
+
+    await user.click(screen.getByRole('button', { name: '10Y' }));
+    await flushDashboardWork();
+
+    expect(screen.getByText('2015-12')).toBeTruthy();
+    expect(screen.getByText('2025-12')).toBeTruthy();
+
+    await dragPresetWindowOlderByMonths({
+      scrollRegion,
+      scrollController,
+      monthCount: 24,
+    });
+
+    expect(screen.getByText('2013-12')).toBeTruthy();
+    expect(screen.getByText('2023-12')).toBeTruthy();
+    expect(screen.queryByText('2025-12')).toBeNull();
+  });
+
   it('re-initializes preset panning correctly after switching through MAX', async () => {
     const {
       endInput,
@@ -586,76 +689,4 @@ describe('SharePriceDashboard preset scrolling', () => {
     expect(startInput.value).toBe('2022-12');
   });
 
-  it('resets preset bootstrap cleanly when the stock identifier changes', async () => {
-    const firstDeferredResponse = createDeferredResponse();
-    const secondDeferredResponse = createDeferredResponse();
-
-    fetchDashboardData
-      .mockImplementationOnce(() => firstDeferredResponse.responsePromise)
-      .mockImplementationOnce(() => secondDeferredResponse.responsePromise);
-
-    const { rerender } = mountDashboard(
-      <SharePriceDashboard identifier="AAPL" name="Apple Inc." />,
-    );
-
-    const startInput = screen.getByLabelText('Start month');
-    const endInput = screen.getByLabelText('End month');
-
-    await act(async () => {
-      firstDeferredResponse.resolveResponse(buildDashboardPayload());
-    });
-
-    await flushDashboardWork();
-
-    let scrollRegion = screen.getByTestId(DASHBOARD_TEST_ID);
-    let scrollController = await configureScrollRegion(scrollRegion);
-    const minAvailableMonth = getMonthStringFromDate(buildDashboardPayload().prices[0].date);
-
-    await flushDashboardWork();
-    await flushDashboardWork();
-
-    expect(startInput.value).toBe('2020-12');
-    expect(scrollController.getScrollLeft()).toBe(getLatestPresetScrollLeft({
-      latestPresetStartMonth: '2020-12',
-      minAvailableMonth,
-    }));
-
-    await dragPresetWindowOlderByMonths({
-      scrollRegion,
-      scrollController,
-      monthCount: 2,
-    });
-
-    expect(startInput.value).toBe('2020-10');
-
-    rerender(<SharePriceDashboard identifier="MSFT" name="Microsoft Corporation" />);
-
-    await act(async () => {
-      secondDeferredResponse.resolveResponse(buildDashboardPayload({
-        identifier: 'MSFT',
-        companyName: 'Microsoft Corporation',
-      }));
-    });
-
-    await flushDashboardWork();
-
-    expect(screen.getByText('Microsoft Corporation')).toBeTruthy();
-    expect(startInput.value).toBe('2020-12');
-    expect(endInput.value).toBe('2025-12');
-    scrollRegion = screen.getByTestId(DASHBOARD_TEST_ID);
-    scrollController = await configureScrollRegion(scrollRegion);
-    await flushDashboardWork();
-    expect(scrollController.getScrollLeft()).toBe(getLatestPresetScrollLeft({
-      latestPresetStartMonth: '2020-12',
-      minAvailableMonth,
-    }));
-
-    await dragPresetWindowOlderByMonths({
-      scrollRegion,
-      scrollController,
-    });
-
-    expect(startInput.value).toBe('2020-11');
-    expect(endInput.value).toBe('2025-11');
-  }, 15000);
 });

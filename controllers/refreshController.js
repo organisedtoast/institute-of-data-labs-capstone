@@ -3,6 +3,7 @@
 // fields stay in sync with any user-entered corrections.
 
 const roicService = require("../services/roicService");
+const { resolveStoredImportRange } = require("../services/importRangeService");
 const normalize = require("../services/normalizationService");
 const WatchlistStock = require("../models/WatchlistStock");
 const { recalculateDerived } = require("../utils/derivedCalc");
@@ -24,6 +25,11 @@ async function refreshStock(req, res, next) {
     if (!stock) {
       return res.status(404).json({ error: "Stock not found" });
     }
+
+    const {
+      years,
+      importRangeYearsExplicit,
+    } = resolveStoredImportRange(stock.sourceMeta);
 
     const [
       profile,
@@ -64,7 +70,8 @@ async function refreshStock(req, res, next) {
       creditRatios,
       enterpriseValue,
       multiples,
-      years: stock.sourceMeta.importRangeYears,
+      years,
+      importRangeYearsExplicit,
       investmentCategory: stock.investmentCategory,
     });
 
@@ -75,6 +82,8 @@ async function refreshStock(req, res, next) {
     }
 
     stock.priceCurrency = freshData.priceCurrency;
+    stock.sourceMeta.importRangeYears = freshData.sourceMeta.importRangeYears;
+    stock.sourceMeta.importRangeYearsExplicit = freshData.sourceMeta.importRangeYearsExplicit;
     stock.sourceMeta.roicEndpointsUsed = freshData.sourceMeta.roicEndpointsUsed;
 
     for (const freshYear of freshData.annualData) {

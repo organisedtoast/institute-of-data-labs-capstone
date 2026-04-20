@@ -1,6 +1,6 @@
 // This end-to-end harness uses fake ROIC responses but the real Express app,
 // real MongoDB writes, and real normalization logic. It is the safest place to
-// prove the expanded schema, override routes, and derived calculations all work
+// prove the grouped schema, override routes, and derived calculations all work
 // together without depending on the live third-party API.
 
 require("dotenv").config();

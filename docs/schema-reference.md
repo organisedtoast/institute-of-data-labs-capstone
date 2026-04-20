@@ -21,7 +21,8 @@
 | priceCurrency | Price currency | roic | /v2/company/profile/{identifier} | All (7) |
 | sourceMeta.lastImportedAt | Last import timestamp | system | N/A | All (7) |
 | sourceMeta.lastRefreshAt | Last refresh timestamp | system | N/A | All (7) |
-| sourceMeta.importRangeYears | Requested yearly import range | system | N/A | All (7) |
+| sourceMeta.importRangeYears | Requested yearly import range (`null` means all available annual years) | system | N/A | All (7) |
+| sourceMeta.importRangeYearsExplicit | Whether the yearly import range was explicitly requested | system | N/A | All (7) |
 | sourceMeta.roicEndpointsUsed | ROIC endpoints used by import | system | Multiple endpoints | All (7) |
 | annualData[] | Historical annual rows | system | Multiple endpoints | All (7) |
 | forecastData | Forecast buckets container | system | N/A | All (7) |
@@ -71,9 +72,9 @@
 | annualData[].incomeStatement.ebitda | EBITDA | roic | /v2/fundamental/income-statement/{identifier} | Unprofitable Hi Growth, Profitable Hi Growth, Mature Compounder +3 more |
 | annualData[].incomeStatement.depreciationAndAmortization | Depreciation & amortization | roic | /v2/fundamental/income-statement/{identifier} | Unprofitable Hi Growth, Profitable Hi Growth, Mature Compounder +3 more |
 | annualData[].incomeStatement.ebit | EBIT | roic | /v2/fundamental/income-statement/{identifier} | Unprofitable Hi Growth, Profitable Hi Growth, Mature Compounder +3 more |
-| annualData[].incomeStatement.netInterestExpense | Net interest expense | roic | /v2/fundamental/income-statement/{identifier} | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
+| annualData[].incomeStatement.netInterestExpense | Net interest expense | roic | /v2/fundamental/income-statement/{identifier} | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
 | annualData[].incomeStatement.npbt | NPBT | roic | /v2/fundamental/income-statement/{identifier} | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
-| annualData[].incomeStatement.incomeTaxExpense | Income tax expense | roic | /v2/fundamental/income-statement/{identifier} | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
+| annualData[].incomeStatement.incomeTaxExpense | Income tax expense | roic | /v2/fundamental/income-statement/{identifier} | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
 | annualData[].incomeStatement.npat | NPAT | roic | /v2/fundamental/income-statement/{identifier} | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
 | annualData[].incomeStatement.capitalExpenditures | Capital expenditures | roic | /v2/fundamental/cash-flow/{identifier} | Unprofitable Hi Growth (1) |
 | annualData[].incomeStatement.fcf | FCF | roic | /v2/fundamental/cash-flow/{identifier} | Unprofitable Hi Growth (1) |
@@ -90,8 +91,6 @@
 | Field path | Label | Source type | ROIC endpoint | Visible in categories |
 | --- | --- | --- | --- | --- |
 | annualData[].sharesAndMarketCap.changeInShares | Change in shares | derived | N/A | Unprofitable Hi Growth (1) |
-| annualData[].sharesAndMarketCap.sharesOnIssueDetailed | Shares on issue (detailed) | roic | /v2/fundamental/per-share/{identifier} | All (7) |
-| annualData[].sharesAndMarketCap.marketCapDetailed | Market cap (detailed) | derived | N/A | All (7) |
 
 ## annualData[].valuationMultiples
 
@@ -195,10 +194,10 @@ This appendix stays compact on purpose. It tells a developer how broad each cate
 
 | Investment category | Card fields | Detail fields | Sample field paths |
 | --- | --- | --- | --- |
-| Unprofitable Hi Growth | 5 | 49 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
-| Profitable Hi Growth | 5 | 83 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
-| Mature Compounder | 5 | 83 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
-| Defensive Yield | 5 | 79 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
-| Cyclicals | 5 | 84 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
-| Lenders | 5 | 51 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
-| Firm Specific Turnaround | 5 | 84 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Unprofitable Hi Growth | 5 | 44 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Profitable Hi Growth | 5 | 78 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Mature Compounder | 5 | 78 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Defensive Yield | 5 | 74 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Cyclicals | 5 | 79 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Lenders | 5 | 49 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Firm Specific Turnaround | 5 | 79 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |

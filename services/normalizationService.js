@@ -601,7 +601,6 @@ function buildAnnualEntry({
   setMetric(annualEntry, "incomeStatement.capitalExpenditures", getCapitalExpenditures(cashFlowRow), "roic");
   setMetric(annualEntry, "incomeStatement.fcf", getFreeCashFlow(cashFlowRow), "roic");
 
-  setMetric(annualEntry, "sharesAndMarketCap.sharesOnIssueDetailed", getSharesOnIssue(perShareRow), "roic");
   setMetric(annualEntry, "valuationMultiples.peTrailing", getPeTrailing(multiplesRow), "roic");
   setMetric(annualEntry, "valuationMultiples.tangibleBookValuePerShare", getTangibleBookValuePerShare(perShareRow, multiplesRow), "roic");
   setMetric(annualEntry, "epsAndDividends.epsTrailing", getEpsTrailing(perShareRow, incomeRow), "roic");
@@ -626,14 +625,17 @@ function buildStockDocument({
   creditRatios,
   enterpriseValue,
   multiples,
-  years = 10,
+  years = null,
+  importRangeYearsExplicit = false,
   investmentCategory,
 }) {
   void creditRatios;
   void enterpriseValue;
 
   const normalizedTicker = String(tickerSymbol || "").toUpperCase().trim();
-  const normalizedYearLimit = Math.max(Number(years) || 10, 0);
+  const normalizedYearLimit = Number.isInteger(Number(years)) && Number(years) > 0
+    ? Number(years)
+    : null;
   const normalizedPrices = normalizePriceHistory(prices);
   const normalizedCalls = normalizeEarningsCalls(earnings);
 
@@ -644,7 +646,7 @@ function buildStockDocument({
   const cashFlowByYear = buildYearMap(cashFlow);
   const multiplesByYear = buildYearMap(multiples);
 
-  const fiscalYears = sortYearsDescending([
+  const allFiscalYears = sortYearsDescending([
     ...new Set([
       ...perShareByYear.keys(),
       ...profitabilityByYear.keys(),
@@ -653,7 +655,10 @@ function buildStockDocument({
       ...cashFlowByYear.keys(),
       ...multiplesByYear.keys(),
     ]),
-  ]).slice(0, normalizedYearLimit);
+  ]);
+  const fiscalYears = normalizedYearLimit === null
+    ? allFiscalYears
+    : allFiscalYears.slice(0, normalizedYearLimit);
 
   const annualData = fiscalYears.map((fiscalYear) => {
     const perShareRow = perShareByYear.get(fiscalYear) || null;
@@ -691,6 +696,7 @@ function buildStockDocument({
     sourceMeta: {
       lastImportedAt: new Date(),
       importRangeYears: normalizedYearLimit,
+      importRangeYearsExplicit: Boolean(importRangeYearsExplicit),
       roicEndpointsUsed: ROIC_ENDPOINTS_USED,
     },
     annualData,

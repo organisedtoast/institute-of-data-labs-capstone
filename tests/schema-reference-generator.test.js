@@ -18,6 +18,8 @@ test("schema reference generator emits the key anchor lines developers need", ()
   assert.match(markdown, /growthForecasts\.revenueCagr3y/);
   assert.match(markdown, /\/v2\/fundamental\/per-share\/\{identifier\}/);
   assert.match(markdown, /manualOnly/);
+  assert.doesNotMatch(markdown, /sharesOnIssueDetailed/);
+  assert.doesNotMatch(markdown, /marketCapDetailed/);
 });
 
 test("schema reference generator fails fast when a required section would be empty", () => {

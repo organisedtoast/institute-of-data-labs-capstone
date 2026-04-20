@@ -1,3 +1,5 @@
+const { getResponsiveLabelMetadata } = require("../utils/responsiveLabelCatalog");
+
 // This catalog is the backend's checked-in copy of the workbook reference.
 // It gives the app one place to look for:
 // - which metrics exist
@@ -92,8 +94,6 @@ const ANNUAL_GROUP_FIELDS = {
   ],
   sharesAndMarketCap: [
     "changeInShares",
-    "sharesOnIssueDetailed",
-    "marketCapDetailed",
   ],
   valuationMultiples: [
     "evSalesTrailing",
@@ -204,8 +204,6 @@ const ANNUAL_FIELD_SOURCE_META = {
   "ownerEarningsBridge.deemedMaintenanceCapex": { sourceType: "derived", roicEndpoint: null },
   "ownerEarningsBridge.ownerEarnings": { sourceType: "derived", roicEndpoint: null },
   "sharesAndMarketCap.changeInShares": { sourceType: "derived", roicEndpoint: null },
-  "sharesAndMarketCap.sharesOnIssueDetailed": { sourceType: "roic", roicEndpoint: ROIC_ENDPOINTS.PER_SHARE },
-  "sharesAndMarketCap.marketCapDetailed": { sourceType: "derived", roicEndpoint: null },
   "valuationMultiples.evSalesTrailing": { sourceType: "derived", roicEndpoint: ROIC_ENDPOINTS.ENTERPRISE_VALUE },
   "valuationMultiples.ebitdaMarginTrailing": { sourceType: "derived", roicEndpoint: ROIC_ENDPOINTS.PROFITABILITY },
   "valuationMultiples.ebitMarginTrailing": { sourceType: "derived", roicEndpoint: ROIC_ENDPOINTS.PROFITABILITY },
@@ -279,7 +277,15 @@ function forecastFieldPath(bucket, metric) {
 }
 
 function displayField(fieldPath, label, section, surface, categories, order) {
-  return { fieldPath, label, section, surface, categories, order };
+  return {
+    fieldPath,
+    label,
+    section,
+    ...getResponsiveLabelMetadata({ label, section }),
+    surface,
+    categories,
+    order,
+  };
 }
 
 // Display rows mirror the workbook. Duplicates are allowed here because the
@@ -319,18 +325,13 @@ const DISPLAY_FIELD_DEFINITIONS = [
   displayField("annualData[].incomeStatement.capitalExpenditures", "Capital expenditures", "Income Statement", "detail", CATEGORY_SET.unprofitableOnly, 410),
   displayField("annualData[].incomeStatement.fcf", "FCF", "Income Statement", "detail", CATEGORY_SET.unprofitableOnly, 420),
 
-  displayField("annualData[].incomeStatement.ebitda", "EBITDA (bridge)", "Owner Earnings Bridge", "detail", CATEGORY_SET.allButLenders, 510),
-  displayField("annualData[].incomeStatement.netInterestExpense", "Net interest expense (bridge)", "Owner Earnings Bridge", "detail", CATEGORY_SET.allButLenders, 520),
-  displayField("annualData[].incomeStatement.incomeTaxExpense", "Income tax expense (bridge)", "Owner Earnings Bridge", "detail", CATEGORY_SET.allButLenders, 530),
   displayField("annualData[].ownerEarningsBridge.deemedMaintenanceCapex", "Deemed Maintenance Capex", "Owner Earnings Bridge", "detail", CATEGORY_SET.allButUnprofitableAndLenders, 540),
   displayField("annualData[].ownerEarningsBridge.ownerEarnings", "Owner earnings", "Owner Earnings Bridge", "detail", CATEGORY_SET.allButUnprofitableAndLenders, 550),
 
   displayField("annualData[].sharesAndMarketCap.changeInShares", "Change in shares", "Shares & Market Cap", "detail", CATEGORY_SET.unprofitableOnly, 610),
-  displayField("annualData[].sharesAndMarketCap.sharesOnIssueDetailed", "Shares on issue (detailed)", "Shares & Market Cap", "detail", CATEGORY_SET.all, 620),
   displayField("forecastData.fy1.sharesOnIssue", "Shares on issue forecast FY+1", "Shares & Market Cap", "detail", CATEGORY_SET.all, 630),
   displayField("forecastData.fy2.sharesOnIssue", "Shares on issue forecast FY+2", "Shares & Market Cap", "detail", CATEGORY_SET.all, 640),
   displayField("forecastData.fy3.sharesOnIssue", "Shares on issue forecast FY+3", "Shares & Market Cap", "detail", CATEGORY_SET.all, 650),
-  displayField("annualData[].sharesAndMarketCap.marketCapDetailed", "Market cap (detailed)", "Shares & Market Cap", "detail", CATEGORY_SET.all, 660),
   displayField("forecastData.fy1.marketCap", "Market cap FY+1", "Shares & Market Cap", "detail", CATEGORY_SET.all, 670),
   displayField("forecastData.fy2.marketCap", "Market cap FY+2", "Shares & Market Cap", "detail", CATEGORY_SET.all, 680),
   displayField("forecastData.fy3.marketCap", "Market cap FY+3", "Shares & Market Cap", "detail", CATEGORY_SET.all, 690),

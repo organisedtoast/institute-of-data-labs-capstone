@@ -32,8 +32,6 @@ function writeDerivedMetric(target, path, value, sourceOfTruth = "derived") {
 function recalculateAnnualDerived(annualEntry, olderAnnualEntry = null) {
   const sharePrice = getMetricEffectiveValue(annualEntry, "base.sharePrice");
   const sharesOnIssue = getMetricEffectiveValue(annualEntry, "base.sharesOnIssue");
-  const sharesOnIssueDetailed = getMetricEffectiveValue(annualEntry, "sharesAndMarketCap.sharesOnIssueDetailed")
-    ?? sharesOnIssue;
   const cash = getMetricEffectiveValue(annualEntry, "balanceSheet.cash");
   const nonCashInvestments = getMetricEffectiveValue(annualEntry, "balanceSheet.nonCashInvestments");
   const debt = getMetricEffectiveValue(annualEntry, "balanceSheet.debt");
@@ -50,8 +48,7 @@ function recalculateAnnualDerived(annualEntry, olderAnnualEntry = null) {
   const epsTrailing = getMetricEffectiveValue(annualEntry, "epsAndDividends.epsTrailing");
   const dpsTrailing = getMetricEffectiveValue(annualEntry, "epsAndDividends.dpsTrailing");
   const olderDetailedShares = olderAnnualEntry
-    ? getMetricEffectiveValue(olderAnnualEntry, "sharesAndMarketCap.sharesOnIssueDetailed")
-      ?? getMetricEffectiveValue(olderAnnualEntry, "base.sharesOnIssue")
+    ? getMetricEffectiveValue(olderAnnualEntry, "base.sharesOnIssue")
     : null;
 
   writeDerivedMetric(
@@ -139,16 +136,8 @@ function recalculateAnnualDerived(annualEntry, olderAnnualEntry = null) {
   writeDerivedMetric(
     annualEntry,
     "sharesAndMarketCap.changeInShares",
-    toFiniteNumber(sharesOnIssueDetailed) !== null && toFiniteNumber(olderDetailedShares) !== null
-      ? sharesOnIssueDetailed - olderDetailedShares
-      : null
-  );
-
-  writeDerivedMetric(
-    annualEntry,
-    "sharesAndMarketCap.marketCapDetailed",
-    toFiniteNumber(sharePrice) !== null && toFiniteNumber(sharesOnIssueDetailed) !== null
-      ? sharePrice * sharesOnIssueDetailed
+    toFiniteNumber(sharesOnIssue) !== null && toFiniteNumber(olderDetailedShares) !== null
+      ? sharesOnIssue - olderDetailedShares
       : null
   );
 

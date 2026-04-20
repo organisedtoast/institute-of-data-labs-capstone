@@ -6,7 +6,9 @@ const mongoose = require("mongoose");
 const lensFieldConfigSchema = new mongoose.Schema({
   fieldPath: { type: String, required: true },
   label: { type: String, required: true },
+  shortLabel: { type: String, required: true },
   section: { type: String, required: true },
+  shortSection: { type: String, required: true },
   order: { type: Number, required: true },
   surface: {
     type: String,

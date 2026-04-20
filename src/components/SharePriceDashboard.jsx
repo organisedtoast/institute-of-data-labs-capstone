@@ -7,6 +7,7 @@ import CardContent from '@mui/material/CardContent';
 import CircularProgress from '@mui/material/CircularProgress';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import { getShortLabel } from '../utils/responsiveLabelCatalog.js';
 import {
   buildRoundedChartScale,
   formatYAxisPrice,
@@ -31,6 +32,7 @@ const SCALE_CONTRACTION_DELAY_MS = 160;
 const SCALE_WINDOW_STEP_PX = 16;
 const PRESET_PAN_STEP_PX = 28;
 const Y_AXIS_LABEL_MIN_SPACING_PX = 32;
+const MOBILE_LABEL_BREAKPOINT_QUERY = '(max-width: 560px)';
 
 const PRESET_BUTTONS = [
   { key: 'MAX', label: 'MAX', monthCount: null },
@@ -332,6 +334,42 @@ function getJanuaryPositions(priceRows, minTime, timeRange, plotWidth) {
   return positions;
 }
 
+function useMediaQueryMatch(mediaQuery) {
+  const getMatches = () => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return false;
+    }
+
+    return window.matchMedia(mediaQuery).matches;
+  };
+
+  const [matches, setMatches] = useState(getMatches);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return undefined;
+    }
+
+    const mediaQueryList = window.matchMedia(mediaQuery);
+    const handleChange = (event) => {
+      setMatches((previousMatches) => {
+        return previousMatches === event.matches ? previousMatches : event.matches;
+      });
+    };
+
+    setMatches((previousMatches) => {
+      return previousMatches === mediaQueryList.matches ? previousMatches : mediaQueryList.matches;
+    });
+    mediaQueryList.addEventListener('change', handleChange);
+
+    return () => {
+      mediaQueryList.removeEventListener('change', handleChange);
+    };
+  }, [mediaQuery]);
+
+  return matches;
+}
+
 /**
  * This dashboard uses a custom SVG line chart because the table columns must line up with
  * exact dates on the chart timeline. For long MAX ranges we split the layout into:
@@ -388,8 +426,12 @@ export default function SharePriceDashboard({
     const controller = new AbortController();
 
     const loadDashboardData = async () => {
-      setIsLoading(true);
-      setError('');
+      setIsLoading((previousIsLoading) => {
+        return previousIsLoading ? previousIsLoading : true;
+      });
+      setError((previousError) => {
+        return previousError ? '' : previousError;
+      });
 
       try {
         const nextDashboardData = await fetchDashboardData(identifier, {
@@ -454,6 +496,7 @@ export default function SharePriceDashboard({
 
   const priceRows = dashboardData?.prices || [];
   const annualMetrics = dashboardData?.annualMetrics || [];
+  const shouldUseShortLabels = useMediaQueryMatch(MOBILE_LABEL_BREAKPOINT_QUERY);
   const activePresetConfig = PRESET_BUTTONS.find((preset) => preset.key === activePreset) || null;
   const minAvailableMonth = priceRows.length ? getMonthStringFromDate(priceRows[0].date) : '';
   const maxAvailableMonth = priceRows.length ? getMonthStringFromDate(priceRows[priceRows.length - 1].date) : '';
@@ -528,54 +571,58 @@ export default function SharePriceDashboard({
     });
   }, [annualMetrics, endBoundaryDate, isRangeValid, startBoundaryDate]);
 
-  const metricsConfig = useMemo(() => {
+  const dashboardFieldRows = useMemo(() => {
     return [
       {
-        key: 'stockPrice',
-        label: 'Average Price',
+        key: 'fiscalYearEndDate',
+        fieldPath: 'annualData[].fiscalYearEndDate',
+        label: 'FY end date',
+        shortLabel: getShortLabel('FY end date'),
+        isHeader: true,
+        formatter: (value, options = {}) => formatFiscalReleaseLabel(value, options.compact),
+      },
+      {
+        key: 'sharePrice',
+        fieldPath: 'annualData[].base.sharePrice',
+        label: 'Share price (at FY release date)',
+        shortLabel: getShortLabel('Share price (at FY release date)'),
         formatter: (value, options = {}) => (options.compact ? formatShortCurrency(value) : formatCurrency(value)),
       },
       {
-        key: 'sharesOutstanding',
-        label: 'Basic Weighted Avg Shares',
+        key: 'sharesOnIssue',
+        fieldPath: 'annualData[].base.sharesOnIssue',
+        label: 'Shares on issue',
+        shortLabel: getShortLabel('Shares on issue'),
         formatter: (value) => formatCompactNumber(value),
       },
       {
         key: 'marketCap',
-        label: 'Market Capitalization',
+        fieldPath: 'annualData[].base.marketCap',
+        label: 'Market cap',
+        shortLabel: getShortLabel('Market cap'),
         formatter: (value) => formatCurrency(value, { compact: true }),
-      },
-      {
-        key: 'returnOnInvestedCapital',
-        label: 'Return on Invested Capital',
-        formatter: (value, options = {}) => (options.compact ? formatCompactPercent(value) : formatPercent(value)),
       },
     ];
   }, []);
 
   const tableRowDefinitions = useMemo(() => {
-    return [
-      {
-        key: 'fy-end',
-        label: 'FY Earnings Release',
-        height: HEADER_ROW_HEIGHT,
-        backgroundColor: '#f8fafc',
-        borderTop: '1px solid #e2e8f0',
-        borderBottom: '2px solid #e2e8f0',
-        isHeader: true,
-      },
-      ...metricsConfig.map((metric, metricIndex) => ({
+    return dashboardFieldRows.map((metric, metricIndex) => ({
         key: metric.key,
         label: metric.label,
-        height: DATA_ROW_HEIGHT,
-        backgroundColor: metricIndex % 2 === 0 ? '#fafafa' : '#ffffff',
+        shortLabel: metric.shortLabel,
+        fieldPath: metric.fieldPath,
+        height: metric.isHeader ? HEADER_ROW_HEIGHT : DATA_ROW_HEIGHT,
+        backgroundColor: metric.isHeader ? '#f8fafc' : metricIndex % 2 === 1 ? '#fafafa' : '#ffffff',
         borderTop: 'none',
-        borderBottom: metricIndex < metricsConfig.length - 1 ? '1px solid #f1f5f9' : 'none',
-        isHeader: false,
+        borderBottom: metric.isHeader
+          ? '2px solid #e2e8f0'
+          : metricIndex < dashboardFieldRows.length - 1
+            ? '1px solid #f1f5f9'
+            : 'none',
+        isHeader: Boolean(metric.isHeader),
         formatter: metric.formatter,
-      })),
-    ];
-  }, [metricsConfig]);
+      }));
+  }, [dashboardFieldRows]);
 
   const columnDensity = useMemo(() => {
     return getColumnDensity(tablePoints.length);
@@ -588,7 +635,9 @@ export default function SharePriceDashboard({
   // MAX already gets readable spacing from its wider scrollable timeline. Narrow preset windows
   // do not have that extra width, so we switch to a compact presentation before the columns
   // become unreadable on mobile.
-  const fixedLeftRailWidth = isCompactPresetTable ? 136 : FIXED_LEFT_RAIL_WIDTH;
+  const fixedLeftRailWidth = isCompactPresetTable
+    ? (shouldUseShortLabels ? 112 : 136)
+    : (shouldUseShortLabels ? 132 : FIXED_LEFT_RAIL_WIDTH);
 
   const timelineLayout = useMemo(() => {
     if (isPresetWindowMode) {
@@ -674,10 +723,20 @@ export default function SharePriceDashboard({
         setIsPresetScrollReady(true);
       }
 
-      setScrollState({
-        containerWidth: measuredContainerWidth,
-        scrollLeft: nextScrollLeft,
-        viewportWidth: measuredViewportWidth,
+      setScrollState((previousScrollState) => {
+        if (
+          previousScrollState.containerWidth === measuredContainerWidth
+          && Math.abs(previousScrollState.scrollLeft - nextScrollLeft) <= 1
+          && previousScrollState.viewportWidth === measuredViewportWidth
+        ) {
+          return previousScrollState;
+        }
+
+        return {
+          containerWidth: measuredContainerWidth,
+          scrollLeft: nextScrollLeft,
+          viewportWidth: measuredViewportWidth,
+        };
       });
     };
 
@@ -1320,6 +1379,8 @@ export default function SharePriceDashboard({
                     }}
                   >
                     <Box
+                      title={shouldUseShortLabels ? tableRow.label : undefined}
+                      aria-label={tableRow.label}
                       sx={{
                         position: 'sticky',
                         left: 0,
@@ -1341,7 +1402,7 @@ export default function SharePriceDashboard({
                         textOverflow: 'ellipsis',
                       }}
                     >
-                      {tableRow.label}
+                      {shouldUseShortLabels ? tableRow.shortLabel : tableRow.label}
                     </Box>
 
                     <Box
@@ -1383,7 +1444,7 @@ export default function SharePriceDashboard({
                             }}
                           >
                             {tableRow.isHeader
-                              ? formatFiscalReleaseLabel(annualRow.fiscalYearEndDate, isCompactPresetTable)
+                              ? tableRow.formatter(annualRow[tableRow.key], { compact: isCompactPresetTable })
                               : tableRow.formatter(annualRow[tableRow.key], { compact: isCompactPresetTable })}
                           </Box>
                         );

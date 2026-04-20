@@ -116,7 +116,6 @@ test("live ROIC import populates grouped fields and preserves new override route
     assert.equal(typeof firstAnnualEntry.balanceSheet.cash, "object");
     assert.equal(typeof firstAnnualEntry.incomeStatement.revenue, "object");
     assert.equal(typeof firstAnnualEntry.ownerEarningsBridge.deemedMaintenanceCapex, "object");
-    assert.equal(typeof firstAnnualEntry.sharesAndMarketCap.sharesOnIssueDetailed, "object");
     assert.equal(typeof firstAnnualEntry.valuationMultiples.peTrailing, "object");
     assert.equal(typeof firstAnnualEntry.epsAndDividends.epsTrailing, "object");
 

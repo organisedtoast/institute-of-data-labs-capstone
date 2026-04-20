@@ -103,7 +103,8 @@ const watchlistStockSchema = new mongoose.Schema({
   sourceMeta: {
     lastImportedAt: { type: Date },
     lastRefreshAt: { type: Date },
-    importRangeYears: { type: Number, default: 10 },
+    importRangeYears: { type: Number, default: null },
+    importRangeYearsExplicit: { type: Boolean, default: false },
     roicEndpointsUsed: [String],
   },
   annualData: [annualDataSchema],
