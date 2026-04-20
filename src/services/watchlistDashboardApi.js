@@ -1,0 +1,90 @@
+import axios from 'axios';
+
+function getEffectiveValue(metricField) {
+  if (!metricField || typeof metricField !== 'object') {
+    return metricField ?? null;
+  }
+
+  if ('effectiveValue' in metricField) {
+    return metricField.effectiveValue ?? null;
+  }
+
+  return metricField;
+}
+
+function normalizePriceRows(pricePayload) {
+  const priceRows = Array.isArray(pricePayload?.prices) ? pricePayload.prices : [];
+
+  return priceRows
+    .map((priceRow) => {
+      const closeValue = Number(priceRow?.close);
+
+      if (typeof priceRow?.date !== 'string' || !Number.isFinite(closeValue)) {
+        return null;
+      }
+
+      return {
+        date: priceRow.date,
+        close: closeValue,
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeAnnualMetrics(stockDocument) {
+  const annualRows = Array.isArray(stockDocument?.annualData) ? stockDocument.annualData : [];
+
+  return annualRows
+    .map((annualRow) => {
+      const fiscalYear = Number(annualRow?.fiscalYear);
+
+      return {
+        fiscalYear: Number.isInteger(fiscalYear) ? fiscalYear : null,
+        fiscalYearEndDate:
+          typeof annualRow?.fiscalYearEndDate === 'string' ? annualRow.fiscalYearEndDate : null,
+        stockPrice: getEffectiveValue(annualRow?.base?.sharePrice),
+        sharesOutstanding: getEffectiveValue(annualRow?.base?.sharesOnIssue),
+        marketCap: getEffectiveValue(annualRow?.base?.marketCap),
+        returnOnInvestedCapital: getEffectiveValue(annualRow?.base?.returnOnInvestedCapital),
+      };
+    })
+    .sort((left, right) => {
+      const leftDate = left.fiscalYearEndDate || '';
+      const rightDate = right.fiscalYearEndDate || '';
+
+      return leftDate.localeCompare(rightDate);
+    });
+}
+
+export function buildDashboardPayload(stockDocument, pricePayload, identifier) {
+  const normalizedIdentifier = String(identifier || '').trim().toUpperCase();
+  const rawCompanyName =
+    stockDocument?.companyName?.effectiveValue ||
+    stockDocument?.companyName?.userValue ||
+    stockDocument?.companyName?.roicValue ||
+    normalizedIdentifier;
+  const companyName =
+    typeof rawCompanyName === 'string' && rawCompanyName.trim()
+      ? rawCompanyName.trim()
+      : normalizedIdentifier;
+
+  return {
+    identifier: normalizedIdentifier,
+    companyName,
+    priceCurrency: stockDocument?.priceCurrency || 'USD',
+    prices: normalizePriceRows(pricePayload),
+    annualMetrics: normalizeAnnualMetrics(stockDocument),
+  };
+}
+
+export async function fetchDashboardData(identifier, options = {}) {
+  const normalizedIdentifier = String(identifier || '').trim().toUpperCase();
+  const requestOptions = options.signal ? { signal: options.signal } : undefined;
+
+  const [stockResponse, priceResponse] = await Promise.all([
+    axios.get(`/api/watchlist/${normalizedIdentifier}`, requestOptions),
+    axios.get(`/api/stock-prices/${normalizedIdentifier}`, requestOptions),
+  ]);
+
+  return buildDashboardPayload(stockResponse.data, priceResponse.data, normalizedIdentifier);
+}
