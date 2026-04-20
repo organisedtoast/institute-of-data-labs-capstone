@@ -9,6 +9,7 @@ process.env.PORT = "3101";
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const { ANNUAL_HISTORY_FETCH_VERSION } = require("../services/normalizationService");
 
 const TEST_TICKER = "STUBLENS01";
 const TEST_CATEGORY = "Profitable Hi Growth";
@@ -29,6 +30,7 @@ const EXPECTED_ROIC_ENDPOINTS = [
   "/v2/fundamental/enterprise-value/{identifier}",
   "/v2/fundamental/multiples/{identifier}",
 ];
+const annualFetchCalls = [];
 
 function buildPerShareRows() {
   return [
@@ -133,14 +135,38 @@ const stubbedRoicService = {
       priceCurrency: "USD",
     };
   },
-  async fetchAnnualPerShare() { return buildPerShareRows(); },
-  async fetchAnnualProfitability() { return buildProfitabilityRows(); },
-  async fetchAnnualBalanceSheet() { return buildBalanceSheetRows(); },
-  async fetchAnnualIncomeStatement() { return buildIncomeStatementRows(); },
-  async fetchAnnualCashFlow() { return buildCashFlowRows(); },
-  async fetchAnnualCreditRatios() { return []; },
-  async fetchAnnualEnterpriseValue() { return []; },
-  async fetchAnnualMultiples() { return buildMultiplesRows(); },
+  async fetchAnnualPerShare(ticker, options) {
+    annualFetchCalls.push({ method: "fetchAnnualPerShare", ticker, options });
+    return buildPerShareRows();
+  },
+  async fetchAnnualProfitability(ticker, options) {
+    annualFetchCalls.push({ method: "fetchAnnualProfitability", ticker, options });
+    return buildProfitabilityRows();
+  },
+  async fetchAnnualBalanceSheet(ticker, options) {
+    annualFetchCalls.push({ method: "fetchAnnualBalanceSheet", ticker, options });
+    return buildBalanceSheetRows();
+  },
+  async fetchAnnualIncomeStatement(ticker, options) {
+    annualFetchCalls.push({ method: "fetchAnnualIncomeStatement", ticker, options });
+    return buildIncomeStatementRows();
+  },
+  async fetchAnnualCashFlow(ticker, options) {
+    annualFetchCalls.push({ method: "fetchAnnualCashFlow", ticker, options });
+    return buildCashFlowRows();
+  },
+  async fetchAnnualCreditRatios(ticker, options) {
+    annualFetchCalls.push({ method: "fetchAnnualCreditRatios", ticker, options });
+    return [];
+  },
+  async fetchAnnualEnterpriseValue(ticker, options) {
+    annualFetchCalls.push({ method: "fetchAnnualEnterpriseValue", ticker, options });
+    return [];
+  },
+  async fetchAnnualMultiples(ticker, options) {
+    annualFetchCalls.push({ method: "fetchAnnualMultiples", ticker, options });
+    return buildMultiplesRows();
+  },
   async fetchStockPrices() { return buildPriceRows(); },
   async fetchEarningsCalls() { return buildEarningsRows(); },
   async searchRoicByCompanyName() { return []; },
@@ -195,6 +221,7 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
   await startServer();
 
   try {
+    annualFetchCalls.length = 0;
     await deleteIfPresent();
 
     const importResponse = await requestJson("/api/watchlist/import", {
@@ -212,7 +239,13 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     assert.equal(importedDoc.tickerSymbol, TEST_TICKER);
     assert.equal(importedDoc.investmentCategory, TEST_CATEGORY);
     assert.equal(importedDoc.sourceMeta.importRangeYears, TEST_YEARS);
+    assert.equal(importedDoc.sourceMeta.annualHistoryFetchVersion, ANNUAL_HISTORY_FETCH_VERSION);
     assert.deepEqual(importedDoc.sourceMeta.roicEndpointsUsed, EXPECTED_ROIC_ENDPOINTS);
+    assert.equal(annualFetchCalls.length, 8);
+    annualFetchCalls.forEach((fetchCall) => {
+      assert.equal(fetchCall.ticker, TEST_TICKER);
+      assert.deepEqual(fetchCall.options, { years: TEST_YEARS });
+    });
     assert.equal(importedDoc.companyName.roicValue, "Stubbed Test Company");
     assert.equal(importedDoc.priceCurrency, "USD");
     assert.equal(importedDoc.annualData.length, TEST_YEARS);
@@ -296,6 +329,12 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
       method: "POST",
     });
     assert.equal(refreshResponse.status, 200, buildFailureMessage("Refresh imported ticker", refreshResponse));
+    assert.equal(refreshResponse.body.sourceMeta.annualHistoryFetchVersion, ANNUAL_HISTORY_FETCH_VERSION);
+    assert.equal(annualFetchCalls.length, 16);
+    annualFetchCalls.slice(8).forEach((fetchCall) => {
+      assert.equal(fetchCall.ticker, TEST_TICKER);
+      assert.deepEqual(fetchCall.options, { years: TEST_YEARS });
+    });
     assert.equal(refreshResponse.body.companyName.sourceOfTruth, "user");
     assert.equal(refreshResponse.body.annualData[0].base.sharePrice.sourceOfTruth, "user");
     assert.equal(refreshResponse.body.forecastData.fy1.sharesOnIssue.sourceOfTruth, "user");

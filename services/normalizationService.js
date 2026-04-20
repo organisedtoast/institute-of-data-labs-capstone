@@ -11,6 +11,8 @@ const { assignMetricValue, createMetricField } = require("../utils/metricField")
 const { recalculateDerived } = require("../utils/derivedCalc");
 const { selectPriceAfterAnchorDate } = require("../utils/priceSelector");
 
+const ANNUAL_HISTORY_FETCH_VERSION = 2;
+
 // Basic type guard used throughout the file when we expect a plain object.
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -697,6 +699,7 @@ function buildStockDocument({
       lastImportedAt: new Date(),
       importRangeYears: normalizedYearLimit,
       importRangeYearsExplicit: Boolean(importRangeYearsExplicit),
+      annualHistoryFetchVersion: ANNUAL_HISTORY_FETCH_VERSION,
       roicEndpointsUsed: ROIC_ENDPOINTS_USED,
     },
     annualData,
@@ -714,5 +717,6 @@ function buildStockDocument({
 }
 
 module.exports = {
+  ANNUAL_HISTORY_FETCH_VERSION,
   buildStockDocument,
 };

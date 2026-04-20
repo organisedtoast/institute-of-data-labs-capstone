@@ -193,6 +193,37 @@ function buildDashboardPayload(overrides = {}) {
   };
 }
 
+function buildLongHistoryDashboardPayload(overrides = {}) {
+  const prices = [];
+
+  for (let year = 1990; year <= 2025; year += 1) {
+    for (let month = 1; month <= 12; month += 1) {
+      prices.push({
+        date: `${year}-${String(month).padStart(2, '0')}-01`,
+        close: 60 + ((year - 1990) * 1.5) + (month / 10),
+      });
+    }
+  }
+
+  const annualMetrics = [];
+
+  for (let year = 1990; year <= 2025; year += 1) {
+    annualMetrics.push({
+      fiscalYear: year,
+      fiscalYearEndDate: `${year}-12-31`,
+      sharePrice: 90 + (year - 1990),
+      sharesOnIssue: 900000000 + ((year - 1990) * 1000000),
+      marketCap: 90000000000 + ((year - 1990) * 4000000000),
+    });
+  }
+
+  return buildDashboardPayload({
+    prices,
+    annualMetrics,
+    ...overrides,
+  });
+}
+
 function createDeferredResponse() {
   let resolveResponse;
 
@@ -611,6 +642,21 @@ describe('SharePriceDashboard preset scrolling', () => {
     expect(fiscalYearLabels[15]).toBe('2025-12');
   });
 
+  it('shows more than 20 annual columns when MAX is selected for long histories', async () => {
+    const { user } = await renderDashboard({
+      payload: buildLongHistoryDashboardPayload(),
+    });
+
+    await user.click(screen.getByRole('button', { name: 'MAX' }));
+    await flushDashboardWork();
+
+    const fiscalYearLabels = screen.getAllByText(/^\d{4}-12$/).map((node) => node.textContent);
+
+    expect(fiscalYearLabels).toHaveLength(36);
+    expect(fiscalYearLabels[0]).toBe('1990-12');
+    expect(fiscalYearLabels[35]).toBe('2025-12');
+  });
+
   it('populates older annual entries when a fixed-length preset is panned left', async () => {
     const {
       scrollController,
@@ -632,6 +678,32 @@ describe('SharePriceDashboard preset scrolling', () => {
 
     expect(screen.getByText('2013-12')).toBeTruthy();
     expect(screen.getByText('2023-12')).toBeTruthy();
+    expect(screen.queryByText('2025-12')).toBeNull();
+  });
+
+  it('lets fixed presets pan into years older than the 20th most recent annual row', async () => {
+    const {
+      scrollController,
+      scrollRegion,
+      user,
+    } = await renderDashboard({
+      payload: buildLongHistoryDashboardPayload(),
+    });
+
+    await user.click(screen.getByRole('button', { name: '10Y' }));
+    await flushDashboardWork();
+
+    expect(screen.getByText('2015-12')).toBeTruthy();
+    expect(screen.getByText('2025-12')).toBeTruthy();
+
+    await dragPresetWindowOlderByMonths({
+      scrollRegion,
+      scrollController,
+      monthCount: 180,
+    });
+
+    expect(screen.getByText('2000-12')).toBeTruthy();
+    expect(screen.getByText('2010-12')).toBeTruthy();
     expect(screen.queryByText('2025-12')).toBeNull();
   });
 

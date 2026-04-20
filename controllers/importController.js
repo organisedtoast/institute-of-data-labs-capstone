@@ -8,9 +8,9 @@ const normalize = require("../services/normalizationService");
 const WatchlistStock = require("../models/WatchlistStock");
 const { assertActiveLensName } = require("../services/lensService");
 
-async function fetchWithContext(label, fetcher, tickerSymbol) {
+async function fetchWithContext(label, fetcher, tickerSymbol, fetchOptions) {
   try {
-    return await fetcher(tickerSymbol);
+    return await fetcher(tickerSymbol, fetchOptions);
   } catch (error) {
     error.message = `ROIC ${label} fetch failed for ${tickerSymbol}: ${error.message}`;
     throw error;
@@ -24,6 +24,7 @@ async function importStock(req, res, next) {
       years,
       importRangeYearsExplicit,
     } = parseRequestedImportRangeYears(req.body.years);
+    const annualFetchOptions = { years };
 
     if (!tickerSymbol) {
       return res.status(400).json({ error: "tickerSymbol is required" });
@@ -51,16 +52,16 @@ async function importStock(req, res, next) {
       multiples,
     ] = await Promise.all([
       fetchWithContext("company profile", roicService.fetchCompanyProfile, tickerSymbol),
-      fetchWithContext("annual per-share", roicService.fetchAnnualPerShare, tickerSymbol),
-      fetchWithContext("annual profitability", roicService.fetchAnnualProfitability, tickerSymbol),
+      fetchWithContext("annual per-share", roicService.fetchAnnualPerShare, tickerSymbol, annualFetchOptions),
+      fetchWithContext("annual profitability", roicService.fetchAnnualProfitability, tickerSymbol, annualFetchOptions),
       fetchWithContext("historical prices", roicService.fetchStockPrices, tickerSymbol),
       fetchWithContext("earnings calls", roicService.fetchEarningsCalls, tickerSymbol),
-      fetchWithContext("annual income statement", roicService.fetchAnnualIncomeStatement, tickerSymbol),
-      fetchWithContext("annual balance sheet", roicService.fetchAnnualBalanceSheet, tickerSymbol),
-      fetchWithContext("annual cash flow", roicService.fetchAnnualCashFlow, tickerSymbol),
-      fetchWithContext("annual credit ratios", roicService.fetchAnnualCreditRatios, tickerSymbol),
-      fetchWithContext("annual enterprise value", roicService.fetchAnnualEnterpriseValue, tickerSymbol),
-      fetchWithContext("annual multiples", roicService.fetchAnnualMultiples, tickerSymbol),
+      fetchWithContext("annual income statement", roicService.fetchAnnualIncomeStatement, tickerSymbol, annualFetchOptions),
+      fetchWithContext("annual balance sheet", roicService.fetchAnnualBalanceSheet, tickerSymbol, annualFetchOptions),
+      fetchWithContext("annual cash flow", roicService.fetchAnnualCashFlow, tickerSymbol, annualFetchOptions),
+      fetchWithContext("annual credit ratios", roicService.fetchAnnualCreditRatios, tickerSymbol, annualFetchOptions),
+      fetchWithContext("annual enterprise value", roicService.fetchAnnualEnterpriseValue, tickerSymbol, annualFetchOptions),
+      fetchWithContext("annual multiples", roicService.fetchAnnualMultiples, tickerSymbol, annualFetchOptions),
     ]);
 
     const stockData = normalize.buildStockDocument({

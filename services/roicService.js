@@ -5,6 +5,7 @@ const API_KEY = process.env.ROIC_API_KEY;
 const COMPANY_NAME_SEARCH_URL = `${BASE_URL}/tickers/search/name`;
 const STOCK_PRICES_URL = `${BASE_URL}/stock-prices`;
 const MAX_SEARCH_RESULTS = 25;
+const DEFAULT_UNCAPPED_ANNUAL_LIMIT = 100;
 const MONTH_STRING_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 function buildMissingApiKeyError() {
@@ -92,12 +93,21 @@ function convertMonthStringToEndDate(monthString) {
   return `${monthString}-${String(lastDayOfMonth).padStart(2, "0")}`;
 }
 
-// Most annual ROIC endpoints share the same period/order/limit arguments, so
-// one helper keeps those fetchers consistent and easier to scan.
-async function fetchAnnualEndpoint(endpointPath, ticker) {
+// Most annual ROIC endpoints share the same period/order arguments. Uncapped
+// imports still send a large explicit limit because ROIC appears to default to
+// a much shorter annual history when the limit is omitted.
+async function fetchAnnualEndpoint(endpointPath, ticker, options = {}) {
+  const { years = null } = options;
+  const normalizedYearLimit = Number.isInteger(Number(years)) && Number(years) > 0
+    ? Number(years)
+    : DEFAULT_UNCAPPED_ANNUAL_LIMIT;
   const res = await axios.get(
     `${BASE_URL}${endpointPath}/${ticker}`,
-    requestConfig({ period: "annual", order: "DESC", limit: 20 })
+    requestConfig({
+      period: "annual",
+      order: "DESC",
+      ...(normalizedYearLimit !== null ? { limit: normalizedYearLimit } : {}),
+    })
   );
 
   return res.data;
@@ -115,44 +125,44 @@ async function fetchCompanyProfile(ticker) {
 
 // Per-share data currently feeds fiscal year end dates, share counts, EPS,
 // DPS, and tangible book value per share.
-async function fetchAnnualPerShare(ticker) {
-  return fetchAnnualEndpoint("/fundamental/per-share", ticker);
+async function fetchAnnualPerShare(ticker, options = {}) {
+  return fetchAnnualEndpoint("/fundamental/per-share", ticker, options);
 }
 
 // Profitability ratios feed ROIC plus several trailing margin-style metrics.
-async function fetchAnnualProfitability(ticker) {
-  return fetchAnnualEndpoint("/fundamental/ratios/profitability", ticker);
+async function fetchAnnualProfitability(ticker, options = {}) {
+  return fetchAnnualEndpoint("/fundamental/ratios/profitability", ticker, options);
 }
 
 // Income statement rows provide revenue, profitability, and expense lines.
-async function fetchAnnualIncomeStatement(ticker) {
-  return fetchAnnualEndpoint("/fundamental/income-statement", ticker);
+async function fetchAnnualIncomeStatement(ticker, options = {}) {
+  return fetchAnnualEndpoint("/fundamental/income-statement", ticker, options);
 }
 
 // Balance sheet rows provide cash, debt, assets, liabilities, and equity.
-async function fetchAnnualBalanceSheet(ticker) {
-  return fetchAnnualEndpoint("/fundamental/balance-sheet", ticker);
+async function fetchAnnualBalanceSheet(ticker, options = {}) {
+  return fetchAnnualEndpoint("/fundamental/balance-sheet", ticker, options);
 }
 
 // Cash flow rows provide capex and free-cash-flow style figures.
-async function fetchAnnualCashFlow(ticker) {
-  return fetchAnnualEndpoint("/fundamental/cash-flow", ticker);
+async function fetchAnnualCashFlow(ticker, options = {}) {
+  return fetchAnnualEndpoint("/fundamental/cash-flow", ticker, options);
 }
 
 // Credit ratios provide debt-to-EBITDA and interest-coverage style inputs.
-async function fetchAnnualCreditRatios(ticker) {
-  return fetchAnnualEndpoint("/fundamental/ratios/credit", ticker);
+async function fetchAnnualCreditRatios(ticker, options = {}) {
+  return fetchAnnualEndpoint("/fundamental/ratios/credit", ticker, options);
 }
 
 // Enterprise value rows can provide direct EV-related metrics, but the backend
 // still computes a fallback when those fields are absent.
-async function fetchAnnualEnterpriseValue(ticker) {
-  return fetchAnnualEndpoint("/fundamental/enterprise-value", ticker);
+async function fetchAnnualEnterpriseValue(ticker, options = {}) {
+  return fetchAnnualEndpoint("/fundamental/enterprise-value", ticker, options);
 }
 
 // Valuation multiples provide trailing PE and related valuation fields.
-async function fetchAnnualMultiples(ticker) {
-  return fetchAnnualEndpoint("/fundamental/multiples", ticker);
+async function fetchAnnualMultiples(ticker, options = {}) {
+  return fetchAnnualEndpoint("/fundamental/multiples", ticker, options);
 }
 
 // Historical stock prices are used to select the first trading day after the
@@ -207,4 +217,5 @@ module.exports = {
   fetchStockPrices,
   isValidMonthString,
   searchRoicByCompanyName,
+  DEFAULT_UNCAPPED_ANNUAL_LIMIT,
 };

@@ -17,6 +17,11 @@ function buildWatchlistStock(overrides = {}) {
       effectiveValue: 'Apple Inc.',
     },
     priceCurrency: 'USD',
+    sourceMeta: {
+      importRangeYears: null,
+      importRangeYearsExplicit: false,
+      annualHistoryFetchVersion: 2,
+    },
     annualData: [
       {
         fiscalYear: 2024,
@@ -188,5 +193,311 @@ describe('watchlistDashboardApi', () => {
     expect(axios.post).toHaveBeenCalledWith('/api/watchlist/AAPL/refresh', {}, { signal: abortSignal });
     expect(payload.annualMetrics).toHaveLength(3);
     expect(payload.annualMetrics[0].fiscalYear).toBe(2022);
+  });
+
+  it('refreshes uncapped stocks that are missing the annual-history fetch version', async () => {
+    const abortSignal = new AbortController().signal;
+    const legacyStockDocument = buildWatchlistStock({
+      sourceMeta: {
+        importRangeYears: null,
+        importRangeYearsExplicit: false,
+      },
+    });
+    const refreshedStockDocument = buildWatchlistStock({
+      sourceMeta: {
+        importRangeYears: null,
+        importRangeYearsExplicit: false,
+        annualHistoryFetchVersion: 2,
+      },
+    });
+
+    axios.get
+      .mockResolvedValueOnce({ data: legacyStockDocument })
+      .mockResolvedValueOnce({
+        data: {
+          prices: [{ date: '2024-01-02', close: 185.64 }],
+        },
+      });
+    axios.post.mockResolvedValueOnce({ data: refreshedStockDocument });
+
+    await fetchDashboardData('aapl', { signal: abortSignal });
+
+    expect(axios.post).toHaveBeenCalledWith('/api/watchlist/AAPL/refresh', {}, { signal: abortSignal });
+  });
+
+  it('refreshes uncapped 10-row watchlist stocks before building the dashboard payload', async () => {
+    const abortSignal = new AbortController().signal;
+    const uncappedTenYearStock = buildWatchlistStock({
+      sourceMeta: {
+        importRangeYears: null,
+        importRangeYearsExplicit: false,
+        annualHistoryFetchVersion: 1,
+      },
+      annualData: Array.from({ length: 10 }, (_, index) => {
+        const fiscalYear = 2025 - index;
+
+        return {
+          fiscalYear,
+          fiscalYearEndDate: `${fiscalYear}-12-31`,
+          base: {
+            sharePrice: { effectiveValue: 100 + index },
+            sharesOnIssue: { effectiveValue: 1000000000 + index },
+            marketCap: { effectiveValue: 100000000000 + index },
+          },
+        };
+      }),
+    });
+    const refreshedStockDocument = buildWatchlistStock({
+      sourceMeta: {
+        importRangeYears: null,
+        importRangeYearsExplicit: false,
+        annualHistoryFetchVersion: 2,
+      },
+      annualData: Array.from({ length: 22 }, (_, index) => {
+        const fiscalYear = 2025 - index;
+
+        return {
+          fiscalYear,
+          fiscalYearEndDate: `${fiscalYear}-12-31`,
+          base: {
+            sharePrice: { effectiveValue: 100 + index },
+            sharesOnIssue: { effectiveValue: 1000000000 + index },
+            marketCap: { effectiveValue: 100000000000 + index },
+          },
+        };
+      }),
+    });
+
+    axios.get
+      .mockResolvedValueOnce({ data: uncappedTenYearStock })
+      .mockResolvedValueOnce({
+        data: {
+          prices: [{ date: '2024-01-02', close: 185.64 }],
+        },
+      });
+    axios.post.mockResolvedValueOnce({ data: refreshedStockDocument });
+
+    const payload = await fetchDashboardData('aapl', { signal: abortSignal });
+
+    expect(axios.post).toHaveBeenCalledWith('/api/watchlist/AAPL/refresh', {}, { signal: abortSignal });
+    expect(payload.annualMetrics).toHaveLength(22);
+    expect(payload.annualMetrics[0].fiscalYear).toBe(2004);
+    expect(payload.annualMetrics[21].fiscalYear).toBe(2025);
+  });
+
+  it('refreshes uncapped 20-row watchlist stocks before building the dashboard payload', async () => {
+    const abortSignal = new AbortController().signal;
+    const uncappedTwentyYearStock = buildWatchlistStock({
+      sourceMeta: {
+        importRangeYears: null,
+        importRangeYearsExplicit: false,
+        annualHistoryFetchVersion: 1,
+      },
+      annualData: Array.from({ length: 20 }, (_, index) => {
+        const fiscalYear = 2025 - index;
+
+        return {
+          fiscalYear,
+          fiscalYearEndDate: `${fiscalYear}-12-31`,
+          base: {
+            sharePrice: { effectiveValue: 100 + index },
+            sharesOnIssue: { effectiveValue: 1000000000 + index },
+            marketCap: { effectiveValue: 100000000000 + index },
+          },
+        };
+      }),
+    });
+    const refreshedStockDocument = buildWatchlistStock({
+      sourceMeta: {
+        importRangeYears: null,
+        importRangeYearsExplicit: false,
+        annualHistoryFetchVersion: 2,
+      },
+      annualData: Array.from({ length: 22 }, (_, index) => {
+        const fiscalYear = 2025 - index;
+
+        return {
+          fiscalYear,
+          fiscalYearEndDate: `${fiscalYear}-12-31`,
+          base: {
+            sharePrice: { effectiveValue: 100 + index },
+            sharesOnIssue: { effectiveValue: 1000000000 + index },
+            marketCap: { effectiveValue: 100000000000 + index },
+          },
+        };
+      }),
+    });
+
+    axios.get
+      .mockResolvedValueOnce({ data: uncappedTwentyYearStock })
+      .mockResolvedValueOnce({
+        data: {
+          prices: [{ date: '2024-01-02', close: 185.64 }],
+        },
+      });
+    axios.post.mockResolvedValueOnce({ data: refreshedStockDocument });
+
+    const payload = await fetchDashboardData('aapl', { signal: abortSignal });
+
+    expect(axios.post).toHaveBeenCalledWith('/api/watchlist/AAPL/refresh', {}, { signal: abortSignal });
+    expect(payload.annualMetrics).toHaveLength(22);
+    expect(payload.annualMetrics[0].fiscalYear).toBe(2004);
+    expect(payload.annualMetrics[21].fiscalYear).toBe(2025);
+  });
+
+  it('does not refresh versioned uncapped watchlist stocks that already use the new fetch contract', async () => {
+    const abortSignal = new AbortController().signal;
+    const upgradedStock = buildWatchlistStock({
+      sourceMeta: {
+        importRangeYears: null,
+        importRangeYearsExplicit: false,
+        annualHistoryFetchVersion: 2,
+      },
+      annualData: Array.from({ length: 22 }, (_, index) => {
+        const fiscalYear = 2025 - index;
+
+        return {
+          fiscalYear,
+          fiscalYearEndDate: `${fiscalYear}-12-31`,
+          base: {
+            sharePrice: { effectiveValue: 100 + index },
+            sharesOnIssue: { effectiveValue: 1000000000 + index },
+            marketCap: { effectiveValue: 100000000000 + index },
+          },
+        };
+      }),
+    });
+
+    axios.get
+      .mockResolvedValueOnce({ data: upgradedStock })
+      .mockResolvedValueOnce({
+        data: {
+          prices: [{ date: '2024-01-02', close: 185.64 }],
+        },
+      });
+
+    const payload = await fetchDashboardData('aapl', { signal: abortSignal });
+
+    expect(axios.post).not.toHaveBeenCalled();
+    expect(payload.annualMetrics).toHaveLength(22);
+    expect(payload.annualMetrics[0].fiscalYear).toBe(2004);
+    expect(payload.annualMetrics[21].fiscalYear).toBe(2025);
+  });
+
+  it('does not refresh versioned uncapped short-history watchlist stocks', async () => {
+    const abortSignal = new AbortController().signal;
+    const upgradedShortHistoryStock = buildWatchlistStock({
+      sourceMeta: {
+        importRangeYears: null,
+        importRangeYearsExplicit: false,
+        annualHistoryFetchVersion: 2,
+      },
+      annualData: Array.from({ length: 10 }, (_, index) => {
+        const fiscalYear = 2025 - index;
+
+        return {
+          fiscalYear,
+          fiscalYearEndDate: `${fiscalYear}-12-31`,
+          base: {
+            sharePrice: { effectiveValue: 100 + index },
+            sharesOnIssue: { effectiveValue: 1000000000 + index },
+            marketCap: { effectiveValue: 100000000000 + index },
+          },
+        };
+      }),
+    });
+
+    axios.get
+      .mockResolvedValueOnce({ data: upgradedShortHistoryStock })
+      .mockResolvedValueOnce({
+        data: {
+          prices: [{ date: '2024-01-02', close: 185.64 }],
+        },
+      });
+
+    const payload = await fetchDashboardData('aapl', { signal: abortSignal });
+
+    expect(axios.post).not.toHaveBeenCalled();
+    expect(payload.annualMetrics).toHaveLength(10);
+    expect(payload.annualMetrics[0].fiscalYear).toBe(2016);
+    expect(payload.annualMetrics[9].fiscalYear).toBe(2025);
+  });
+
+  it('does not refresh explicitly capped 20-row watchlist stocks', async () => {
+    const abortSignal = new AbortController().signal;
+    const explicitTwentyYearStock = buildWatchlistStock({
+      sourceMeta: {
+        importRangeYears: 20,
+        importRangeYearsExplicit: true,
+        annualHistoryFetchVersion: 2,
+      },
+      annualData: Array.from({ length: 20 }, (_, index) => {
+        const fiscalYear = 2025 - index;
+
+        return {
+          fiscalYear,
+          fiscalYearEndDate: `${fiscalYear}-12-31`,
+          base: {
+            sharePrice: { effectiveValue: 100 + index },
+            sharesOnIssue: { effectiveValue: 1000000000 + index },
+            marketCap: { effectiveValue: 100000000000 + index },
+          },
+        };
+      }),
+    });
+
+    axios.get
+      .mockResolvedValueOnce({ data: explicitTwentyYearStock })
+      .mockResolvedValueOnce({
+        data: {
+          prices: [{ date: '2024-01-02', close: 185.64 }],
+        },
+      });
+
+    const payload = await fetchDashboardData('aapl', { signal: abortSignal });
+
+    expect(axios.post).not.toHaveBeenCalled();
+    expect(payload.annualMetrics).toHaveLength(20);
+    expect(payload.annualMetrics[0].fiscalYear).toBe(2006);
+    expect(payload.annualMetrics[19].fiscalYear).toBe(2025);
+  });
+
+  it('does not refresh explicitly capped 10-row watchlist stocks', async () => {
+    const abortSignal = new AbortController().signal;
+    const explicitTenYearStock = buildWatchlistStock({
+      sourceMeta: {
+        importRangeYears: 10,
+        importRangeYearsExplicit: true,
+        annualHistoryFetchVersion: 2,
+      },
+      annualData: Array.from({ length: 10 }, (_, index) => {
+        const fiscalYear = 2025 - index;
+
+        return {
+          fiscalYear,
+          fiscalYearEndDate: `${fiscalYear}-12-31`,
+          base: {
+            sharePrice: { effectiveValue: 100 + index },
+            sharesOnIssue: { effectiveValue: 1000000000 + index },
+            marketCap: { effectiveValue: 100000000000 + index },
+          },
+        };
+      }),
+    });
+
+    axios.get
+      .mockResolvedValueOnce({ data: explicitTenYearStock })
+      .mockResolvedValueOnce({
+        data: {
+          prices: [{ date: '2024-01-02', close: 185.64 }],
+        },
+      });
+
+    const payload = await fetchDashboardData('aapl', { signal: abortSignal });
+
+    expect(axios.post).not.toHaveBeenCalled();
+    expect(payload.annualMetrics).toHaveLength(10);
+    expect(payload.annualMetrics[0].fiscalYear).toBe(2016);
+    expect(payload.annualMetrics[9].fiscalYear).toBe(2025);
   });
 });

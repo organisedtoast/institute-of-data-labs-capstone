@@ -9,9 +9,9 @@ const WatchlistStock = require("../models/WatchlistStock");
 const { recalculateDerived } = require("../utils/derivedCalc");
 const { mergeAnnualEntry } = require("../services/stockMergeService");
 
-async function fetchWithContext(label, fetcher, tickerSymbol) {
+async function fetchWithContext(label, fetcher, tickerSymbol, fetchOptions) {
   try {
-    return await fetcher(tickerSymbol);
+    return await fetcher(tickerSymbol, fetchOptions);
   } catch (error) {
     error.message = `ROIC ${label} fetch failed for ${tickerSymbol}: ${error.message}`;
     throw error;
@@ -30,6 +30,7 @@ async function refreshStock(req, res, next) {
       years,
       importRangeYearsExplicit,
     } = resolveStoredImportRange(stock.sourceMeta);
+    const annualFetchOptions = { years };
 
     const [
       profile,
@@ -45,16 +46,16 @@ async function refreshStock(req, res, next) {
       multiples,
     ] = await Promise.all([
       fetchWithContext("company profile", roicService.fetchCompanyProfile, ticker),
-      fetchWithContext("annual per-share", roicService.fetchAnnualPerShare, ticker),
-      fetchWithContext("annual profitability", roicService.fetchAnnualProfitability, ticker),
+      fetchWithContext("annual per-share", roicService.fetchAnnualPerShare, ticker, annualFetchOptions),
+      fetchWithContext("annual profitability", roicService.fetchAnnualProfitability, ticker, annualFetchOptions),
       fetchWithContext("historical prices", roicService.fetchStockPrices, ticker),
       fetchWithContext("earnings calls", roicService.fetchEarningsCalls, ticker),
-      fetchWithContext("annual income statement", roicService.fetchAnnualIncomeStatement, ticker),
-      fetchWithContext("annual balance sheet", roicService.fetchAnnualBalanceSheet, ticker),
-      fetchWithContext("annual cash flow", roicService.fetchAnnualCashFlow, ticker),
-      fetchWithContext("annual credit ratios", roicService.fetchAnnualCreditRatios, ticker),
-      fetchWithContext("annual enterprise value", roicService.fetchAnnualEnterpriseValue, ticker),
-      fetchWithContext("annual multiples", roicService.fetchAnnualMultiples, ticker),
+      fetchWithContext("annual income statement", roicService.fetchAnnualIncomeStatement, ticker, annualFetchOptions),
+      fetchWithContext("annual balance sheet", roicService.fetchAnnualBalanceSheet, ticker, annualFetchOptions),
+      fetchWithContext("annual cash flow", roicService.fetchAnnualCashFlow, ticker, annualFetchOptions),
+      fetchWithContext("annual credit ratios", roicService.fetchAnnualCreditRatios, ticker, annualFetchOptions),
+      fetchWithContext("annual enterprise value", roicService.fetchAnnualEnterpriseValue, ticker, annualFetchOptions),
+      fetchWithContext("annual multiples", roicService.fetchAnnualMultiples, ticker, annualFetchOptions),
     ]);
 
     const freshData = normalize.buildStockDocument({
@@ -84,6 +85,7 @@ async function refreshStock(req, res, next) {
     stock.priceCurrency = freshData.priceCurrency;
     stock.sourceMeta.importRangeYears = freshData.sourceMeta.importRangeYears;
     stock.sourceMeta.importRangeYearsExplicit = freshData.sourceMeta.importRangeYearsExplicit;
+    stock.sourceMeta.annualHistoryFetchVersion = freshData.sourceMeta.annualHistoryFetchVersion;
     stock.sourceMeta.roicEndpointsUsed = freshData.sourceMeta.roicEndpointsUsed;
 
     for (const freshYear of freshData.annualData) {

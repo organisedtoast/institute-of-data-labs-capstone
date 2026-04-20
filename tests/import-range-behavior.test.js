@@ -5,7 +5,10 @@ const {
   parseRequestedImportRangeYears,
   resolveStoredImportRange,
 } = require("../services/importRangeService");
-const { buildStockDocument } = require("../services/normalizationService");
+const {
+  ANNUAL_HISTORY_FETCH_VERSION,
+  buildStockDocument,
+} = require("../services/normalizationService");
 
 function buildAnnualRows(startYear, endYear) {
   return Array.from({ length: endYear - startYear + 1 }, (_, index) => {
@@ -73,6 +76,7 @@ test("buildStockDocument keeps all available annual rows when years is omitted",
 
   assert.equal(stockDocument.sourceMeta.importRangeYears, null);
   assert.equal(stockDocument.sourceMeta.importRangeYearsExplicit, false);
+  assert.equal(stockDocument.sourceMeta.annualHistoryFetchVersion, ANNUAL_HISTORY_FETCH_VERSION);
   assert.equal(stockDocument.annualData.length, 16);
   assert.equal(stockDocument.annualData[0].fiscalYear, 2025);
   assert.equal(stockDocument.annualData.at(-1).fiscalYear, 2010);
@@ -86,6 +90,7 @@ test("buildStockDocument limits annual rows when an explicit cap is provided", (
 
   assert.equal(stockDocument.sourceMeta.importRangeYears, 5);
   assert.equal(stockDocument.sourceMeta.importRangeYearsExplicit, true);
+  assert.equal(stockDocument.sourceMeta.annualHistoryFetchVersion, ANNUAL_HISTORY_FETCH_VERSION);
   assert.equal(stockDocument.annualData.length, 5);
   assert.equal(stockDocument.annualData[0].fiscalYear, 2025);
   assert.equal(stockDocument.annualData.at(-1).fiscalYear, 2021);

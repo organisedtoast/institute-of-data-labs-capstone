@@ -1,5 +1,7 @@
 import axios from 'axios';
 
+const ANNUAL_HISTORY_FETCH_VERSION = 2;
+
 function getEffectiveValue(metricField) {
   if (!metricField || typeof metricField !== 'object') {
     return metricField ?? null;
@@ -58,8 +60,22 @@ function normalizeAnnualMetrics(stockDocument) {
 function shouldUpgradeLegacyAnnualHistory(stockDocument) {
   const importRangeYears = stockDocument?.sourceMeta?.importRangeYears;
   const importRangeYearsExplicit = stockDocument?.sourceMeta?.importRangeYearsExplicit === true;
+  const annualHistoryFetchVersion = Number(stockDocument?.sourceMeta?.annualHistoryFetchVersion);
+  const annualRowCount = Array.isArray(stockDocument?.annualData) ? stockDocument.annualData.length : 0;
+  const needsVersionUpgrade =
+    !Number.isInteger(annualHistoryFetchVersion) ||
+    annualHistoryFetchVersion < ANNUAL_HISTORY_FETCH_VERSION;
+  const hasLegacyTruncatedUncappedHistory =
+    importRangeYears == null && (annualRowCount === 10 || annualRowCount === 20);
 
-  return importRangeYears === 10 && !importRangeYearsExplicit;
+  if (importRangeYearsExplicit) {
+    return false;
+  }
+
+  return needsVersionUpgrade || (
+    hasLegacyTruncatedUncappedHistory &&
+    annualHistoryFetchVersion !== ANNUAL_HISTORY_FETCH_VERSION
+  );
 }
 
 export function buildDashboardPayload(stockDocument, pricePayload, identifier) {
