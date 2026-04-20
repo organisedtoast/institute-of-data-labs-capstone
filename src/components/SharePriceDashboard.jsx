@@ -345,7 +345,7 @@ function useMediaQueryMatch(mediaQuery) {
 
   const [matches, setMatches] = useState(getMatches);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
       return undefined;
     }
@@ -383,6 +383,7 @@ export default function SharePriceDashboard({
   name,
   isRemovable = false,
   onRemove = null,
+  scaleAnimationDurationMs = null,
 }) {
   const svgRef = useRef(null);
   const timelineScrollRef = useRef(null);
@@ -918,13 +919,34 @@ export default function SharePriceDashboard({
       return undefined;
     }
 
+    const shouldDisableScaleAnimation =
+      scaleAnimationDurationMs !== null
+      && scaleAnimationDurationMs !== undefined
+      && scaleAnimationDurationMs <= 0;
+
+    if (shouldDisableScaleAnimation) {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+
+      if (contractionTimeoutRef.current) {
+        clearTimeout(contractionTimeoutRef.current);
+        contractionTimeoutRef.current = null;
+      }
+
+      setRenderedScale(targetChartScale);
+      renderedScaleRef.current = targetChartScale;
+      return undefined;
+    }
+
     const isExpandingDown = targetChartScale.minPrice < currentScale.minPrice;
     const isExpandingUp = targetChartScale.maxPrice > currentScale.maxPrice;
     const shouldExpandImmediately = isExpandingDown || isExpandingUp;
     const transitionDelay = shouldExpandImmediately ? 0 : SCALE_CONTRACTION_DELAY_MS;
     const transitionDuration = shouldExpandImmediately
-      ? SCALE_EXPANSION_DURATION_MS
-      : SCALE_CONTRACTION_DURATION_MS;
+      ? (scaleAnimationDurationMs ?? SCALE_EXPANSION_DURATION_MS)
+      : (scaleAnimationDurationMs ?? SCALE_CONTRACTION_DURATION_MS);
 
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
@@ -976,7 +998,7 @@ export default function SharePriceDashboard({
         contractionTimeoutRef.current = null;
       }
     };
-  }, [filteredPriceRows.length, preferredYAxisTickCount, targetChartScale]);
+  }, [filteredPriceRows.length, preferredYAxisTickCount, scaleAnimationDurationMs, targetChartScale]);
 
   const chartGeometry = useMemo(() => {
     if (!filteredPriceRows.length) {

@@ -125,7 +125,6 @@ vi.mock('@mui/material/TextField', () => ({
 
 const PRESET_SCROLL_STEP_PX = 28;
 const DASHBOARD_TEST_ID = 'share-price-dashboard-scroll-region';
-const DASHBOARD_SETTLE_TIME_MS = 550;
 
 let originalRequestAnimationFrame;
 let originalCancelAnimationFrame;
@@ -258,6 +257,9 @@ async function configureScrollRegion(scrollRegion, clientWidth = 920) {
 
   await act(async () => {
     window.dispatchEvent(new Event('resize'));
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, 0);
+    });
   });
 
   return {
@@ -295,9 +297,9 @@ function getCloseRangeForMonths(priceRows, startMonth, endMonth) {
   };
 }
 
-// The dashboard animates its chart scale after loading data or changing ranges.
-// Waiting for one short settle window is enough for the mocked payload plus the
-// chart animation to finish before we assert on the visible month values.
+// The dashboard still has async data loading, passive effects, and a preset
+// bootstrap rAF. Once scale animation is disabled through the injected prop,
+// one short macrotask turn plus surrounding microtasks is enough to settle it.
 async function flushDashboardWork() {
   await act(async () => {
     await Promise.resolve();
@@ -305,7 +307,7 @@ async function flushDashboardWork() {
 
   await act(async () => {
     await new Promise((resolve) => {
-      window.setTimeout(resolve, DASHBOARD_SETTLE_TIME_MS);
+      window.setTimeout(resolve, 0);
     });
   });
 
@@ -352,6 +354,7 @@ async function renderDashboard(options = {}) {
     <SharePriceDashboard
       identifier={identifier}
       name={name}
+      scaleAnimationDurationMs={0}
     />,
   );
 
@@ -360,6 +363,8 @@ async function renderDashboard(options = {}) {
 
   await act(async () => {
     deferredResponse.resolveResponse(payload);
+    await deferredResponse.responsePromise;
+    await Promise.resolve();
   });
 
   await flushDashboardWork();
@@ -427,14 +432,11 @@ describe('SharePriceDashboard preset scrolling', () => {
       };
     };
 
-    // Passing a future timestamp makes each chart-scale animation finish in one
-    // frame, which keeps the component responsive in tests without changing app code.
     window.requestAnimationFrame = (callback) => {
       const handle = window.setTimeout(() => {
         pendingAnimationFrameHandles.delete(handle);
-        callback(window.performance.now() + DASHBOARD_SETTLE_TIME_MS);
+        callback(window.performance.now());
       }, 0);
-
       pendingAnimationFrameHandles.add(handle);
       return handle;
     };
