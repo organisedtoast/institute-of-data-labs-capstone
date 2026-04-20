@@ -11,10 +11,13 @@ const { assignMetricValue, createMetricField } = require("../utils/metricField")
 const { recalculateDerived } = require("../utils/derivedCalc");
 const { selectPriceAfterAnchorDate } = require("../utils/priceSelector");
 
+// Basic type guard used throughout the file when we expect a plain object.
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+// Converts incoming values into numbers where possible so later calculations
+// can work with a consistent data type.
 function coerceNumber(value) {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -37,6 +40,7 @@ function coerceNumber(value) {
   return null;
 }
 
+// Normalizes simple values by turning empty inputs into null.
 function coerceScalar(value) {
   if (value === undefined || value === null || value === "") {
     return null;
@@ -45,6 +49,7 @@ function coerceScalar(value) {
   return value;
 }
 
+// Standardizes many possible date inputs into YYYY-MM-DD format.
 function normalizeDateString(value) {
   if (value === undefined || value === null || value === "") {
     return null;
@@ -70,6 +75,7 @@ function normalizeDateString(value) {
   return parsed.toISOString().slice(0, 10);
 }
 
+// Adds a number of days to a normalized date string.
 function addDaysToDateString(dateString, daysToAdd) {
   const normalizedDate = normalizeDateString(dateString);
   if (!normalizedDate) {
@@ -85,6 +91,8 @@ function addDaysToDateString(dateString, daysToAdd) {
   return parsed.toISOString().slice(0, 10);
 }
 
+// Checks several possible field names and returns the first usable value.
+// This helps us support slightly different API response shapes.
 function pickFirstDefined(source, keys) {
   if (!isObject(source)) {
     return undefined;
@@ -100,6 +108,7 @@ function pickFirstDefined(source, keys) {
   return undefined;
 }
 
+// Pulls annual-report rows out of whichever wrapper shape the payload uses.
 function extractAnnualRows(payload) {
   if (Array.isArray(payload)) {
     return payload;
@@ -125,6 +134,7 @@ function extractAnnualRows(payload) {
   return [];
 }
 
+// Pulls price-history rows out of the payload.
 function extractPriceRows(payload) {
   if (Array.isArray(payload)) {
     return payload;
@@ -150,6 +160,7 @@ function extractPriceRows(payload) {
   return [];
 }
 
+// Pulls earnings-call rows out of the payload.
 function extractEarningsRows(payload) {
   if (Array.isArray(payload)) {
     return payload;
@@ -175,6 +186,7 @@ function extractEarningsRows(payload) {
   return [];
 }
 
+// Reads the fiscal year from a row, even when the source uses different names.
 function getFiscalYear(row) {
   const rawYear = pickFirstDefined(row, [
     "fiscalYear",
@@ -190,6 +202,7 @@ function getFiscalYear(row) {
   return Number.isInteger(numericYear) ? numericYear : null;
 }
 
+// Finds the row's year-end date and normalizes it.
 function getFiscalYearEndDate(row) {
   const rawDate = pickFirstDefined(row, [
     "fiscalYearEndDate",
@@ -204,6 +217,7 @@ function getFiscalYearEndDate(row) {
   return normalizeDateString(rawDate);
 }
 
+// Reads basic company profile fields from alternative possible keys.
 function getCompanyName(profile) {
   return coerceScalar(pickFirstDefined(profile, [
     "companyName",
@@ -224,6 +238,7 @@ function getPriceCurrency(profile) {
   ]));
 }
 
+// Converts raw price data into a clean, sorted list of { date, close } entries.
 function normalizePriceHistory(pricesPayload) {
   const rows = extractPriceRows(pricesPayload);
 
@@ -236,6 +251,8 @@ function normalizePriceHistory(pricesPayload) {
     .sort((left, right) => left.date.localeCompare(right.date));
 }
 
+// Converts raw earnings-call data into a clean, sorted list that we can
+// use to estimate when yearly results were released to the market.
 function normalizeEarningsCalls(earningsPayload) {
   const rows = extractEarningsRows(earningsPayload);
 
@@ -256,6 +273,9 @@ function normalizeEarningsCalls(earningsPayload) {
     .sort((left, right) => left.date.localeCompare(right.date));
 }
 
+// Chooses the best earnings release date for a fiscal year.
+// Prefer a real earnings-call date after year-end, otherwise fall back to
+// an estimate around 90 days later.
 function selectEarningsReleaseDate({ fiscalYearEndDate, normalizedCalls }) {
   if (fiscalYearEndDate) {
     const matchAfterYearEnd = normalizedCalls.find((call) => call.date >= fiscalYearEndDate);
@@ -267,6 +287,8 @@ function selectEarningsReleaseDate({ fiscalYearEndDate, normalizedCalls }) {
   return addDaysToDateString(fiscalYearEndDate, 90);
 }
 
+// The helpers below each read one business metric from a row.
+// They exist because different data sources often name the same concept differently.
 function getSharesOnIssue(row) {
   return coerceNumber(pickFirstDefined(row, [
     "bs_sh_out",
@@ -302,6 +324,7 @@ function getCash(row) {
   ]));
 }
 
+// Adds together several numeric fields when a value is spread across columns.
 function sumCandidateNumbers(row, keys) {
   const numericValues = keys
     .map((key) => coerceNumber(row?.[key]))
@@ -314,6 +337,8 @@ function sumCandidateNumbers(row, keys) {
   return numericValues.reduce((sum, value) => sum + value, 0);
 }
 
+// Debt may be provided directly or split into short-term and long-term debt,
+// so we support both cases here.
 function getDebt(row) {
   return coerceNumber(pickFirstDefined(row, [
     "short_and_long_term_debt",
@@ -439,6 +464,8 @@ function getCapitalExpenditures(row) {
   ]));
 }
 
+// Free cash flow may come directly from the source, or we derive it from
+// operating cash flow minus capex when needed.
 function getFreeCashFlow(row) {
   const directValue = coerceNumber(pickFirstDefined(row, [
     "free_cash_flow",
@@ -501,10 +528,12 @@ function getDpsTrailing(perShareRow) {
   ]));
 }
 
+// Sorts fiscal years newest to oldest so the most recent history comes first.
 function sortYearsDescending(years) {
   return [...years].sort((left, right) => right - left);
 }
 
+// Builds a quick lookup table of annual rows by fiscal year.
 function buildYearMap(rows) {
   const map = new Map();
   for (const row of extractAnnualRows(rows)) {
@@ -517,6 +546,8 @@ function buildYearMap(rows) {
   return map;
 }
 
+// Writes a metric into the nested stock-document structure while also
+// preserving metadata about where the value came from.
 function setMetric(target, path, value, sourceOfTruth = "roic") {
   const parts = path.split(".");
   let current = target;
@@ -527,6 +558,8 @@ function setMetric(target, path, value, sourceOfTruth = "roic") {
   assignMetricValue(current[parts[parts.length - 1]], value, sourceOfTruth);
 }
 
+// Builds one normalized annual record by combining related rows from
+// several source datasets into the app's standard schema.
 function buildAnnualEntry({
   fiscalYear,
   fiscalYearEndDate,
@@ -577,6 +610,9 @@ function buildAnnualEntry({
   return annualEntry;
 }
 
+// Main entry point for this file.
+// It takes raw source payloads, normalizes them, builds yearly records,
+// creates the final stock document, and then recalculates derived values.
 function buildStockDocument({
   tickerSymbol,
   profile,
