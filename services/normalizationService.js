@@ -11,7 +11,8 @@ const { assignMetricValue, createMetricField } = require("../utils/metricField")
 const { recalculateDerived } = require("../utils/derivedCalc");
 const { selectPriceAfterAnchorDate } = require("../utils/priceSelector");
 
-const ANNUAL_HISTORY_FETCH_VERSION = 2;
+const ANNUAL_HISTORY_FETCH_VERSION = 3;
+const EARNINGS_RELEASE_FALLBACK_DAYS = 60;
 
 // Basic type guard used throughout the file when we expect a plain object.
 function isObject(value) {
@@ -277,7 +278,7 @@ function normalizeEarningsCalls(earningsPayload) {
 
 // Chooses the best earnings release date for a fiscal year.
 // Prefer a real earnings-call date tied to the same fiscal year and released
-// after year-end, otherwise fall back to an estimate around 90 days later.
+// after year-end, otherwise fall back to an estimate around 60 days later.
 function selectEarningsReleaseDate({ fiscalYear, fiscalYearEndDate, normalizedCalls }) {
   if (fiscalYearEndDate && Number.isInteger(fiscalYear)) {
     const matchingFiscalYearCall = normalizedCalls.find((call) => (
@@ -293,7 +294,7 @@ function selectEarningsReleaseDate({ fiscalYear, fiscalYearEndDate, normalizedCa
   }
 
   return {
-    date: addDaysToDateString(fiscalYearEndDate, 90),
+    date: addDaysToDateString(fiscalYearEndDate, EARNINGS_RELEASE_FALLBACK_DAYS),
     sourceOfTruth: "system",
   };
 }
@@ -737,6 +738,7 @@ function buildStockDocument({
 module.exports = {
   ANNUAL_HISTORY_FETCH_VERSION,
   buildStockDocument,
+  EARNINGS_RELEASE_FALLBACK_DAYS,
   normalizeEarningsCalls,
   selectEarningsReleaseDate,
 };

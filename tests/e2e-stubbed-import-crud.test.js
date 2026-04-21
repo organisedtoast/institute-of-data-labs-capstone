@@ -270,7 +270,7 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
 
     const secondAnnualEntry = importedDoc.annualData[1];
     assert.equal(secondAnnualEntry.fiscalYear, 2023);
-    assert.equal(secondAnnualEntry.earningsReleaseDate.effectiveValue, "2023-09-28");
+    assert.equal(secondAnnualEntry.earningsReleaseDate.effectiveValue, "2023-08-29");
     assert.equal(secondAnnualEntry.earningsReleaseDate.sourceOfTruth, "system");
     assert.equal(secondAnnualEntry.base.sharePrice.effectiveValue, 185);
 

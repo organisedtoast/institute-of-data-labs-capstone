@@ -3,7 +3,7 @@
 
 // The earnings release date is now a hybrid field:
 // - prefer the earnings-call date when ROIC provides it
-// - otherwise fall back to fiscal year end plus 90 calendar days
+// - otherwise fall back to fiscal year end plus 60 calendar days
 //
 // This gives the app a consistent date to anchor prices against even when the
 // upstream earnings-call dataset is incomplete.

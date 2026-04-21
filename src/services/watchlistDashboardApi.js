@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const ANNUAL_HISTORY_FETCH_VERSION = 2;
+const ANNUAL_HISTORY_FETCH_VERSION = 3;
 
 function getEffectiveValue(metricField) {
   if (!metricField || typeof metricField !== 'object') {

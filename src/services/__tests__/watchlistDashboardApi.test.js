@@ -26,7 +26,7 @@ function buildWatchlistStock(overrides = {}) {
     sourceMeta: {
       importRangeYears: null,
       importRangeYearsExplicit: false,
-      annualHistoryFetchVersion: 2,
+      annualHistoryFetchVersion: 3,
     },
     annualData: [
       {
@@ -252,7 +252,7 @@ describe('watchlistDashboardApi', () => {
       sourceMeta: {
         importRangeYears: null,
         importRangeYearsExplicit: false,
-        annualHistoryFetchVersion: 2,
+        annualHistoryFetchVersion: 3,
       },
     });
 
@@ -296,7 +296,7 @@ describe('watchlistDashboardApi', () => {
       sourceMeta: {
         importRangeYears: null,
         importRangeYearsExplicit: false,
-        annualHistoryFetchVersion: 2,
+        annualHistoryFetchVersion: 3,
       },
       annualData: Array.from({ length: 22 }, (_, index) => {
         const fiscalYear = 2025 - index;
@@ -356,7 +356,7 @@ describe('watchlistDashboardApi', () => {
       sourceMeta: {
         importRangeYears: null,
         importRangeYearsExplicit: false,
-        annualHistoryFetchVersion: 2,
+        annualHistoryFetchVersion: 3,
       },
       annualData: Array.from({ length: 22 }, (_, index) => {
         const fiscalYear = 2025 - index;
@@ -396,7 +396,7 @@ describe('watchlistDashboardApi', () => {
       sourceMeta: {
         importRangeYears: null,
         importRangeYearsExplicit: false,
-        annualHistoryFetchVersion: 2,
+        annualHistoryFetchVersion: 3,
       },
       annualData: Array.from({ length: 22 }, (_, index) => {
         const fiscalYear = 2025 - index;
@@ -435,7 +435,7 @@ describe('watchlistDashboardApi', () => {
       sourceMeta: {
         importRangeYears: null,
         importRangeYearsExplicit: false,
-        annualHistoryFetchVersion: 2,
+        annualHistoryFetchVersion: 3,
       },
       annualData: Array.from({ length: 10 }, (_, index) => {
         const fiscalYear = 2025 - index;
@@ -474,7 +474,7 @@ describe('watchlistDashboardApi', () => {
       sourceMeta: {
         importRangeYears: 20,
         importRangeYearsExplicit: true,
-        annualHistoryFetchVersion: 2,
+        annualHistoryFetchVersion: 3,
       },
       annualData: Array.from({ length: 20 }, (_, index) => {
         const fiscalYear = 2025 - index;
@@ -513,7 +513,7 @@ describe('watchlistDashboardApi', () => {
       sourceMeta: {
         importRangeYears: 10,
         importRangeYearsExplicit: true,
-        annualHistoryFetchVersion: 2,
+        annualHistoryFetchVersion: 3,
       },
       annualData: Array.from({ length: 10 }, (_, index) => {
         const fiscalYear = 2025 - index;

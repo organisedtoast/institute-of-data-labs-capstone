@@ -196,7 +196,7 @@ This is the strongest deterministic end-to-end backend test. It exercises the re
 What it proves:
 - `POST /api/watchlist/import` can normalize upstream data into the `WatchlistStock` schema
 - imported annual rows preserve the expected overridable-field object shape
-- earnings release date fallback logic uses fiscal year end plus 90 days when earnings-call data is missing for a year
+- earnings release date fallback logic uses fiscal year end plus 60 days when earnings-call data is missing for a year
 - imported records can be read, listed, updated, refreshed, and deleted
 - user overrides still survive a refresh
 - lookup routes stay read-only and do not silently create MongoDB records before import

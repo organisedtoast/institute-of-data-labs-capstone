@@ -117,7 +117,7 @@ test("selectEarningsReleaseDate uses a same-fiscal-year ROIC call after year-end
   );
 });
 
-test("selectEarningsReleaseDate falls back to fiscalYearEndDate plus 90 days when only unrelated later calls exist", () => {
+test("selectEarningsReleaseDate falls back to fiscalYearEndDate plus 60 days when only unrelated later calls exist", () => {
   const normalizedCalls = normalizeEarningsCalls([
     { fiscalYear: 2023, date: "2025-02-20" },
     { fiscalYear: 2022, date: "2024-02-15" },
@@ -130,7 +130,7 @@ test("selectEarningsReleaseDate falls back to fiscalYearEndDate plus 90 days whe
       normalizedCalls,
     }),
     {
-      date: "2025-03-31",
+      date: "2025-03-01",
       sourceOfTruth: "system",
     }
   );
@@ -148,7 +148,7 @@ test("selectEarningsReleaseDate falls back when the same-fiscal-year call is bef
       normalizedCalls,
     }),
     {
-      date: "2025-03-31",
+      date: "2025-03-01",
       sourceOfTruth: "system",
     }
   );
@@ -166,7 +166,7 @@ test("selectEarningsReleaseDate falls back when calls have no usable fiscal year
       normalizedCalls,
     }),
     {
-      date: "2025-03-31",
+      date: "2025-03-01",
       sourceOfTruth: "system",
     }
   );
@@ -180,7 +180,7 @@ test("selectEarningsReleaseDate falls back when no calls exist", () => {
       normalizedCalls: [],
     }),
     {
-      date: "2025-03-31",
+      date: "2025-03-01",
       sourceOfTruth: "system",
     }
   );
