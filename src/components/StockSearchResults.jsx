@@ -41,7 +41,7 @@ export default function StockSearchResults() {
   };
 
   return (
-    <Card sx={{ maxWidth: 960, mx: 'auto', mb: 3 }}>
+    <Card sx={{ maxWidth: 960, width: '100%', mx: 'auto', mb: 3, borderRadius: 2 }}>
       <CardContent>
         <Stack spacing={2}>
           <Box sx={{ textAlign: 'center' }}>
@@ -90,6 +90,7 @@ export default function StockSearchResults() {
                       borderColor: 'divider',
                       borderRadius: 2,
                       p: 2,
+                      backgroundColor: 'background.paper',
                     }}
                   >
                     <Box
@@ -114,10 +115,6 @@ export default function StockSearchResults() {
                         alignSelf: { xs: 'center', sm: 'center' },
                         width: { xs: '100%', sm: 'auto' },
                         maxWidth: { xs: 220, sm: 'none' },
-                        backgroundColor: '#4a148c',
-                        '&:hover': {
-                          backgroundColor: '#6a1b9a',
-                        },
                       }}
                       onClick={() => handleAddStockCard(stock)}
                     >

@@ -14,6 +14,7 @@ const { connectDB, disconnectDB } = require('./config/db');
 // normalized ROIC lookup responses used by search and preview flows.
 const stockLookupRoutes = require("./routes/stockLookupRoutes");
 const watchlistRoutes = require("./routes/watchlistRoutes");
+const investmentCategoryCardsRoutes = require("./routes/investmentCategoryCardsRoutes");
 const errorHandler = require("./middleware/errorHandler");
 const { ensureDefaultLenses } = require("./services/lensService");
 const { migrateInvestmentCategoryNames } = require("./services/investmentCategoryMigrationService");
@@ -45,6 +46,9 @@ app.use("/api", stockLookupRoutes);
  
 // Mount watchlist routes under /api/watchlist
 app.use("/api/watchlist", watchlistRoutes);
+
+// Mount homepage investment category routes under /api/homepage/investment-category-cards
+app.use("/api/homepage/investment-category-cards", investmentCategoryCardsRoutes);
  
 // Central error handler (must be registered LAST)
 app.use(errorHandler);

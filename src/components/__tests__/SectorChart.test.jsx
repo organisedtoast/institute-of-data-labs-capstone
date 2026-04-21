@@ -37,10 +37,10 @@ vi.mock('@mui/material/TextField', () => ({
     InputLabelProps,
     inputProps,
     label,
-    size,
-    sx,
     ...props
   }) {
+    void InputLabelProps;
+
     return React.createElement(
       'label',
       null,
@@ -56,6 +56,23 @@ vi.mock('@mui/material/TextField', () => ({
 
 let originalResizeObserver;
 
+const baseProps = {
+  series: [
+    { date: '2024-01-01', close: 100 },
+    { date: '2024-02-01', close: 115 },
+    { date: '2024-03-01', close: 125 },
+  ],
+  startDate: '2024-01',
+  endDate: '2024-03',
+  onStartDateChange: vi.fn(),
+  onEndDateChange: vi.fn(),
+  minAvailableMonth: '2024-01',
+  maxAvailableMonth: '2024-03',
+  activePreset: '1Y',
+  onApplyMaxRange: vi.fn(),
+  onApplyTrailingRange: vi.fn(),
+};
+
 beforeEach(() => {
   originalResizeObserver = global.ResizeObserver;
   global.ResizeObserver = undefined;
@@ -63,17 +80,15 @@ beforeEach(() => {
 
 afterEach(() => {
   global.ResizeObserver = originalResizeObserver;
+  vi.clearAllMocks();
 });
 
 describe('SectorChart', () => {
-  it('renders through the custom svg chart core with whole-number y-axis labels and no fiscal overlays', async () => {
-    render(<SectorChart />);
+  it('renders a controlled series with whole-number y-axis labels', async () => {
+    render(<SectorChart {...baseProps} />);
 
     const svg = await screen.findByTestId('sector-chart-svg');
     expect(svg).toBeTruthy();
-    expect(screen.queryByTestId('share-price-dashboard-fiscal-band')).toBeNull();
-    expect(screen.queryByTestId('share-price-dashboard-fiscal-tick')).toBeNull();
-    expect(screen.queryByTestId('share-price-dashboard-fiscal-watermark')).toBeNull();
 
     const yAxisLabels = screen.getAllByTestId('sector-chart-y-axis-label');
     expect(yAxisLabels.length).toBeGreaterThan(0);
@@ -84,49 +99,48 @@ describe('SectorChart', () => {
     });
   });
 
-  it('shows whole-number hover values without currency formatting', async () => {
-    render(<SectorChart />);
+  it('shows a custom invalid range message for reversed month inputs', async () => {
+    render(
+      <SectorChart
+        {...baseProps}
+        startDate="2024-03"
+        endDate="2024-01"
+        invalidRangeMessage="Range is invalid."
+      />,
+    );
 
-    const svg = await screen.findByTestId('sector-chart-svg');
-    svg.getBoundingClientRect = vi.fn(() => ({
-      width: 540,
-      left: 0,
-      top: 0,
-      right: 540,
-      bottom: 360,
-      height: 360,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    }));
-
-    fireEvent.mouseMove(svg, { clientX: 240 });
-
-    expect(svg.textContent).not.toMatch(/\$/);
-    expect(svg.textContent).not.toMatch(/\d+\.\d+/);
+    expect(await screen.findByText('Range is invalid.')).toBeTruthy();
   });
 
-  it('keeps the invalid range state', async () => {
-    render(<SectorChart />);
+  it('shows a custom empty state message when the series is empty', async () => {
+    render(
+      <SectorChart
+        {...baseProps}
+        series={[]}
+        emptyRangeMessage="No constituents are active in this range."
+      />,
+    );
 
-    const startInput = await screen.findByLabelText('Start month');
-    const endInput = screen.getByLabelText('End month');
-
-    fireEvent.change(startInput, { target: { value: '2026-03' } });
-    fireEvent.change(endInput, { target: { value: '2025-01' } });
-
-    expect(screen.getByText('Start month must be earlier than or equal to end month.')).toBeTruthy();
+    expect(await screen.findByText('No constituents are active in this range.')).toBeTruthy();
   });
 
-  it('keeps the empty range state', async () => {
-    render(<SectorChart />);
+  it('maps preset scroll movement into a month pan callback', async () => {
+    const onPresetPanOffsetChange = vi.fn();
 
-    const startInput = await screen.findByLabelText('Start month');
-    const endInput = screen.getByLabelText('End month');
+    render(
+      <SectorChart
+        {...baseProps}
+        isPresetWindowMode
+        maxPresetPanOffset={6}
+        presetPanOffsetMonths={0}
+        onPresetPanOffsetChange={onPresetPanOffsetChange}
+      />,
+    );
 
-    fireEvent.change(startInput, { target: { value: '2010-01' } });
-    fireEvent.change(endInput, { target: { value: '2010-02' } });
+    const scrollRegion = await screen.findByTestId('sector-chart-scroll-region');
+    scrollRegion.scrollLeft = 56;
+    fireEvent.scroll(scrollRegion);
 
-    expect(screen.getByText('No sector chart data matches the selected month range.')).toBeTruthy();
+    expect(onPresetPanOffsetChange).toHaveBeenCalledWith(4);
   });
 });

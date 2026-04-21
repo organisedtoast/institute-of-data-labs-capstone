@@ -18,27 +18,14 @@ const PRESET_BUTTONS = [
 // Because both the sector chart and the individual stock cards reuse this component,
 // changing the style here updates both places at once.
 const chartButtonStyles = {
-  color: '#4a148c',
-  borderColor: '#4a148c',
   '&:hover': {
-    borderColor: '#6a1b9a',
     backgroundColor: 'rgba(74, 20, 140, 0.08)',
-  },
-  '&.Mui-disabled': {
-    borderColor: 'rgba(74, 20, 140, 0.3)',
-    color: 'rgba(74, 20, 140, 0.4)',
   },
 };
 
 const chartButtonContainedStyles = {
-  backgroundColor: '#4a148c',
-  color: '#ffffff',
   '&:hover': {
-    backgroundColor: '#6a1b9a',
-  },
-  '&.Mui-disabled': {
-    backgroundColor: 'rgba(74, 20, 140, 0.4)',
-    color: 'rgba(255, 255, 255, 0.8)',
+    backgroundColor: '#3f1178',
   },
 };
 

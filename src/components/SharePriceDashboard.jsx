@@ -80,19 +80,14 @@ const INVESTMENT_CATEGORY_OPTIONS = [
 ];
 
 const chartButtonStyles = {
-  color: '#4a148c',
-  borderColor: '#4a148c',
   '&:hover': {
-    borderColor: '#6a1b9a',
     backgroundColor: 'rgba(74, 20, 140, 0.08)',
   },
 };
 
 const chartButtonContainedStyles = {
-  backgroundColor: '#4a148c',
-  color: '#ffffff',
   '&:hover': {
-    backgroundColor: '#6a1b9a',
+    backgroundColor: '#3f1178',
   },
 };
 
@@ -993,6 +988,7 @@ export default function SharePriceDashboard({
         cancelAnimationFrame(presetBootstrapFrameRef.current);
         presetBootstrapFrameRef.current = null;
       }
+
     };
   }, []);
 
@@ -1545,7 +1541,15 @@ export default function SharePriceDashboard({
     );
   } else {
     cardBody = (
-      <Box sx={{ border: '1px solid #e2e8f0', borderRadius: 2, overflow: 'hidden', backgroundColor: '#fff' }}>
+      <Box
+        sx={{
+          border: '1px solid',
+          borderColor: 'divider',
+          borderRadius: 2,
+          overflow: 'hidden',
+          backgroundColor: 'background.paper',
+        }}
+      >
         <Box
           sx={{
             width: '100%',
@@ -1825,10 +1829,26 @@ export default function SharePriceDashboard({
         display: 'flex',
         flexDirection: 'column',
         margin: 0,
+        borderRadius: 2,
       }}
     >
-      <CardContent sx={{ paddingBottom: '16px !important', paddingTop: '16px !important' }}>
-        <Typography gutterBottom sx={{ color: 'text.secondary', fontSize: 14, marginBottom: '8px' }}>
+      <CardContent
+        sx={{
+          paddingBottom: '16px !important',
+          paddingTop: '18px !important',
+          px: { xs: 2, sm: 2.5, lg: 3 },
+        }}
+      >
+        <Typography
+          gutterBottom
+          sx={{
+            color: 'text.secondary',
+            fontSize: 11,
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+            marginBottom: '8px',
+          }}
+        >
           Stock
         </Typography>
         <Typography variant="h5" component="div" sx={{ marginBottom: 0, marginTop: 0 }}>
@@ -1840,13 +1860,23 @@ export default function SharePriceDashboard({
       </CardContent>
 
       {!isLoading && dashboardData ? (
-        <CardActions sx={{ pt: 0, px: 2, pb: 2, flexDirection: 'column', alignItems: 'stretch', gap: 1 }}>
+        <CardActions
+          sx={{
+            pt: 0,
+            px: { xs: 2, sm: 2.5, lg: 3 },
+            pb: 2,
+            flexDirection: 'column',
+            alignItems: 'stretch',
+            gap: 1,
+          }}
+        >
           <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 1.5 }}>
             <Box
               sx={{
-                border: '1px solid #cbd5e1',
+                border: '1px solid',
+                borderColor: 'divider',
                 borderRadius: 1,
-                backgroundColor: '#ffffff',
+                backgroundColor: 'background.paper',
                 px: 1.5,
                 py: 0.75,
                 minWidth: 210,
@@ -1895,7 +1925,7 @@ export default function SharePriceDashboard({
           display: 'flex',
           flexDirection: 'column',
           gap: 2,
-          px: { xs: 1, sm: 2 },
+          px: { xs: 1, sm: 2, lg: 2.5 },
           pb: 2,
           pt: 0,
         }}

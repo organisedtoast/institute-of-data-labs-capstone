@@ -2,12 +2,6 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 
-import {
-  filterDataByMonthRange,
-  getMonthBoundsFromData,
-} from '../dataset/SharePrice';
-import { SectorPrice } from '../dataset/SectorPrice';
-import useChartDateRange from '../hooks/useChartDateRange';
 import ChartDateRangeControls from './ChartDateRangeControls';
 import {
   buildRoundedIntegerChartScale,
@@ -31,6 +25,7 @@ const SECTOR_CHART_HEIGHT = 360;
 const SECTOR_CHART_RIGHT_PADDING = 16;
 const SECTOR_Y_AXIS_WIDTH = 68;
 const SECTOR_CHART_FALLBACK_WIDTH = 540;
+const PRESET_PAN_STEP_PX = 28;
 
 const sectorHoverDateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -41,36 +36,39 @@ function formatSectorHoverDate(dateString) {
   return sectorHoverDateFormatter.format(new Date(dateString));
 }
 
-export default function SectorChart() {
+export default function SectorChart({
+  series = [],
+  startDate = '',
+  endDate = '',
+  onStartDateChange,
+  onEndDateChange,
+  minAvailableMonth = '',
+  maxAvailableMonth = '',
+  activePreset = '',
+  onApplyMaxRange,
+  onApplyTrailingRange,
+  disabled = false,
+  isPresetWindowMode = false,
+  maxPresetPanOffset = 0,
+  presetPanOffsetMonths = 0,
+  onPresetPanOffsetChange = () => {},
+  invalidRangeMessage = 'Start month must be earlier than or equal to end month.',
+  emptyRangeMessage = 'No sector chart data matches the selected month range.',
+}) {
   const svgRef = useRef(null);
   const chartViewportRef = useRef(null);
   const [chartWidth, setChartWidth] = useState(0);
+  const [isPresetScrollReady, setIsPresetScrollReady] = useState(false);
   const [hoverState, setHoverState] = useState({
     label: '',
     value: null,
     x: null,
   });
-  const {
-    startDate,
-    endDate,
-    setStartDate,
-    setEndDate,
-    minAvailableMonth,
-    maxAvailableMonth,
-    isRangeValid,
-    activePreset,
-    initializeRangeFromData,
-    applyMaxRange,
-    applyTrailingRange,
-  } = useChartDateRange();
-
-  useEffect(() => {
-    initializeRangeFromData(SectorPrice);
-  }, [initializeRangeFromData]);
+  const isRangeValid = !startDate || !endDate || startDate <= endDate;
 
   useLayoutEffect(() => {
     const updateChartWidth = () => {
-      setChartWidth(chartViewportRef.current?.clientWidth || 0);
+      setChartWidth(Math.max((chartViewportRef.current?.clientWidth || 0) - SECTOR_Y_AXIS_WIDTH, 0));
     };
 
     updateChartWidth();
@@ -95,8 +93,49 @@ export default function SectorChart() {
     };
   }, []);
 
-  const filteredSectorData = filterDataByMonthRange(SectorPrice, startDate, endDate);
-  const { earliestMonth, latestMonth } = getMonthBoundsFromData(SectorPrice);
+  useLayoutEffect(() => {
+    const scrollElement = chartViewportRef.current;
+
+    if (!scrollElement || !isPresetWindowMode) {
+      return undefined;
+    }
+
+    const desiredScrollLeft = Math.max(maxPresetPanOffset, 0) * PRESET_PAN_STEP_PX;
+
+    if (!isPresetScrollReady) {
+      scrollElement.scrollLeft = desiredScrollLeft;
+      setIsPresetScrollReady(true);
+    }
+
+    const handleScroll = () => {
+      const nextPresetPanOffset = Math.min(
+        Math.max(maxPresetPanOffset - Math.round(scrollElement.scrollLeft / PRESET_PAN_STEP_PX), 0),
+        maxPresetPanOffset,
+      );
+
+      if (nextPresetPanOffset !== presetPanOffsetMonths) {
+        onPresetPanOffsetChange(nextPresetPanOffset);
+      }
+    };
+
+    scrollElement.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      scrollElement.removeEventListener('scroll', handleScroll);
+    };
+  }, [
+    isPresetScrollReady,
+    isPresetWindowMode,
+    maxPresetPanOffset,
+    onPresetPanOffsetChange,
+    presetPanOffsetMonths,
+  ]);
+
+  useEffect(() => {
+    setIsPresetScrollReady(false);
+  }, [activePreset, maxPresetPanOffset]);
+
+  const filteredSectorData = Array.isArray(series) ? series : [];
   const effectiveChartWidth = chartWidth || SECTOR_CHART_FALLBACK_WIDTH;
   const plotWidth = Math.max(effectiveChartWidth - SECTOR_CHART_RIGHT_PADDING, 1);
   const contentWidth = plotWidth + SECTOR_CHART_RIGHT_PADDING;
@@ -240,19 +279,20 @@ export default function SectorChart() {
           }}
         >
           <Typography variant="body2" color="error" align="center">
-            Start month must be earlier than or equal to end month.
+            {invalidRangeMessage}
           </Typography>
         </Box>
         <ChartDateRangeControls
           startDate={startDate}
           endDate={endDate}
-          onStartDateChange={setStartDate}
-          onEndDateChange={setEndDate}
+          onStartDateChange={onStartDateChange}
+          onEndDateChange={onEndDateChange}
           minAvailableMonth={minAvailableMonth}
           maxAvailableMonth={maxAvailableMonth}
           activePreset={activePreset}
-          onApplyMaxRange={applyMaxRange}
-          onApplyTrailingRange={applyTrailingRange}
+          onApplyMaxRange={onApplyMaxRange}
+          onApplyTrailingRange={onApplyTrailingRange}
+          disabled={disabled}
         />
       </Box>
     );
@@ -277,23 +317,28 @@ export default function SectorChart() {
           }}
         >
           <Typography variant="body2" color="text.secondary" align="center">
-            No sector chart data matches the selected month range.
+            {emptyRangeMessage}
           </Typography>
         </Box>
         <ChartDateRangeControls
           startDate={startDate}
           endDate={endDate}
-          onStartDateChange={setStartDate}
-          onEndDateChange={setEndDate}
-          minAvailableMonth={minAvailableMonth || earliestMonth}
-          maxAvailableMonth={maxAvailableMonth || latestMonth}
+          onStartDateChange={onStartDateChange}
+          onEndDateChange={onEndDateChange}
+          minAvailableMonth={minAvailableMonth}
+          maxAvailableMonth={maxAvailableMonth}
           activePreset={activePreset}
-          onApplyMaxRange={applyMaxRange}
-          onApplyTrailingRange={applyTrailingRange}
+          onApplyMaxRange={onApplyMaxRange}
+          onApplyTrailingRange={onApplyTrailingRange}
+          disabled={disabled}
         />
       </Box>
     );
   }
+
+  const presetPanTrackWidth = Math.max(effectiveChartWidth, SECTOR_CHART_FALLBACK_WIDTH)
+    + (Math.max(maxPresetPanOffset, 0) * PRESET_PAN_STEP_PX);
+  const scrollSurfaceWidth = isPresetWindowMode ? presetPanTrackWidth : effectiveChartWidth;
 
   return (
     <Box
@@ -303,7 +348,19 @@ export default function SectorChart() {
         gap: 2,
       }}
     >
-      <Box sx={{ display: 'flex', alignItems: 'stretch', width: '100%' }}>
+      <Box
+        ref={chartViewportRef}
+        sx={{
+          display: 'flex',
+          alignItems: 'stretch',
+          width: '100%',
+          overflowX: isPresetWindowMode ? 'auto' : 'hidden',
+          WebkitOverflowScrolling: 'touch',
+        }}
+        data-testid="sector-chart-scroll-region"
+        data-scroll-mode={isPresetWindowMode ? 'preset' : 'range'}
+      >
+        <Box sx={{ width: scrollSurfaceWidth, display: 'flex', alignItems: 'stretch' }}>
         <Box
           sx={{
             position: 'relative',
@@ -344,54 +401,65 @@ export default function SectorChart() {
           ))}
         </Box>
 
-        <Box ref={chartViewportRef} sx={{ flex: 1, minWidth: 0 }}>
-          <TimeSeriesChartSvg
-            testId="sector-chart-svg"
-            svgRef={svgRef}
-            chartHeight={SECTOR_CHART_HEIGHT}
-            contentWidth={contentWidth}
-            plotWidth={plotWidth}
-            horizontalGridLines={chartGeometry.ticks.map((tickValue) => ({
-              key: tickValue,
-              testId: 'sector-chart-y-gridline',
-              y: getChartYPosition(
-                tickValue,
-                chartGeometry.minPrice,
-                chartGeometry.maxPrice,
-                SECTOR_CHART_HEIGHT,
-                {
-                  topPadding: DEFAULT_CHART_TOP_PADDING,
-                  bottomPadding: DEFAULT_CHART_BOTTOM_PADDING,
-                },
-              ),
-            }))}
-            verticalMarkers={chartGeometry.januaryPositions.map((position) => ({
-              key: position.year,
-              x: position.x,
-            }))}
-            linePath={chartGeometry.svgPath}
-            hoverState={hoverState.x !== null && hoverState.value !== null ? hoverState : null}
-            hoverValueFormatter={formatYAxisInteger}
-            onMouseMove={handleMouseMove}
-            onMouseLeave={handleMouseLeave}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-            onTouchCancel={handleTouchEnd}
-          />
+        <Box
+          sx={{
+            flex: 1,
+            minWidth: 0,
+            position: isPresetWindowMode ? 'sticky' : 'relative',
+            left: isPresetWindowMode ? 0 : 'auto',
+          }}
+        >
+          <Box sx={{ width: effectiveChartWidth }}>
+            <TimeSeriesChartSvg
+              testId="sector-chart-svg"
+              svgRef={svgRef}
+              chartHeight={SECTOR_CHART_HEIGHT}
+              contentWidth={contentWidth}
+              plotWidth={plotWidth}
+              horizontalGridLines={chartGeometry.ticks.map((tickValue) => ({
+                key: tickValue,
+                testId: 'sector-chart-y-gridline',
+                y: getChartYPosition(
+                  tickValue,
+                  chartGeometry.minPrice,
+                  chartGeometry.maxPrice,
+                  SECTOR_CHART_HEIGHT,
+                  {
+                    topPadding: DEFAULT_CHART_TOP_PADDING,
+                    bottomPadding: DEFAULT_CHART_BOTTOM_PADDING,
+                  },
+                ),
+              }))}
+              verticalMarkers={chartGeometry.januaryPositions.map((position) => ({
+                key: position.year,
+                x: position.x,
+              }))}
+              linePath={chartGeometry.svgPath}
+              hoverState={hoverState.x !== null && hoverState.value !== null ? hoverState : null}
+              hoverValueFormatter={formatYAxisInteger}
+              onMouseMove={handleMouseMove}
+              onMouseLeave={handleMouseLeave}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              onTouchCancel={handleTouchEnd}
+            />
+          </Box>
         </Box>
+      </Box>
       </Box>
 
       <ChartDateRangeControls
         startDate={startDate}
         endDate={endDate}
-        onStartDateChange={setStartDate}
-        onEndDateChange={setEndDate}
-        minAvailableMonth={minAvailableMonth || earliestMonth}
-        maxAvailableMonth={maxAvailableMonth || latestMonth}
+        onStartDateChange={onStartDateChange}
+        onEndDateChange={onEndDateChange}
+        minAvailableMonth={minAvailableMonth}
+        maxAvailableMonth={maxAvailableMonth}
         activePreset={activePreset}
-        onApplyMaxRange={applyMaxRange}
-        onApplyTrailingRange={applyTrailingRange}
+        onApplyMaxRange={onApplyMaxRange}
+        onApplyTrailingRange={onApplyTrailingRange}
+        disabled={disabled}
       />
     </Box>
   );
