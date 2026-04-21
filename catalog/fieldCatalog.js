@@ -16,25 +16,25 @@ const CATEGORY_NAMES = [
   "Profitable Hi Growth",
   "Mature Compounder",
   "Defensive Yield",
-  "Cyclicals",
-  "Lenders",
+  "Cyclical",
+  "Lender",
   "Firm Specific Turnaround",
 ];
 
 const CATEGORY_SET = {
   all: [...CATEGORY_NAMES],
-  allButLenders: CATEGORY_NAMES.filter((name) => name !== "Lenders"),
+  allButLenders: CATEGORY_NAMES.filter((name) => name !== "Lender"),
   allButUnprofitable: CATEGORY_NAMES.filter((name) => name !== "Unprofitable Hi Growth"),
   allButUnprofitableAndLenders: CATEGORY_NAMES.filter(
-    (name) => !["Unprofitable Hi Growth", "Lenders"].includes(name)
+    (name) => !["Unprofitable Hi Growth", "Lender"].includes(name)
   ),
   qualityNonLenders: CATEGORY_NAMES.filter(
-    (name) => ["Profitable Hi Growth", "Mature Compounder", "Defensive Yield", "Cyclicals", "Firm Specific Turnaround"].includes(name)
+    (name) => ["Profitable Hi Growth", "Mature Compounder", "Defensive Yield", "Cyclical", "Firm Specific Turnaround"].includes(name)
   ),
   unprofitableOnly: ["Unprofitable Hi Growth"],
-  lendersOnly: ["Lenders"],
-  cyclicalsLendersTurnaround: ["Cyclicals", "Lenders", "Firm Specific Turnaround"],
-  matureAndLenders: ["Mature Compounder", "Lenders"],
+  lendersOnly: ["Lender"],
+  cyclicalsLendersTurnaround: ["Cyclical", "Lender", "Firm Specific Turnaround"],
+  matureAndLenders: ["Mature Compounder", "Lender"],
 };
 
 const ROIC_ENDPOINTS = {
@@ -292,8 +292,8 @@ function displayField(fieldPath, label, section, surface, categories, order) {
 // same stored metric may appear in multiple sections for learning purposes.
 const DISPLAY_FIELD_DEFINITIONS = [
   displayField("annualData[].fiscalYearEndDate", "FY end date", "BASE", "card", CATEGORY_SET.all, 10),
-  displayField("annualData[].earningsReleaseDate", "FY earnings release date", "BASE", "card", CATEGORY_SET.all, 20),
-  displayField("annualData[].base.sharePrice", "Share price (at FY release date)", "BASE", "card", CATEGORY_SET.all, 30),
+  displayField("annualData[].earningsReleaseDate", "FY release date", "BASE", "card", CATEGORY_SET.all, 20),
+  displayField("annualData[].base.sharePrice", "Share price", "BASE", "card", CATEGORY_SET.all, 30),
   displayField("annualData[].base.sharesOnIssue", "Shares on issue", "BASE", "card", CATEGORY_SET.all, 40),
   displayField("annualData[].base.marketCap", "Market cap", "BASE", "card", CATEGORY_SET.all, 50),
 
@@ -395,7 +395,7 @@ const DISPLAY_FIELD_DEFINITIONS = [
   displayField("forecastData.fy1.dy", "DY FY+1", "EPS & Dividends", "detail", CATEGORY_SET.allButUnprofitable, 1460),
   displayField("forecastData.fy2.dy", "DY FY+2", "EPS & Dividends", "detail", CATEGORY_SET.allButUnprofitable, 1470),
   displayField("forecastData.fy3.dy", "DY FY+3", "EPS & Dividends", "detail", CATEGORY_SET.allButUnprofitable, 1480),
-  displayField("annualData[].epsAndDividends.dpsTrailing", "DPS (trailing)", "EPS & Dividends", "detail", ["Profitable Hi Growth", "Lenders"], 1490),
+  displayField("annualData[].epsAndDividends.dpsTrailing", "DPS (trailing)", "EPS & Dividends", "detail", ["Profitable Hi Growth", "Lender"], 1490),
   displayField("forecastData.fy1.dps", "DPS FY+1", "EPS & Dividends", "detail", CATEGORY_SET.allButUnprofitable, 1500),
   displayField("forecastData.fy2.dps", "DPS FY+2", "EPS & Dividends", "detail", CATEGORY_SET.allButUnprofitable, 1510),
   displayField("forecastData.fy3.dps", "DPS FY+3", "EPS & Dividends", "detail", CATEGORY_SET.allButUnprofitable, 1520),

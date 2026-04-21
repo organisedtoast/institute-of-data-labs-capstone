@@ -44,6 +44,7 @@ function normalizeAnnualMetrics(stockDocument) {
         fiscalYear: Number.isInteger(fiscalYear) ? fiscalYear : null,
         fiscalYearEndDate:
           typeof annualRow?.fiscalYearEndDate === 'string' ? annualRow.fiscalYearEndDate : null,
+        earningsReleaseDate: getEffectiveValue(annualRow?.earningsReleaseDate),
         sharePrice: getEffectiveValue(annualRow?.base?.sharePrice),
         sharesOnIssue: getEffectiveValue(annualRow?.base?.sharesOnIssue),
         marketCap: getEffectiveValue(annualRow?.base?.marketCap),
@@ -93,6 +94,10 @@ export function buildDashboardPayload(stockDocument, pricePayload, identifier) {
   return {
     identifier: normalizedIdentifier,
     companyName,
+    investmentCategory:
+      typeof stockDocument?.investmentCategory === 'string'
+        ? stockDocument.investmentCategory.trim()
+        : '',
     priceCurrency: stockDocument?.priceCurrency || 'USD',
     prices: normalizePriceRows(pricePayload),
     annualMetrics: normalizeAnnualMetrics(stockDocument),
@@ -119,4 +124,24 @@ export async function fetchDashboardData(identifier, options = {}) {
   }
 
   return buildDashboardPayload(stockDocument, priceResponse.data, normalizedIdentifier);
+}
+
+export async function updateDashboardInvestmentCategory(identifier, investmentCategory, options = {}) {
+  const normalizedIdentifier = String(identifier || '').trim().toUpperCase();
+  const requestOptions = options.signal ? { signal: options.signal } : undefined;
+  const response = await axios.patch(
+    `/api/watchlist/${normalizedIdentifier}`,
+    {
+      investmentCategory,
+    },
+    requestOptions,
+  );
+
+  return {
+    identifier: normalizedIdentifier,
+    investmentCategory:
+      typeof response.data?.investmentCategory === 'string'
+        ? response.data.investmentCategory.trim()
+        : '',
+  };
 }

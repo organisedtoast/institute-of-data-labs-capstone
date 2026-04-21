@@ -16,7 +16,7 @@ test("lens visibility resolves card/detail fields for categories and stocks", as
   await startServer();
 
   try {
-    const categoryView = await resolveVisibleFieldsForCategory("Lenders");
+    const categoryView = await resolveVisibleFieldsForCategory("Lender");
     assert.equal(categoryView.cardFields[0].label, "FY end date");
     assert.ok(categoryView.detailFields.some((field) => field.label === "Assets"));
     assert.ok(!categoryView.detailFields.some((field) => field.label === "Revenue"));
@@ -28,7 +28,7 @@ test("lens visibility resolves card/detail fields for categories and stocks", as
     });
 
     const stockView = await resolveVisibleFieldsForStock(stock);
-    assert.ok(stockView.cardFields.some((field) => field.label === "Share price (at FY release date)"));
+    assert.ok(stockView.cardFields.some((field) => field.label === "Share price"));
     assert.ok(stockView.detailFields.some((field) => field.label === "EV/Sales trailing"));
     assert.ok(!stockView.detailFields.some((field) => field.label === "PE trailing"));
   } finally {

@@ -149,10 +149,10 @@ test("live ROIC import populates grouped fields and preserves new override route
 
     const patchCategoryResponse = await requestJson(`/api/watchlist/${TEST_TICKER}`, {
       method: "PATCH",
-      body: JSON.stringify({ investmentCategory: "Lenders" }),
+      body: JSON.stringify({ investmentCategory: "Lender" }),
     });
     assert.equal(patchCategoryResponse.status, 200, buildFailureMessage("Patch investmentCategory", patchCategoryResponse));
-    assert.equal(patchCategoryResponse.body.investmentCategory, "Lenders");
+    assert.equal(patchCategoryResponse.body.investmentCategory, "Lender");
 
     const patchCompanyResponse = await requestJson(`/api/watchlist/${TEST_TICKER}`, {
       method: "PATCH",

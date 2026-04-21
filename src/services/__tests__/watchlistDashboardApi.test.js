@@ -1,11 +1,16 @@
 import axios from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { buildDashboardPayload, fetchDashboardData } from '../watchlistDashboardApi';
+import {
+  buildDashboardPayload,
+  fetchDashboardData,
+  updateDashboardInvestmentCategory,
+} from '../watchlistDashboardApi';
 
 vi.mock('axios', () => ({
   default: {
     get: vi.fn(),
+    patch: vi.fn(),
     post: vi.fn(),
   },
 }));
@@ -13,6 +18,7 @@ vi.mock('axios', () => ({
 function buildWatchlistStock(overrides = {}) {
   return {
     tickerSymbol: 'AAPL',
+    investmentCategory: 'Profitable Hi Growth',
     companyName: {
       effectiveValue: 'Apple Inc.',
     },
@@ -49,6 +55,7 @@ function buildWatchlistStock(overrides = {}) {
 describe('watchlistDashboardApi', () => {
   beforeEach(() => {
     axios.get.mockReset();
+    axios.patch.mockReset();
     axios.post.mockReset();
   });
 
@@ -66,6 +73,7 @@ describe('watchlistDashboardApi', () => {
 
     expect(payload.identifier).toBe('AAPL');
     expect(payload.companyName).toBe('Apple Inc.');
+    expect(payload.investmentCategory).toBe('Profitable Hi Growth');
     expect(payload.priceCurrency).toBe('USD');
     expect(payload.prices).toEqual([
       { date: '2024-01-02', close: 185.64 },
@@ -75,6 +83,7 @@ describe('watchlistDashboardApi', () => {
       {
         fiscalYear: 2023,
         fiscalYearEndDate: '2023-12-31',
+        earningsReleaseDate: null,
         sharePrice: 189.6,
         sharesOnIssue: 15700000000,
         marketCap: 2980000000000,
@@ -82,11 +91,23 @@ describe('watchlistDashboardApi', () => {
       {
         fiscalYear: 2024,
         fiscalYearEndDate: '2024-12-31',
+        earningsReleaseDate: null,
         sharePrice: 210.4,
         sharesOnIssue: 15500000000,
         marketCap: 3200000000000,
       },
     ]);
+  });
+
+  it('preserves the Mongo-backed fiscal year on each normalized annual metric row', () => {
+    const payload = buildDashboardPayload(
+      buildWatchlistStock(),
+      { prices: [] },
+      'aapl',
+    );
+
+    expect(payload.annualMetrics[0].fiscalYear).toBe(2023);
+    expect(payload.annualMetrics[1].fiscalYear).toBe(2024);
   });
 
   it('preserves every annual metric row returned by the watchlist document', () => {
@@ -134,6 +155,30 @@ describe('watchlistDashboardApi', () => {
     expect(axios.get).toHaveBeenNthCalledWith(2, '/api/stock-prices/AAPL', { signal: abortSignal });
     expect(payload.companyName).toBe('Apple Inc.');
     expect(payload.prices).toEqual([{ date: '2024-01-02', close: 185.64 }]);
+  });
+
+  it('updates the investment category through the canonical watchlist route', async () => {
+    const abortSignal = new AbortController().signal;
+
+    axios.patch = vi.fn().mockResolvedValueOnce({
+      data: buildWatchlistStock({
+        investmentCategory: 'Mature Compounder',
+      }),
+    });
+
+    const result = await updateDashboardInvestmentCategory('aapl', 'Mature Compounder', {
+      signal: abortSignal,
+    });
+
+    expect(axios.patch).toHaveBeenCalledWith(
+      '/api/watchlist/AAPL',
+      { investmentCategory: 'Mature Compounder' },
+      { signal: abortSignal },
+    );
+    expect(result).toEqual({
+      identifier: 'AAPL',
+      investmentCategory: 'Mature Compounder',
+    });
   });
 
   it('refreshes legacy default-10 watchlist stocks before building the dashboard payload', async () => {

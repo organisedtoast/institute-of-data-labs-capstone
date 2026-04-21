@@ -16,6 +16,7 @@ const stockLookupRoutes = require("./routes/stockLookupRoutes");
 const watchlistRoutes = require("./routes/watchlistRoutes");
 const errorHandler = require("./middleware/errorHandler");
 const { ensureDefaultLenses } = require("./services/lensService");
+const { migrateInvestmentCategoryNames } = require("./services/investmentCategoryMigrationService");
 
 // Create an Express application instance
 const app = express();
@@ -76,9 +77,10 @@ async function startServer() {
   // lenses after Mongoose reports a real connected state.
   if (mongoose.connection.readyState === 1) {
     try {
+      await migrateInvestmentCategoryNames();
       await ensureDefaultLenses();
     } catch (error) {
-      console.error(`Server startup warning: unable to seed default lenses (${error.message})`);
+      console.error(`Server startup warning: unable to prepare investment categories (${error.message})`);
     }
   }
 

@@ -21,8 +21,7 @@
 | priceCurrency | Price currency | roic | /v2/company/profile/{identifier} | All (7) |
 | sourceMeta.lastImportedAt | Last import timestamp | system | N/A | All (7) |
 | sourceMeta.lastRefreshAt | Last refresh timestamp | system | N/A | All (7) |
-| sourceMeta.importRangeYears | Requested yearly import range (`null` means all available annual years) | system | N/A | All (7) |
-| sourceMeta.importRangeYearsExplicit | Whether the yearly import range was explicitly requested | system | N/A | All (7) |
+| sourceMeta.importRangeYears | Requested yearly import range | system | N/A | All (7) |
 | sourceMeta.roicEndpointsUsed | ROIC endpoints used by import | system | Multiple endpoints | All (7) |
 | annualData[] | Historical annual rows | system | Multiple endpoints | All (7) |
 | forecastData | Forecast buckets container | system | N/A | All (7) |
@@ -35,13 +34,13 @@
 | --- | --- | --- | --- | --- |
 | annualData[].fiscalYear | Fiscal year | roic | Multiple annual endpoints | All (7) |
 | annualData[].fiscalYearEndDate | FY end date | roic | /v2/fundamental/per-share/{identifier} | All (7) |
-| annualData[].earningsReleaseDate | FY earnings release date | roic | /v2/company/earnings-calls/list/{identifier} | All (7) |
+| annualData[].earningsReleaseDate | FY release date | roic | /v2/company/earnings-calls/list/{identifier} | All (7) |
 
 ## annualData[].base
 
 | Field path | Label | Source type | ROIC endpoint | Visible in categories |
 | --- | --- | --- | --- | --- |
-| annualData[].base.sharePrice | Share price (at FY release date) | roic | /v2/stock-prices/{identifier} | All (7) |
+| annualData[].base.sharePrice | Share price | roic | /v2/stock-prices/{identifier} | All (7) |
 | annualData[].base.sharesOnIssue | Shares on issue | roic | /v2/fundamental/per-share/{identifier} | All (7) |
 | annualData[].base.marketCap | Market cap | derived | N/A | All (7) |
 | annualData[].base.returnOnInvestedCapital | Return On Invested Capital | roic | /v2/fundamental/ratios/profitability/{identifier} | All (7) |
@@ -56,10 +55,10 @@
 | annualData[].balanceSheet.netDebtOrCash | Net debt / (cash) | derived | N/A | Unprofitable Hi Growth, Profitable Hi Growth, Mature Compounder +3 more |
 | annualData[].balanceSheet.netDebtToEbitda | Net debt to EBITDA | derived | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
 | annualData[].balanceSheet.ebitInterestCoverage | EBIT interest coverage | derived | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
-| annualData[].balanceSheet.assets | Assets | roic | /v2/fundamental/balance-sheet/{identifier} | Lenders (1) |
-| annualData[].balanceSheet.liabilities | Liabilities | roic | /v2/fundamental/balance-sheet/{identifier} | Lenders (1) |
-| annualData[].balanceSheet.equity | Equity | roic | /v2/fundamental/balance-sheet/{identifier} | Lenders (1) |
-| annualData[].balanceSheet.leverageRatio | Leverage Ratio | derived | N/A | Lenders (1) |
+| annualData[].balanceSheet.assets | Assets | roic | /v2/fundamental/balance-sheet/{identifier} | Lender (1) |
+| annualData[].balanceSheet.liabilities | Liabilities | roic | /v2/fundamental/balance-sheet/{identifier} | Lender (1) |
+| annualData[].balanceSheet.equity | Equity | roic | /v2/fundamental/balance-sheet/{identifier} | Lender (1) |
+| annualData[].balanceSheet.leverageRatio | Leverage Ratio | derived | N/A | Lender (1) |
 | annualData[].balanceSheet.enterpriseValueTrailing | Enterprise value (trailing) | derived | /v2/fundamental/enterprise-value/{identifier} | Unprofitable Hi Growth, Profitable Hi Growth, Mature Compounder +3 more |
 
 ## annualData[].incomeStatement
@@ -102,9 +101,9 @@
 | annualData[].valuationMultiples.npatMarginTrailing | NPAT margin (trailing) | derived | /v2/fundamental/ratios/profitability/{identifier} | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
 | annualData[].valuationMultiples.evEbitTrailing | EV/EBIT trailing | derived | /v2/fundamental/enterprise-value/{identifier} | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
 | annualData[].valuationMultiples.peTrailing | PE trailing | roic | /v2/fundamental/multiples/{identifier} | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| annualData[].valuationMultiples.tangibleBookValuePerShare | Tangible Book Value per share | roic | /v2/fundamental/per-share/{identifier} | Cyclicals, Lenders, Firm Specific Turnaround (3) |
-| annualData[].valuationMultiples.priceToNta | Price to NTA | derived | N/A | Cyclicals, Lenders, Firm Specific Turnaround (3) |
-| annualData[].valuationMultiples.dividendPayout | Dividend payout | derived | /v2/fundamental/ratios/profitability/{identifier} | Mature Compounder, Lenders (2) |
+| annualData[].valuationMultiples.tangibleBookValuePerShare | Tangible Book Value per share | roic | /v2/fundamental/per-share/{identifier} | Cyclical, Lender, Firm Specific Turnaround (3) |
+| annualData[].valuationMultiples.priceToNta | Price to NTA | derived | N/A | Cyclical, Lender, Firm Specific Turnaround (3) |
+| annualData[].valuationMultiples.dividendPayout | Dividend payout | derived | /v2/fundamental/ratios/profitability/{identifier} | Mature Compounder, Lender (2) |
 
 ## annualData[].epsAndDividends
 
@@ -112,7 +111,7 @@
 | --- | --- | --- | --- | --- |
 | annualData[].epsAndDividends.epsTrailing | EPS (trailing) | roic | /v2/fundamental/per-share/{identifier} | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
 | annualData[].epsAndDividends.dyTrailing | DY trailing | derived | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| annualData[].epsAndDividends.dpsTrailing | DPS (trailing) | roic | /v2/fundamental/per-share/{identifier} | Profitable Hi Growth, Lenders (2) |
+| annualData[].epsAndDividends.dpsTrailing | DPS (trailing) | roic | /v2/fundamental/per-share/{identifier} | Profitable Hi Growth, Lender (2) |
 
 ## forecastData.fy1|fy2|fy3
 
@@ -198,6 +197,6 @@ This appendix stays compact on purpose. It tells a developer how broad each cate
 | Profitable Hi Growth | 5 | 78 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
 | Mature Compounder | 5 | 78 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
 | Defensive Yield | 5 | 74 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
-| Cyclicals | 5 | 79 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
-| Lenders | 5 | 49 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Cyclical | 5 | 79 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Lender | 5 | 49 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
 | Firm Specific Turnaround | 5 | 79 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |

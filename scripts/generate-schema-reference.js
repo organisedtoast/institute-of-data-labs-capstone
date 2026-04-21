@@ -39,7 +39,7 @@ const TOP_LEVEL_REFERENCE_FIELDS = [
 const ANNUAL_CORE_FIELDS = [
   { fieldPath: "annualData[].fiscalYear", label: "Fiscal year", sourceType: "roic", roicEndpoint: "Multiple annual endpoints" },
   { fieldPath: "annualData[].fiscalYearEndDate", label: "FY end date", sourceType: "roic", roicEndpoint: ROIC_ENDPOINTS.PER_SHARE },
-  { fieldPath: "annualData[].earningsReleaseDate", label: "FY earnings release date", sourceType: "roic", roicEndpoint: ROIC_ENDPOINTS.EARNINGS_CALLS },
+  { fieldPath: "annualData[].earningsReleaseDate", label: "FY release date", sourceType: "roic", roicEndpoint: ROIC_ENDPOINTS.EARNINGS_CALLS },
 ];
 
 function formatEndpoint(roicEndpoint) {

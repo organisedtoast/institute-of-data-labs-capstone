@@ -9,13 +9,13 @@ const test = require("node:test");
 const { spawnSync } = require("node:child_process");
 
 test("inspect-lens-fields script prints seeded category fields", () => {
-  const result = spawnSync(process.execPath, ["scripts/inspect-lens-fields.js", "--category", "Lenders"], {
+  const result = spawnSync(process.execPath, ["scripts/inspect-lens-fields.js", "--category", "Lender"], {
     cwd: process.cwd(),
     encoding: "utf8",
   });
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Lens: Lenders/);
+  assert.match(result.stdout, /Lens: Lender/);
   assert.match(result.stdout, /Assets/);
   assert.match(result.stdout, /FY end date/);
 });

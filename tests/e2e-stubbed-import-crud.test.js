@@ -313,10 +313,10 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
 
     const patchCategoryResponse = await requestJson(`/api/watchlist/${TEST_TICKER}`, {
       method: "PATCH",
-      body: JSON.stringify({ investmentCategory: "Lenders" }),
+      body: JSON.stringify({ investmentCategory: "Lender" }),
     });
     assert.equal(patchCategoryResponse.status, 200, buildFailureMessage("Patch investmentCategory", patchCategoryResponse));
-    assert.equal(patchCategoryResponse.body.investmentCategory, "Lenders");
+    assert.equal(patchCategoryResponse.body.investmentCategory, "Lender");
 
     const patchCompanyResponse = await requestJson(`/api/watchlist/${TEST_TICKER}`, {
       method: "PATCH",

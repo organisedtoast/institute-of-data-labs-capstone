@@ -6,7 +6,10 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SharePriceDashboard from '../SharePriceDashboard';
-import { fetchDashboardData } from '../../services/watchlistDashboardApi';
+import {
+  fetchDashboardData,
+  updateDashboardInvestmentCategory,
+} from '../../services/watchlistDashboardApi';
 import {
   buildRoundedChartScale,
   formatYAxisPrice,
@@ -71,6 +74,7 @@ function createMockComponent(tagName, omittedPropNames = []) {
 
 vi.mock('../../services/watchlistDashboardApi', () => ({
   fetchDashboardData: vi.fn(),
+  updateDashboardInvestmentCategory: vi.fn(),
 }));
 
 vi.mock('@mui/material/Box', () => ({
@@ -176,6 +180,7 @@ function buildDashboardPayload(overrides = {}) {
     annualMetrics.push({
       fiscalYear: year,
       fiscalYearEndDate: `${year}-12-31`,
+      earningsReleaseDate: `${year + 1}-02-15`,
       sharePrice: 100 + (year - 2010),
       sharesOnIssue: 1000000000 + ((year - 2010) * 1000000),
       marketCap: 100000000000 + ((year - 2010) * 5000000000),
@@ -185,6 +190,7 @@ function buildDashboardPayload(overrides = {}) {
   return {
     identifier: 'AAPL',
     companyName: 'Apple Inc.',
+    investmentCategory: 'Profitable Hi Growth',
     priceCurrency: 'USD',
     prices,
     annualMetrics,
@@ -210,6 +216,7 @@ function buildLongHistoryDashboardPayload(overrides = {}) {
     annualMetrics.push({
       fiscalYear: year,
       fiscalYearEndDate: `${year}-12-31`,
+      earningsReleaseDate: `${year + 1}-02-15`,
       sharePrice: 90 + (year - 1990),
       sharesOnIssue: 900000000 + ((year - 1990) * 1000000),
       marketCap: 90000000000 + ((year - 1990) * 4000000000),
@@ -338,6 +345,7 @@ function mountDashboard(ui) {
 async function renderDashboard(options = {}) {
   const {
     identifier = 'AAPL',
+    isRemovable = false,
     name = `${identifier} name`,
     payload = buildDashboardPayload(),
   } = options;
@@ -353,6 +361,7 @@ async function renderDashboard(options = {}) {
   const renderResult = mountDashboard(
     <SharePriceDashboard
       identifier={identifier}
+      isRemovable={isRemovable}
       name={name}
       scaleAnimationDurationMs={0}
     />,
@@ -410,6 +419,11 @@ async function dragPresetWindowOlderByMonths({
 describe('SharePriceDashboard preset scrolling', () => {
   beforeEach(() => {
     fetchDashboardData.mockReset();
+    updateDashboardInvestmentCategory.mockReset();
+    updateDashboardInvestmentCategory.mockResolvedValue({
+      identifier: 'AAPL',
+      investmentCategory: 'Mature Compounder',
+    });
     pendingAnimationFrameHandles = new Set();
 
     originalRequestAnimationFrame = window.requestAnimationFrame;
@@ -519,10 +533,25 @@ describe('SharePriceDashboard preset scrolling', () => {
     await renderDashboard();
 
     expect(screen.getByText('FY end date')).toBeTruthy();
-    expect(screen.getByText('Share price (at FY release date)')).toBeTruthy();
+    expect(screen.getByText('FY')).toBeTruthy();
+    expect(screen.getByText('FY release date')).toBeTruthy();
+    expect(screen.getByText('Share price')).toBeTruthy();
     expect(screen.getByText('Shares on issue')).toBeTruthy();
     expect(screen.getByText('Market cap')).toBeTruthy();
     expect(screen.queryByText('ROIC')).toBeNull();
+  });
+
+  it('keeps the full-label left rail tight on wide screens while preserving the longest label', async () => {
+    setViewportWidth(1440);
+
+    await renderDashboard();
+
+    const scrollRegion = screen.getByTestId('share-price-dashboard-scroll-region');
+
+    expect(screen.getByText('FY release date')).toBeTruthy();
+    expect(screen.getByText('Shares on issue')).toBeTruthy();
+    expect(Number(scrollRegion.getAttribute('data-left-rail-width'))).toBeLessThan(220);
+    expect(Number(scrollRegion.getAttribute('data-left-rail-width'))).toBeGreaterThanOrEqual(120);
   });
 
   it('uses short sticky rail labels on narrow screens while keeping the full label as metadata', async () => {
@@ -531,14 +560,77 @@ describe('SharePriceDashboard preset scrolling', () => {
     await renderDashboard();
 
     expect(screen.getByText('FY END')).toBeTruthy();
-    expect(screen.getByText('Px')).toBeTruthy();
+    expect(screen.getByText('FY')).toBeTruthy();
+    expect(screen.getByText('FY release')).toBeTruthy();
+    expect(screen.getByText('SP')).toBeTruthy();
     expect(screen.getByText('SOI')).toBeTruthy();
     expect(screen.getByText('Mkt Cap')).toBeTruthy();
     expect(screen.queryByText('ROIC')).toBeNull();
 
-    const sharePriceRailLabel = screen.getByText('Px');
-    expect(sharePriceRailLabel.getAttribute('title')).toBe('Share price (at FY release date)');
-    expect(sharePriceRailLabel.getAttribute('aria-label')).toBe('Share price (at FY release date)');
+    const sharePriceRailLabel = screen.getByText('SP');
+    expect(sharePriceRailLabel.getAttribute('title')).toBe('Share price');
+    expect(sharePriceRailLabel.getAttribute('aria-label')).toBe('Share price');
+  });
+
+  it('shows the current investment category next to Remove stock and updates it from the dropdown', async () => {
+    const { user } = await renderDashboard({ isRemovable: true });
+
+    const categorySelect = screen.getByLabelText('Investment Category');
+
+    expect(categorySelect.value).toBe('Profitable Hi Growth');
+    expect(screen.getByRole('button', { name: 'Remove stock' })).toBeTruthy();
+
+    await user.selectOptions(categorySelect, 'Mature Compounder');
+    await flushDashboardWork();
+
+    expect(updateDashboardInvestmentCategory).toHaveBeenCalledWith('AAPL', 'Mature Compounder');
+    expect(categorySelect.value).toBe('Mature Compounder');
+  });
+
+  it('keeps preset annual columns readable on very narrow scroll widths', async () => {
+    setViewportWidth(480);
+
+    const {
+      endInput,
+      scrollRegion,
+      startInput,
+      user,
+    } = await renderDashboard();
+
+    await configureScrollRegion(scrollRegion, 240);
+    await flushDashboardWork();
+
+    await user.click(screen.getByRole('button', { name: '10Y' }));
+    await flushDashboardWork();
+
+    expect(startInput.value).toBe('2015-12');
+    expect(endInput.value).toBe('2025-12');
+    expect(scrollRegion.getAttribute('data-scroll-mode')).toBe('preset');
+    expect(Number(scrollRegion.getAttribute('data-year-cell-width'))).toBeGreaterThanOrEqual(48);
+    expect(Number(scrollRegion.getAttribute('data-content-width'))).toBeGreaterThanOrEqual((11 * 48) + 24);
+    expect(Number(scrollRegion.getAttribute('data-scroll-surface-width'))).toBeGreaterThan(240);
+  });
+
+  it('centers each fiscal-year tick on the matching visible table column', async () => {
+    setViewportWidth(1024);
+
+    const { user } = await renderDashboard();
+
+    await user.click(screen.getByRole('button', { name: '10Y' }));
+    await flushDashboardWork();
+
+    const fiscalTicks = screen.getAllByTestId('share-price-dashboard-fiscal-tick');
+    const headerCells = screen.getAllByTestId('share-price-dashboard-header-cell');
+
+    expect(fiscalTicks).toHaveLength(headerCells.length);
+
+    fiscalTicks.forEach((tickNode, index) => {
+      expect(tickNode.getAttribute('data-fiscal-year')).toBe(headerCells[index].getAttribute('data-fiscal-year'));
+      expect(Number(tickNode.getAttribute('data-x'))).toBeCloseTo(
+        Number(headerCells[index].getAttribute('data-center-x')),
+        6,
+      );
+    });
   });
 
   it('lets the default 5Y preset pan immediately on first load', async () => {
@@ -681,6 +773,13 @@ describe('SharePriceDashboard preset scrolling', () => {
     expect(screen.getByText('2013-12')).toBeTruthy();
     expect(screen.getByText('2023-12')).toBeTruthy();
     expect(screen.queryByText('2025-12')).toBeNull();
+
+    const visibleFiscalYears = screen.getAllByTestId('share-price-dashboard-fiscal-tick').map((node) => {
+      return node.getAttribute('data-fiscal-year');
+    });
+
+    expect(visibleFiscalYears[0]).toBe('2013');
+    expect(visibleFiscalYears[visibleFiscalYears.length - 1]).toBe('2023');
   });
 
   it('lets fixed presets pan into years older than the 20th most recent annual row', async () => {
@@ -738,6 +837,30 @@ describe('SharePriceDashboard preset scrolling', () => {
 
     expect(startInput.value).toBe('2024-11');
     expect(endInput.value).toBe('2025-11');
+  });
+
+  it('keeps a single visible annual row centered in its table column', async () => {
+    const {
+      endInput,
+      startInput,
+    } = await renderDashboard();
+
+    await act(async () => {
+      fireEvent.change(startInput, { target: { value: '2025-12' } });
+      fireEvent.change(endInput, { target: { value: '2025-12' } });
+    });
+    await flushDashboardWork();
+
+    const fiscalTicks = screen.getAllByTestId('share-price-dashboard-fiscal-tick');
+    const headerCells = screen.getAllByTestId('share-price-dashboard-header-cell');
+
+    expect(fiscalTicks).toHaveLength(1);
+    expect(headerCells).toHaveLength(1);
+    expect(fiscalTicks[0].getAttribute('data-fiscal-year')).toBe('2025');
+    expect(Number(fiscalTicks[0].getAttribute('data-x'))).toBeCloseTo(
+      Number(headerCells[0].getAttribute('data-center-x')),
+      6,
+    );
   });
 
   it('ignores the programmatic preset snap when switching presets', async () => {

@@ -15,10 +15,12 @@ import {
   getRawChartScale,
   getTargetChartScale,
 } from './sharePriceChartScale';
-import { fetchDashboardData } from '../services/watchlistDashboardApi';
+import {
+  fetchDashboardData,
+  updateDashboardInvestmentCategory,
+} from '../services/watchlistDashboardApi';
 
 const CHART_HEIGHT = 280;
-const FIXED_LEFT_RAIL_WIDTH = 190;
 const CHART_RIGHT_PADDING = 24;
 const CHART_TOP_PADDING = 20;
 const CHART_BOTTOM_PADDING = 20;
@@ -33,6 +35,11 @@ const SCALE_WINDOW_STEP_PX = 16;
 const PRESET_PAN_STEP_PX = 28;
 const Y_AXIS_LABEL_MIN_SPACING_PX = 32;
 const MOBILE_LABEL_BREAKPOINT_QUERY = '(max-width: 560px)';
+const PRESET_MIN_COLUMN_WIDTH = 56;
+const PRESET_COMPACT_MIN_COLUMN_WIDTH = 48;
+const MIN_FULL_LABEL_LEFT_RAIL_WIDTH = 120;
+const MIN_SHORT_LABEL_LEFT_RAIL_WIDTH = 76;
+const MIN_COMPACT_SHORT_LABEL_LEFT_RAIL_WIDTH = 68;
 
 const PRESET_BUTTONS = [
   { key: 'MAX', label: 'MAX', monthCount: null },
@@ -42,6 +49,16 @@ const PRESET_BUTTONS = [
   { key: '3Y', label: '3Y', monthCount: 36 },
   { key: '5Y', label: '5Y', monthCount: 60 },
   { key: '10Y', label: '10Y', monthCount: 120 },
+];
+
+const INVESTMENT_CATEGORY_OPTIONS = [
+  'Unprofitable Hi Growth',
+  'Profitable Hi Growth',
+  'Mature Compounder',
+  'Defensive Yield',
+  'Cyclical',
+  'Lender',
+  'Firm Specific Turnaround',
 ];
 
 const chartButtonStyles = {
@@ -286,7 +303,173 @@ function getColumnDensity(columnCount) {
   };
 }
 
-function buildSvgPath(priceRows, minPrice, maxPrice, minTime, timeRange, plotWidth) {
+function getPresetMinimumColumnWidth(isCompactPresetTable) {
+  return isCompactPresetTable ? PRESET_COMPACT_MIN_COLUMN_WIDTH : PRESET_MIN_COLUMN_WIDTH;
+}
+
+function createLinearTimeMapper(minTime, maxTime, plotWidth) {
+  const safePlotWidth = Math.max(plotWidth, 1);
+  const safeMinTime = Number.isFinite(minTime) ? minTime : 0;
+  const safeMaxTime = Number.isFinite(maxTime) ? maxTime : safeMinTime;
+  const timeRange = Math.max(safeMaxTime - safeMinTime, 1);
+
+  return {
+    minTime: safeMinTime,
+    maxTime: safeMaxTime,
+    timeRange,
+    mapTimeToX(timestamp) {
+      const clampedTime = Math.min(Math.max(timestamp, safeMinTime), safeMaxTime);
+      return ((clampedTime - safeMinTime) / timeRange) * safePlotWidth;
+    },
+    mapXToTime(x) {
+      const clampedX = Math.min(Math.max(x, 0), safePlotWidth);
+      return safeMinTime + ((clampedX / safePlotWidth) * timeRange);
+    },
+  };
+}
+
+function interpolateSegment({ startTime, endTime, startX, endX }, value, inputKey, outputKey) {
+  const inputRange = endTime - startTime;
+
+  if (Math.abs(inputRange) <= 1e-6) {
+    return outputKey === 'x' ? endX : endTime;
+  }
+
+  const ratio = (value - startTime) / inputRange;
+  const outputRange = endX - startX;
+
+  return outputKey === 'x'
+    ? startX + (ratio * outputRange)
+    : startTime + (ratio * outputRange);
+}
+
+function createChartXGeometry({ filteredPriceRows, tablePoints, plotWidth, yearCellWidth }) {
+  if (!filteredPriceRows.length) {
+    return {
+      anchorPositions: [],
+      mapTimeToX: () => 0,
+      mapXToTime: () => 0,
+      maxTime: 0,
+      minTime: 0,
+      plotWidth,
+      timeRange: 1,
+    };
+  }
+
+  const minTime = new Date(filteredPriceRows[0].date).getTime();
+  const maxTime = new Date(filteredPriceRows[filteredPriceRows.length - 1].date).getTime();
+  const linearMapper = createLinearTimeMapper(minTime, maxTime, plotWidth);
+
+  if (!tablePoints.length || yearCellWidth <= 0) {
+    return {
+      anchorPositions: [],
+      mapTimeToX: linearMapper.mapTimeToX,
+      mapXToTime: linearMapper.mapXToTime,
+      maxTime,
+      minTime,
+      plotWidth,
+      timeRange: linearMapper.timeRange,
+    };
+  }
+
+  const anchorPositions = tablePoints.map((annualRow, columnIndex) => {
+    return {
+      fiscalYear: annualRow.fiscalYear,
+      date: annualRow.fiscalYearEndDate,
+      time: new Date(annualRow.fiscalYearEndDate).getTime(),
+      x: (columnIndex * yearCellWidth) + (yearCellWidth / 2),
+    };
+  });
+
+  const segments = [];
+  const firstAnchor = anchorPositions[0];
+  const lastAnchor = anchorPositions[anchorPositions.length - 1];
+
+  segments.push({
+    startTime: minTime,
+    endTime: firstAnchor.time,
+    startX: 0,
+    endX: firstAnchor.x,
+  });
+
+  for (let index = 0; index < anchorPositions.length - 1; index += 1) {
+    const currentAnchor = anchorPositions[index];
+    const nextAnchor = anchorPositions[index + 1];
+
+    segments.push({
+      startTime: currentAnchor.time,
+      endTime: nextAnchor.time,
+      startX: currentAnchor.x,
+      endX: nextAnchor.x,
+    });
+  }
+
+  segments.push({
+    startTime: lastAnchor.time,
+    endTime: maxTime,
+    startX: lastAnchor.x,
+    endX: plotWidth,
+  });
+
+  const mapTimeToX = (timestamp) => {
+    if (!Number.isFinite(timestamp)) {
+      return 0;
+    }
+
+    if (timestamp <= minTime) {
+      return 0;
+    }
+
+    if (timestamp >= maxTime) {
+      return plotWidth;
+    }
+
+    const matchingSegment = segments.find((segment) => {
+      return timestamp >= segment.startTime && timestamp <= segment.endTime;
+    }) || segments[segments.length - 1];
+
+    return interpolateSegment(matchingSegment, timestamp, 'time', 'x');
+  };
+
+  const mapXToTime = (x) => {
+    if (!Number.isFinite(x)) {
+      return minTime;
+    }
+
+    if (x <= 0) {
+      return minTime;
+    }
+
+    if (x >= plotWidth) {
+      return maxTime;
+    }
+
+    const matchingSegment = segments.find((segment) => {
+      return x >= segment.startX && x <= segment.endX;
+    }) || segments[segments.length - 1];
+
+    const xRange = matchingSegment.endX - matchingSegment.startX;
+
+    if (Math.abs(xRange) <= 1e-6) {
+      return matchingSegment.endTime;
+    }
+
+    const ratio = (x - matchingSegment.startX) / xRange;
+    return matchingSegment.startTime + (ratio * (matchingSegment.endTime - matchingSegment.startTime));
+  };
+
+  return {
+    anchorPositions,
+    mapTimeToX,
+    mapXToTime,
+    maxTime,
+    minTime,
+    plotWidth,
+    timeRange: linearMapper.timeRange,
+  };
+}
+
+function buildSvgPath(priceRows, minPrice, maxPrice, mapTimeToX) {
   if (!priceRows.length) {
     return '';
   }
@@ -294,7 +477,7 @@ function buildSvgPath(priceRows, minPrice, maxPrice, minTime, timeRange, plotWid
   const priceRange = maxPrice - minPrice || 1;
 
   const points = priceRows.map((priceRow) => {
-    const x = ((new Date(priceRow.date).getTime() - minTime) / timeRange) * plotWidth;
+    const x = mapTimeToX(new Date(priceRow.date).getTime());
     const y = CHART_TOP_PADDING + CHART_PLOT_HEIGHT - (((priceRow.close - minPrice) / priceRange) * CHART_PLOT_HEIGHT);
 
     return `${x},${y}`;
@@ -309,7 +492,7 @@ function getChartYPosition(priceValue, minPrice, maxPrice) {
   return CHART_TOP_PADDING + CHART_PLOT_HEIGHT - (((priceValue - minPrice) / priceRange) * CHART_PLOT_HEIGHT);
 }
 
-function getJanuaryPositions(priceRows, minTime, timeRange, plotWidth) {
+function getJanuaryPositions(priceRows, minTime, maxTime, mapTimeToX) {
   if (!priceRows.length) {
     return [];
   }
@@ -321,13 +504,13 @@ function getJanuaryPositions(priceRows, minTime, timeRange, plotWidth) {
   for (let year = startYear; year <= endYear; year += 1) {
     const januaryFirstTime = new Date(`${year}-01-01T00:00:00Z`).getTime();
 
-    if (januaryFirstTime < minTime || januaryFirstTime > minTime + timeRange) {
+    if (januaryFirstTime < minTime || januaryFirstTime > maxTime) {
       continue;
     }
 
     positions.push({
       year,
-      x: ((januaryFirstTime - minTime) / timeRange) * plotWidth,
+      x: mapTimeToX(januaryFirstTime),
     });
   }
 
@@ -390,6 +573,8 @@ export default function SharePriceDashboard({
   const [dashboardData, setDashboardData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [investmentCategoryError, setInvestmentCategoryError] = useState('');
+  const [isUpdatingInvestmentCategory, setIsUpdatingInvestmentCategory] = useState(false);
   const [freeRangeStartMonth, setFreeRangeStartMonth] = useState('');
   const [freeRangeEndMonth, setFreeRangeEndMonth] = useState('');
   const [rangeMode, setRangeMode] = useState('preset');
@@ -461,6 +646,7 @@ export default function SharePriceDashboard({
         });
 
         setDashboardData(nextDashboardData);
+        setInvestmentCategoryError('');
         setFreeRangeStartMonth(defaultRange.startMonth);
         setFreeRangeEndMonth(defaultRange.endMonth);
         setRangeMode('preset');
@@ -583,10 +769,24 @@ export default function SharePriceDashboard({
         formatter: (value, options = {}) => formatFiscalReleaseLabel(value, options.compact),
       },
       {
+        key: 'fiscalYear',
+        fieldPath: 'annualData[].fiscalYear',
+        label: 'FY',
+        shortLabel: getShortLabel('Fiscal year'),
+        formatter: (value) => (Number.isInteger(value) ? String(value) : '--'),
+      },
+      {
+        key: 'earningsReleaseDate',
+        fieldPath: 'annualData[].earningsReleaseDate',
+        label: 'FY release date',
+        shortLabel: getShortLabel('FY release date'),
+        formatter: (value, options = {}) => formatFiscalReleaseLabel(value, options.compact),
+      },
+      {
         key: 'sharePrice',
         fieldPath: 'annualData[].base.sharePrice',
-        label: 'Share price (at FY release date)',
-        shortLabel: getShortLabel('Share price (at FY release date)'),
+        label: 'Share price',
+        shortLabel: getShortLabel('Share price'),
         formatter: (value, options = {}) => (options.compact ? formatShortCurrency(value) : formatCurrency(value)),
       },
       {
@@ -629,6 +829,40 @@ export default function SharePriceDashboard({
     return getColumnDensity(tablePoints.length);
   }, [tablePoints.length]);
 
+  const shortLabelLeftRailWidth = useMemo(() => {
+    const longestShortLabelLength = dashboardFieldRows.reduce((maximumLength, fieldRow) => {
+      return Math.max(maximumLength, String(fieldRow.shortLabel || '').length);
+    }, 0);
+
+    // Keep the short-label rail only as wide as the current short labels need,
+    // while leaving a small buffer so the text does not kiss the column edge.
+    return Math.max(
+      MIN_SHORT_LABEL_LEFT_RAIL_WIDTH,
+      Math.ceil(longestShortLabelLength * 6.5) + 18,
+    );
+  }, [dashboardFieldRows]);
+
+  const fullLabelLeftRailWidth = useMemo(() => {
+    const longestFullLabelLength = dashboardFieldRows.reduce((maximumLength, fieldRow) => {
+      return Math.max(maximumLength, String(fieldRow.label || '').length);
+    }, 0);
+
+    // Wide layouts should still hug the active full labels instead of keeping
+    // a stale oversized fixed rail. The small buffer preserves breathing room
+    // between the text and the column divider.
+    return Math.max(
+      MIN_FULL_LABEL_LEFT_RAIL_WIDTH,
+      Math.ceil(longestFullLabelLength * 6.6) + 18,
+    );
+  }, [dashboardFieldRows]);
+
+  const compactShortLabelLeftRailWidth = useMemo(() => {
+    return Math.max(
+      MIN_COMPACT_SHORT_LABEL_LEFT_RAIL_WIDTH,
+      shortLabelLeftRailWidth - 8,
+    );
+  }, [shortLabelLeftRailWidth]);
+
   const isCompactPresetTable = isPresetWindowMode
     && tablePoints.length >= 8
     && Boolean(scrollState.containerWidth)
@@ -637,8 +871,8 @@ export default function SharePriceDashboard({
   // do not have that extra width, so we switch to a compact presentation before the columns
   // become unreadable on mobile.
   const fixedLeftRailWidth = isCompactPresetTable
-    ? (shouldUseShortLabels ? 112 : 136)
-    : (shouldUseShortLabels ? 132 : FIXED_LEFT_RAIL_WIDTH);
+    ? (shouldUseShortLabels ? compactShortLabelLeftRailWidth : 136)
+    : (shouldUseShortLabels ? shortLabelLeftRailWidth : fullLabelLeftRailWidth);
 
   const timelineLayout = useMemo(() => {
     if (isPresetWindowMode) {
@@ -646,18 +880,23 @@ export default function SharePriceDashboard({
         (scrollState.containerWidth || (fixedLeftRailWidth + RIGHT_TIMELINE_MIN_WIDTH)) - fixedLeftRailWidth,
         1,
       );
-      const contentWidth = Math.max(timelineViewportWidth, 1);
+      const minimumColumnWidth = getPresetMinimumColumnWidth(isCompactPresetTable);
+      const minimumIntrinsicPlotWidth = tablePoints.length
+        ? tablePoints.length * minimumColumnWidth
+        : minimumColumnWidth;
+      const minimumIntrinsicContentWidth = minimumIntrinsicPlotWidth + CHART_RIGHT_PADDING;
+      const contentWidth = Math.max(timelineViewportWidth, minimumIntrinsicContentWidth, 1);
       const plotWidth = Math.max(contentWidth - CHART_RIGHT_PADDING, 1);
       const yearCellWidth = tablePoints.length
-        ? Math.max(Math.floor(plotWidth / tablePoints.length), isCompactPresetTable ? 32 : 42)
-        : 56;
+        ? Math.max(Math.floor(plotWidth / tablePoints.length), minimumColumnWidth)
+        : minimumColumnWidth;
 
       return {
         plotWidth,
         contentWidth,
         yearCellWidth,
-        headerFontSize: isCompactPresetTable ? { xs: '8px', sm: '9px' } : { xs: '9px', sm: '10px' },
-        bodyFontSize: isCompactPresetTable ? { xs: '8px', sm: '9px', md: '10px' } : { xs: '9px', sm: '10px', md: '11px' },
+        headerFontSize: isCompactPresetTable ? { xs: '10px', sm: '11px' } : { xs: '11px', sm: '12px' },
+        bodyFontSize: isCompactPresetTable ? { xs: '10px', sm: '11px', md: '12px' } : { xs: '11px', sm: '12px', md: '13px' },
       };
     }
 
@@ -667,8 +906,8 @@ export default function SharePriceDashboard({
       plotWidth,
       contentWidth: plotWidth + CHART_RIGHT_PADDING,
       yearCellWidth: columnDensity.columnWidth,
-      headerFontSize: { xs: columnDensity.headerFontSize, sm: '10px' },
-      bodyFontSize: { xs: columnDensity.bodyFontSize, sm: '10px', md: '11px' },
+      headerFontSize: { xs: '11px', sm: '12px' },
+      bodyFontSize: { xs: '11px', sm: '12px', md: '13px' },
     };
   }, [columnDensity, fixedLeftRailWidth, isCompactPresetTable, isPresetWindowMode, scrollState.containerWidth, tablePoints.length]);
 
@@ -835,6 +1074,15 @@ export default function SharePriceDashboard({
     };
   }, [isPresetWindowMode, scrollState.scrollLeft, scrollState.viewportWidth, timelineLayout.contentWidth, timelineLayout.plotWidth]);
 
+  const chartXGeometry = useMemo(() => {
+    return createChartXGeometry({
+      filteredPriceRows,
+      tablePoints,
+      plotWidth: timelineLayout.plotWidth,
+      yearCellWidth: timelineLayout.yearCellWidth,
+    });
+  }, [filteredPriceRows, tablePoints, timelineLayout.plotWidth, timelineLayout.yearCellWidth]);
+
   const visiblePriceRows = useMemo(() => {
     if (!filteredPriceRows.length) {
       return [];
@@ -844,11 +1092,8 @@ export default function SharePriceDashboard({
       return filteredPriceRows;
     }
 
-    const minTime = new Date(filteredPriceRows[0].date).getTime();
-    const maxTime = new Date(filteredPriceRows[filteredPriceRows.length - 1].date).getTime();
-    const timeRange = Math.max(maxTime - minTime, 1);
-    const visibleStartTime = minTime + ((visibleWindow.left / timelineLayout.plotWidth) * timeRange);
-    const visibleEndTime = minTime + ((visibleWindow.right / timelineLayout.plotWidth) * timeRange);
+    const visibleStartTime = chartXGeometry.mapXToTime(visibleWindow.left);
+    const visibleEndTime = chartXGeometry.mapXToTime(visibleWindow.right);
 
     const rowsInView = filteredPriceRows.filter((priceRow) => {
       const pointTime = new Date(priceRow.date).getTime();
@@ -856,7 +1101,7 @@ export default function SharePriceDashboard({
     });
 
     return rowsInView.length > 0 ? rowsInView : filteredPriceRows;
-  }, [filteredPriceRows, timelineLayout.plotWidth, visibleWindow.left, visibleWindow.right]);
+  }, [chartXGeometry, filteredPriceRows, visibleWindow.left, visibleWindow.right]);
 
   const rawVisibleScale = useMemo(() => {
     return getRawChartScale(visiblePriceRows);
@@ -1003,58 +1248,45 @@ export default function SharePriceDashboard({
   const chartGeometry = useMemo(() => {
     if (!filteredPriceRows.length) {
       return {
+        anchorPositions: [],
         svgPath: '',
         pointPositions: [],
         januaryPositions: [],
         minPrice: 0,
         maxPrice: 0,
         ticks: [],
-        minTime: 0,
-        timeRange: 1,
+        mapTimeToX: () => 0,
+        mapXToTime: () => 0,
       };
     }
 
-    const minTime = new Date(filteredPriceRows[0].date).getTime();
-    const maxTime = new Date(filteredPriceRows[filteredPriceRows.length - 1].date).getTime();
-    const timeRange = Math.max(maxTime - minTime, 1);
     // The visible window tells us which prices are onscreen right now.
     // The raw visible scale reacts immediately to that data, but the rendered scale
     // expands quickly and contracts more slowly so scroll-driven re-scaling feels calmer.
     const { minPrice, maxPrice, ticks } = renderedScale;
 
-    const pointPositions = tablePoints.map((annualRow) => {
-      const pointTime = new Date(annualRow.fiscalYearEndDate).getTime();
-
-      return {
-        fiscalYear: annualRow.fiscalYear,
-        date: annualRow.fiscalYearEndDate,
-        x: ((pointTime - minTime) / timeRange) * timelineLayout.plotWidth,
-      };
-    });
-
     return {
+      anchorPositions: chartXGeometry.anchorPositions,
       svgPath: buildSvgPath(
         filteredPriceRows,
         minPrice,
         maxPrice,
-        minTime,
-        timeRange,
-        timelineLayout.plotWidth,
+        chartXGeometry.mapTimeToX,
       ),
-      pointPositions,
+      pointPositions: chartXGeometry.anchorPositions,
       januaryPositions: getJanuaryPositions(
         filteredPriceRows,
-        minTime,
-        timeRange,
-        timelineLayout.plotWidth,
+        chartXGeometry.minTime,
+        chartXGeometry.maxTime,
+        chartXGeometry.mapTimeToX,
       ),
       minPrice,
       maxPrice,
       ticks,
-      minTime,
-      timeRange,
+      mapTimeToX: chartXGeometry.mapTimeToX,
+      mapXToTime: chartXGeometry.mapXToTime,
     };
-  }, [filteredPriceRows, renderedScale, tablePoints, timelineLayout.plotWidth]);
+  }, [chartXGeometry, filteredPriceRows, renderedScale]);
 
   const visibleYAxisLabels = useMemo(() => {
     if (chartGeometry.ticks.length <= 2) {
@@ -1114,8 +1346,7 @@ export default function SharePriceDashboard({
       return;
     }
 
-    const ratio = svgX / Math.max(timelineLayout.plotWidth, 1);
-    const targetTime = chartGeometry.minTime + (ratio * chartGeometry.timeRange);
+    const targetTime = chartGeometry.mapXToTime(svgX);
 
     let closestPoint = filteredPriceRows[0];
     let smallestDifference = Math.abs(new Date(filteredPriceRows[0].date).getTime() - targetTime);
@@ -1133,7 +1364,7 @@ export default function SharePriceDashboard({
     setHoverState({
       date: formatLongDate(closestPoint.date),
       price: closestPoint.close,
-      x: svgX,
+      x: chartGeometry.mapTimeToX(new Date(closestPoint.date).getTime()),
     });
   };
 
@@ -1143,6 +1374,40 @@ export default function SharePriceDashboard({
       price: null,
       x: null,
     });
+  };
+
+  const handleInvestmentCategoryChange = async (event) => {
+    const nextInvestmentCategory = event.target.value;
+
+    if (!identifier || !nextInvestmentCategory || nextInvestmentCategory === dashboardData?.investmentCategory) {
+      return;
+    }
+
+    setInvestmentCategoryError('');
+    setIsUpdatingInvestmentCategory(true);
+
+    try {
+      const updatedCategory = await updateDashboardInvestmentCategory(identifier, nextInvestmentCategory);
+
+      setDashboardData((previousDashboardData) => {
+        if (!previousDashboardData) {
+          return previousDashboardData;
+        }
+
+        return {
+          ...previousDashboardData,
+          investmentCategory: updatedCategory.investmentCategory,
+        };
+      });
+    } catch (requestError) {
+      setInvestmentCategoryError(
+        requestError.response?.data?.message ||
+          requestError.response?.data?.error ||
+          'Unable to update the investment category right now.',
+      );
+    } finally {
+      setIsUpdatingInvestmentCategory(false);
+    }
   };
 
   let cardBody = null;
@@ -1225,6 +1490,13 @@ export default function SharePriceDashboard({
             WebkitOverflowScrolling: 'touch',
           }}
           data-testid="share-price-dashboard-scroll-region"
+          data-scroll-mode={isPresetWindowMode ? 'preset' : 'range'}
+          data-surface-width={String(baseSurfaceWidth)}
+          data-scroll-surface-width={String(scrollSurfaceWidth)}
+          data-content-width={String(timelineLayout.contentWidth)}
+          data-plot-width={String(timelineLayout.plotWidth)}
+          data-year-cell-width={String(timelineLayout.yearCellWidth)}
+          data-left-rail-width={String(fixedLeftRailWidth)}
           ref={timelineScrollRef}
         >
           {/*
@@ -1285,7 +1557,7 @@ export default function SharePriceDashboard({
                 </Box>
 
                 <Box sx={{ width: timelineLayout.contentWidth, flexShrink: 0 }}>
-                  <Box sx={{ width: timelineLayout.contentWidth, p: { xs: 1, sm: 2 }, pb: 0 }}>
+                  <Box sx={{ width: timelineLayout.contentWidth, pb: 0 }}>
                     <svg
                       ref={svgRef}
                       viewBox={`0 0 ${timelineLayout.contentWidth} ${CHART_HEIGHT}`}
@@ -1340,6 +1612,10 @@ export default function SharePriceDashboard({
                       {chartGeometry.pointPositions.map((position) => (
                         <line
                           key={position.date}
+                          data-testid="share-price-dashboard-fiscal-tick"
+                          data-fiscal-year={String(position.fiscalYear)}
+                          data-date={position.date}
+                          data-x={String(position.x)}
                           x1={position.x}
                           y1={CHART_TOP_PADDING + CHART_PLOT_HEIGHT}
                           x2={position.x}
@@ -1411,8 +1687,8 @@ export default function SharePriceDashboard({
                         flexShrink: 0,
                         px: 1.25,
                         fontSize: tableRow.isHeader
-                          ? { xs: '9px', sm: '10px' }
-                          : { xs: '9px', sm: '10px', md: '11px' },
+                          ? { xs: '11px', sm: '12px' }
+                          : { xs: '11px', sm: '12px', md: '13px' },
                         fontWeight: tableRow.isHeader ? 600 : 400,
                         color: tableRow.isHeader ? '#64748b' : '#475569',
                         display: 'flex',
@@ -1445,6 +1721,11 @@ export default function SharePriceDashboard({
                         return (
                           <Box
                             key={`${tableRow.key}-${annualRow.fiscalYear}`}
+                            data-testid={tableRow.isHeader ? 'share-price-dashboard-header-cell' : undefined}
+                            data-fiscal-year={String(annualRow.fiscalYear)}
+                            data-date={annualRow.fiscalYearEndDate}
+                            data-center-x={String(position.x)}
+                            data-cell-width={String(timelineLayout.yearCellWidth)}
                             sx={{
                               position: 'absolute',
                               left: `${position.x}px`,
@@ -1512,11 +1793,54 @@ export default function SharePriceDashboard({
         </Typography>
       </CardContent>
 
-      {isRemovable ? (
-        <CardActions sx={{ pt: 0, px: 2 }}>
-          <Button color="error" size="small" onClick={onRemove}>
-            Remove stock
-          </Button>
+      {!isLoading && dashboardData ? (
+        <CardActions sx={{ pt: 0, px: 2, pb: 2, flexDirection: 'column', alignItems: 'stretch', gap: 1 }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 1.5 }}>
+            <Box
+              sx={{
+                border: '1px solid #cbd5e1',
+                borderRadius: 1,
+                backgroundColor: '#ffffff',
+                px: 1.5,
+                py: 0.75,
+                minWidth: 210,
+              }}
+            >
+              <select
+                aria-label="Investment Category"
+                value={dashboardData.investmentCategory || ''}
+                onChange={handleInvestmentCategoryChange}
+                disabled={isUpdatingInvestmentCategory}
+                style={{
+                  width: '100%',
+                  border: 'none',
+                  backgroundColor: 'transparent',
+                  color: '#1e293b',
+                  fontSize: '0.95rem',
+                  fontWeight: 500,
+                  outline: 'none',
+                }}
+              >
+                {INVESTMENT_CATEGORY_OPTIONS.map((categoryName) => (
+                  <option key={categoryName} value={categoryName}>
+                    {categoryName}
+                  </option>
+                ))}
+              </select>
+            </Box>
+
+            {isRemovable ? (
+              <Button color="error" size="small" onClick={onRemove}>
+                Remove stock
+              </Button>
+            ) : null}
+          </Box>
+
+          {investmentCategoryError ? (
+            <Typography variant="body2" color="error" align="center">
+              {investmentCategoryError}
+            </Typography>
+          ) : null}
         </CardActions>
       ) : null}
 

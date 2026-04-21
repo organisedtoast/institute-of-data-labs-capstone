@@ -13,8 +13,9 @@ export const SECTION_SHORT_LABELS = {
 
 const EXACT_SHORT_LABELS = {
   'FY end date': 'FY END',
-  'FY earnings release date': 'FY Release',
-  'Share price (at FY release date)': 'Px',
+  'Fiscal year': 'FY',
+  'FY release date': 'FY release',
+  'Share price': 'SP',
   'Shares on issue': 'SOI',
   'Market cap': 'Mkt Cap',
   Cash: 'Cash',

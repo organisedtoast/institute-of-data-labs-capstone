@@ -7,6 +7,7 @@ require("dotenv").config();
 const { connectDB, disconnectDB } = require("../config/db");
 const WatchlistStock = require("../models/WatchlistStock");
 const { ensureDefaultLenses, resolveVisibleFieldsForCategory, resolveVisibleFieldsForStock } = require("../services/lensService");
+const { migrateInvestmentCategoryNames } = require("../services/investmentCategoryMigrationService");
 
 function readArg(flag) {
   const index = process.argv.indexOf(flag);
@@ -30,6 +31,7 @@ async function main() {
   }
 
   await connectDB();
+  await migrateInvestmentCategoryNames();
   await ensureDefaultLenses();
 
   try {
