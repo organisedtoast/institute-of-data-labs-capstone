@@ -15,6 +15,16 @@ import {
   getRawChartScale,
   getTargetChartScale,
 } from './sharePriceChartScale';
+import TimeSeriesChartSvg from './TimeSeriesChartSvg';
+import {
+  DEFAULT_CHART_BOTTOM_PADDING,
+  DEFAULT_CHART_TOP_PADDING,
+  buildLinearTimeMapper,
+  buildSvgPath,
+  getChartYPosition,
+  getChartPlotHeight,
+  getJanuaryPositions,
+} from './timeSeriesChartCore';
 import {
   fetchDashboardData,
   updateDashboardInvestmentCategory,
@@ -22,9 +32,12 @@ import {
 
 const CHART_HEIGHT = 280;
 const CHART_RIGHT_PADDING = 24;
-const CHART_TOP_PADDING = 20;
-const CHART_BOTTOM_PADDING = 20;
-const CHART_PLOT_HEIGHT = CHART_HEIGHT - CHART_TOP_PADDING - CHART_BOTTOM_PADDING;
+const CHART_TOP_PADDING = DEFAULT_CHART_TOP_PADDING;
+const CHART_BOTTOM_PADDING = DEFAULT_CHART_BOTTOM_PADDING;
+const CHART_PLOT_HEIGHT = getChartPlotHeight(CHART_HEIGHT, {
+  topPadding: CHART_TOP_PADDING,
+  bottomPadding: CHART_BOTTOM_PADDING,
+});
 const RIGHT_TIMELINE_MIN_WIDTH = 720;
 const HEADER_ROW_HEIGHT = 36;
 const DATA_ROW_HEIGHT = 32;
@@ -40,6 +53,11 @@ const PRESET_COMPACT_MIN_COLUMN_WIDTH = 48;
 const MIN_FULL_LABEL_LEFT_RAIL_WIDTH = 120;
 const MIN_SHORT_LABEL_LEFT_RAIL_WIDTH = 76;
 const MIN_COMPACT_SHORT_LABEL_LEFT_RAIL_WIDTH = 68;
+const FISCAL_BAND_FILL = 'rgba(148, 163, 184, 0.08)';
+const ACTIVE_FISCAL_BAND_FILL = 'rgba(148, 163, 184, 0.12)';
+const FY_WATERMARK_OPACITY = 0.16;
+const LONG_PRESS_ACTIVATION_MS = 400;
+const LONG_PRESS_MOVE_TOLERANCE_PX = 10;
 
 const PRESET_BUTTONS = [
   { key: 'MAX', label: 'MAX', monthCount: null },
@@ -307,27 +325,6 @@ function getPresetMinimumColumnWidth(isCompactPresetTable) {
   return isCompactPresetTable ? PRESET_COMPACT_MIN_COLUMN_WIDTH : PRESET_MIN_COLUMN_WIDTH;
 }
 
-function createLinearTimeMapper(minTime, maxTime, plotWidth) {
-  const safePlotWidth = Math.max(plotWidth, 1);
-  const safeMinTime = Number.isFinite(minTime) ? minTime : 0;
-  const safeMaxTime = Number.isFinite(maxTime) ? maxTime : safeMinTime;
-  const timeRange = Math.max(safeMaxTime - safeMinTime, 1);
-
-  return {
-    minTime: safeMinTime,
-    maxTime: safeMaxTime,
-    timeRange,
-    mapTimeToX(timestamp) {
-      const clampedTime = Math.min(Math.max(timestamp, safeMinTime), safeMaxTime);
-      return ((clampedTime - safeMinTime) / timeRange) * safePlotWidth;
-    },
-    mapXToTime(x) {
-      const clampedX = Math.min(Math.max(x, 0), safePlotWidth);
-      return safeMinTime + ((clampedX / safePlotWidth) * timeRange);
-    },
-  };
-}
-
 function interpolateSegment({ startTime, endTime, startX, endX }, value, inputKey, outputKey) {
   const inputRange = endTime - startTime;
 
@@ -358,7 +355,7 @@ function createChartXGeometry({ filteredPriceRows, tablePoints, plotWidth, yearC
 
   const minTime = new Date(filteredPriceRows[0].date).getTime();
   const maxTime = new Date(filteredPriceRows[filteredPriceRows.length - 1].date).getTime();
-  const linearMapper = createLinearTimeMapper(minTime, maxTime, plotWidth);
+  const linearMapper = buildLinearTimeMapper(minTime, maxTime, plotWidth);
 
   if (!tablePoints.length || yearCellWidth <= 0) {
     return {
@@ -469,54 +466,6 @@ function createChartXGeometry({ filteredPriceRows, tablePoints, plotWidth, yearC
   };
 }
 
-function buildSvgPath(priceRows, minPrice, maxPrice, mapTimeToX) {
-  if (!priceRows.length) {
-    return '';
-  }
-
-  const priceRange = maxPrice - minPrice || 1;
-
-  const points = priceRows.map((priceRow) => {
-    const x = mapTimeToX(new Date(priceRow.date).getTime());
-    const y = CHART_TOP_PADDING + CHART_PLOT_HEIGHT - (((priceRow.close - minPrice) / priceRange) * CHART_PLOT_HEIGHT);
-
-    return `${x},${y}`;
-  });
-
-  return points.length === 1 ? `M ${points[0]} L ${points[0]}` : `M ${points.join(' L ')}`;
-}
-
-function getChartYPosition(priceValue, minPrice, maxPrice) {
-  const priceRange = maxPrice - minPrice || 1;
-
-  return CHART_TOP_PADDING + CHART_PLOT_HEIGHT - (((priceValue - minPrice) / priceRange) * CHART_PLOT_HEIGHT);
-}
-
-function getJanuaryPositions(priceRows, minTime, maxTime, mapTimeToX) {
-  if (!priceRows.length) {
-    return [];
-  }
-
-  const startYear = new Date(priceRows[0].date).getFullYear();
-  const endYear = new Date(priceRows[priceRows.length - 1].date).getFullYear();
-  const positions = [];
-
-  for (let year = startYear; year <= endYear; year += 1) {
-    const januaryFirstTime = new Date(`${year}-01-01T00:00:00Z`).getTime();
-
-    if (januaryFirstTime < minTime || januaryFirstTime > maxTime) {
-      continue;
-    }
-
-    positions.push({
-      year,
-      x: mapTimeToX(januaryFirstTime),
-    });
-  }
-
-  return positions;
-}
-
 function useMediaQueryMatch(mediaQuery) {
   const getMatches = () => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -585,6 +534,7 @@ export default function SharePriceDashboard({
     price: null,
     x: null,
   });
+  const [activeFiscalBand, setActiveFiscalBand] = useState(null);
   const [scrollState, setScrollState] = useState({
     containerWidth: 0,
     scrollLeft: 0,
@@ -606,6 +556,12 @@ export default function SharePriceDashboard({
   const presetBootstrapFrameRef = useRef(null);
   const animationFrameRef = useRef(null);
   const contractionTimeoutRef = useRef(null);
+  const longPressTimeoutRef = useRef(null);
+  const touchLongPressStateRef = useRef({
+    isActive: false,
+    startClientX: 0,
+    startClientY: 0,
+  });
 
   useEffect(() => {
     let isMounted = true;
@@ -1249,6 +1205,7 @@ export default function SharePriceDashboard({
     if (!filteredPriceRows.length) {
       return {
         anchorPositions: [],
+        fiscalYearBands: [],
         svgPath: '',
         pointPositions: [],
         januaryPositions: [],
@@ -1264,14 +1221,35 @@ export default function SharePriceDashboard({
     // The raw visible scale reacts immediately to that data, but the rendered scale
     // expands quickly and contracts more slowly so scroll-driven re-scaling feels calmer.
     const { minPrice, maxPrice, ticks } = renderedScale;
+    const fiscalYearBands = chartXGeometry.anchorPositions.map((anchorPosition, index) => {
+      const unclippedStartX = anchorPosition.x - (timelineLayout.yearCellWidth / 2);
+      const unclippedEndX = anchorPosition.x + (timelineLayout.yearCellWidth / 2);
+      const startX = Math.max(0, unclippedStartX);
+      const endX = Math.min(timelineLayout.plotWidth, unclippedEndX);
+
+      return {
+        fiscalYear: anchorPosition.fiscalYear,
+        centerX: anchorPosition.x,
+        startX,
+        endX,
+        width: Math.max(endX - startX, 0),
+        isAlternate: index % 2 === 1,
+      };
+    }).filter((band) => band.width > 0);
 
     return {
       anchorPositions: chartXGeometry.anchorPositions,
+      fiscalYearBands,
       svgPath: buildSvgPath(
         filteredPriceRows,
         minPrice,
         maxPrice,
         chartXGeometry.mapTimeToX,
+        CHART_HEIGHT,
+        {
+          topPadding: CHART_TOP_PADDING,
+          bottomPadding: CHART_BOTTOM_PADDING,
+        },
       ),
       pointPositions: chartXGeometry.anchorPositions,
       januaryPositions: getJanuaryPositions(
@@ -1286,7 +1264,7 @@ export default function SharePriceDashboard({
       mapTimeToX: chartXGeometry.mapTimeToX,
       mapXToTime: chartXGeometry.mapXToTime,
     };
-  }, [chartXGeometry, filteredPriceRows, renderedScale]);
+  }, [chartXGeometry, filteredPriceRows, renderedScale, timelineLayout.plotWidth, timelineLayout.yearCellWidth]);
 
   const visibleYAxisLabels = useMemo(() => {
     if (chartGeometry.ticks.length <= 2) {
@@ -1328,21 +1306,48 @@ export default function SharePriceDashboard({
     setPresetPanOffsetMonths(0);
   };
 
-  const handleMouseMove = (event) => {
-    if (!svgRef.current || !filteredPriceRows.length) {
-      return;
+  const clearHoverState = () => {
+    setHoverState({
+      date: '',
+      price: null,
+      x: null,
+    });
+  };
+
+  const clearActiveFiscalBand = () => {
+    setActiveFiscalBand(null);
+  };
+
+  const clearLongPressTimeout = () => {
+    if (longPressTimeoutRef.current) {
+      clearTimeout(longPressTimeoutRef.current);
+      longPressTimeoutRef.current = null;
+    }
+  };
+
+  const getSvgXFromClientX = (clientX) => {
+    const svgRect = svgRef.current?.getBoundingClientRect?.();
+
+    if (!svgRect || !svgRect.width || !Number.isFinite(clientX)) {
+      return null;
     }
 
-    const svgRect = svgRef.current.getBoundingClientRect();
-    const mouseX = event.clientX - svgRect.left;
-    const svgX = (mouseX / svgRect.width) * timelineLayout.contentWidth;
+    return ((clientX - svgRect.left) / svgRect.width) * timelineLayout.contentWidth;
+  };
 
-    if (svgX < 0 || svgX > timelineLayout.plotWidth) {
-      setHoverState({
-        date: '',
-        price: null,
-        x: null,
-      });
+  const resolveFiscalBandForSvgX = (svgX) => {
+    if (!Number.isFinite(svgX) || svgX < 0 || svgX > timelineLayout.plotWidth) {
+      return null;
+    }
+
+    return chartGeometry.fiscalYearBands.find((band) => {
+      return svgX >= band.startX && svgX <= band.endX;
+    }) || null;
+  };
+
+  const updateHoverStateFromSvgX = (svgX) => {
+    if (!filteredPriceRows.length || svgX === null || svgX < 0 || svgX > timelineLayout.plotWidth) {
+      clearHoverState();
       return;
     }
 
@@ -1368,13 +1373,72 @@ export default function SharePriceDashboard({
     });
   };
 
-  const handleMouseLeave = () => {
-    setHoverState({
-      date: '',
-      price: null,
-      x: null,
-    });
+  const handleMouseMove = (event) => {
+    if (!svgRef.current || !filteredPriceRows.length) {
+      return;
+    }
+
+    const svgX = getSvgXFromClientX(event.clientX);
+    updateHoverStateFromSvgX(svgX);
+    setActiveFiscalBand(resolveFiscalBandForSvgX(svgX));
   };
+
+  const handleMouseLeave = () => {
+    clearHoverState();
+    clearActiveFiscalBand();
+  };
+
+  const handleTouchStart = (event) => {
+    if (!event.touches?.length) {
+      return;
+    }
+
+    const touch = event.touches[0];
+    touchLongPressStateRef.current = {
+      isActive: false,
+      startClientX: touch.clientX,
+      startClientY: touch.clientY,
+    };
+
+    clearLongPressTimeout();
+    longPressTimeoutRef.current = window.setTimeout(() => {
+      touchLongPressStateRef.current.isActive = true;
+      const svgX = getSvgXFromClientX(touch.clientX);
+      setActiveFiscalBand(resolveFiscalBandForSvgX(svgX));
+    }, LONG_PRESS_ACTIVATION_MS);
+  };
+
+  const handleTouchMove = (event) => {
+    if (!event.touches?.length) {
+      return;
+    }
+
+    const touch = event.touches[0];
+    const deltaX = Math.abs(touch.clientX - touchLongPressStateRef.current.startClientX);
+    const deltaY = Math.abs(touch.clientY - touchLongPressStateRef.current.startClientY);
+
+    if (!touchLongPressStateRef.current.isActive) {
+      if (deltaX > LONG_PRESS_MOVE_TOLERANCE_PX || deltaY > LONG_PRESS_MOVE_TOLERANCE_PX) {
+        clearLongPressTimeout();
+      }
+      return;
+    }
+
+    const svgX = getSvgXFromClientX(touch.clientX);
+    setActiveFiscalBand(resolveFiscalBandForSvgX(svgX));
+  };
+
+  const handleTouchEnd = () => {
+    clearLongPressTimeout();
+    touchLongPressStateRef.current.isActive = false;
+    clearActiveFiscalBand();
+  };
+
+  useEffect(() => {
+    return () => {
+      clearLongPressTimeout();
+    };
+  }, []);
 
   const handleInvestmentCategoryChange = async (event) => {
     const nextInvestmentCategory = event.target.value;
@@ -1545,7 +1609,16 @@ export default function SharePriceDashboard({
                       sx={{
                         position: 'absolute',
                         right: 8,
-                        top: `${getChartYPosition(tickValue, chartGeometry.minPrice, chartGeometry.maxPrice)}px`,
+                        top: `${getChartYPosition(
+                          tickValue,
+                          chartGeometry.minPrice,
+                          chartGeometry.maxPrice,
+                          CHART_HEIGHT,
+                          {
+                            topPadding: CHART_TOP_PADDING,
+                            bottomPadding: CHART_BOTTOM_PADDING,
+                          },
+                        )}px`,
                         transform: 'translateY(-50%)',
                         lineHeight: 1,
                         whiteSpace: 'nowrap',
@@ -1558,106 +1631,79 @@ export default function SharePriceDashboard({
 
                 <Box sx={{ width: timelineLayout.contentWidth, flexShrink: 0 }}>
                   <Box sx={{ width: timelineLayout.contentWidth, pb: 0 }}>
-                    <svg
-                      ref={svgRef}
-                      viewBox={`0 0 ${timelineLayout.contentWidth} ${CHART_HEIGHT}`}
-                      style={{ width: `${timelineLayout.contentWidth}px`, height: `${CHART_HEIGHT}px`, cursor: 'crosshair', display: 'block' }}
-                      onMouseMove={handleMouseMove}
-                      onMouseLeave={handleMouseLeave}
-                    >
-                      <rect x="0" y={CHART_TOP_PADDING} width={timelineLayout.plotWidth} height={CHART_PLOT_HEIGHT} fill="white" />
-
-                      {/* The gridlines come from the full rounded tick list so the
-                        horizontal guides always match the scale values exactly. */}
-                      {chartGeometry.ticks.map((tickValue) => {
-                        const yPosition = getChartYPosition(
+                    <TimeSeriesChartSvg
+                      svgRef={svgRef}
+                      chartHeight={CHART_HEIGHT}
+                      contentWidth={timelineLayout.contentWidth}
+                      plotWidth={timelineLayout.plotWidth}
+                      backgroundBands={chartGeometry.fiscalYearBands.map((band) => ({
+                        key: `fiscal-band-${band.fiscalYear}`,
+                        testId: 'share-price-dashboard-fiscal-band',
+                        startX: band.startX,
+                        width: band.width,
+                        fill: activeFiscalBand?.fiscalYear === band.fiscalYear
+                          ? ACTIVE_FISCAL_BAND_FILL
+                          : (band.isAlternate ? FISCAL_BAND_FILL : 'transparent'),
+                        dataAttributes: {
+                          'fiscal-year': band.fiscalYear,
+                          'start-x': band.startX,
+                          width: band.width,
+                          'center-x': band.centerX,
+                          'is-alternate': band.isAlternate,
+                        },
+                      }))}
+                      horizontalGridLines={chartGeometry.ticks.map((tickValue) => ({
+                        key: tickValue,
+                        testId: 'share-price-dashboard-y-gridline',
+                        y: getChartYPosition(
                           tickValue,
                           chartGeometry.minPrice,
                           chartGeometry.maxPrice,
-                        );
-
-                        return (
-                          <line
-                            key={tickValue}
-                            data-testid="share-price-dashboard-y-gridline"
-                            x1="0"
-                            y1={yPosition}
-                            x2={timelineLayout.plotWidth}
-                            y2={yPosition}
-                            stroke="#f1f5f9"
-                          />
-                        );
-                      })}
-
-                      {chartGeometry.januaryPositions.map((position) => (
-                        <line
-                          key={position.year}
-                          x1={position.x}
-                          y1={CHART_TOP_PADDING}
-                          x2={position.x}
-                          y2={CHART_TOP_PADDING + CHART_PLOT_HEIGHT}
-                          stroke="#e2e8f0"
-                        />
-                      ))}
-
-                      <path
-                        d={chartGeometry.svgPath}
-                        fill="none"
-                        stroke="#c2410c"
-                        strokeWidth="4"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-
-                      {chartGeometry.pointPositions.map((position) => (
-                        <line
-                          key={position.date}
-                          data-testid="share-price-dashboard-fiscal-tick"
-                          data-fiscal-year={String(position.fiscalYear)}
-                          data-date={position.date}
-                          data-x={String(position.x)}
-                          x1={position.x}
-                          y1={CHART_TOP_PADDING + CHART_PLOT_HEIGHT}
-                          x2={position.x}
-                          y2={CHART_TOP_PADDING + CHART_PLOT_HEIGHT + 10}
-                          stroke="#cbd5e1"
-                          strokeWidth="2"
-                        />
-                      ))}
-
-                      {hoverState.x !== null && hoverState.price !== null ? (
-                        <g>
-                          <line
-                            x1={hoverState.x}
-                            y1={CHART_TOP_PADDING}
-                            x2={hoverState.x}
-                            y2={CHART_TOP_PADDING + CHART_PLOT_HEIGHT}
-                            stroke="#3b82f6"
-                            strokeWidth="1.5"
-                            strokeDasharray="4 4"
-                            opacity="0.8"
-                          />
-                          <rect
-                            x={Math.max(0, Math.min(hoverState.x - 60, timelineLayout.plotWidth - 120))}
-                            y="5"
-                            width="120"
-                            height="36"
-                            fill="white"
-                            stroke="#3b82f6"
-                            rx="4"
-                            opacity="0.95"
-                          />
-                          <text x={hoverState.x} y="18" textAnchor="middle" fontSize="8" fontWeight="600" fill="#64748b">
-                            {hoverState.date}
-                          </text>
-                          <text x={hoverState.x} y="32" textAnchor="middle" fontSize="10" fontWeight="700" fill="#c2410c">
-                            {formatCurrency(hoverState.price)}
-                          </text>
-                        </g>
-                      ) : null}
-
-                      <line x1="0" y1={CHART_TOP_PADDING} x2="0" y2={CHART_TOP_PADDING + CHART_PLOT_HEIGHT} stroke="#cbd5e1" />
-                    </svg>
+                          CHART_HEIGHT,
+                          {
+                            topPadding: CHART_TOP_PADDING,
+                            bottomPadding: CHART_BOTTOM_PADDING,
+                          },
+                        ),
+                      }))}
+                      verticalMarkers={chartGeometry.januaryPositions.map((position) => ({
+                        key: position.year,
+                        x: position.x,
+                      }))}
+                      linePath={chartGeometry.svgPath}
+                      bottomMarkers={chartGeometry.pointPositions.map((position) => ({
+                        key: position.date,
+                        testId: 'share-price-dashboard-fiscal-tick',
+                        x: position.x,
+                        dataAttributes: {
+                          'fiscal-year': position.fiscalYear,
+                          date: position.date,
+                          x: position.x,
+                        },
+                      }))}
+                      hoverState={hoverState.x !== null && hoverState.price !== null ? {
+                        x: hoverState.x,
+                        label: hoverState.date,
+                        value: hoverState.price,
+                      } : null}
+                      hoverValueFormatter={(value) => formatCurrency(value)}
+                      watermark={activeFiscalBand ? {
+                        testId: 'share-price-dashboard-fiscal-watermark',
+                        x: activeFiscalBand.centerX,
+                        y: CHART_TOP_PADDING + (CHART_PLOT_HEIGHT / 2),
+                        text: `FY ${activeFiscalBand.fiscalYear}`,
+                        opacity: FY_WATERMARK_OPACITY,
+                        dataAttributes: {
+                          'fiscal-year': activeFiscalBand.fiscalYear,
+                        },
+                      } : null}
+                      onMouseMove={handleMouseMove}
+                      onMouseLeave={handleMouseLeave}
+                      onTouchStart={handleTouchStart}
+                      onTouchMove={handleTouchMove}
+                      onTouchEnd={handleTouchEnd}
+                      onTouchCancel={handleTouchEnd}
+                    />
                   </Box>
                 </Box>
               </Box>

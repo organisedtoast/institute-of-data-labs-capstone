@@ -204,3 +204,28 @@ export function formatYAxisPrice(value, tickValues) {
     maximumFractionDigits: decimalPlaces,
   }).format(value);
 }
+
+export function buildRoundedIntegerChartScale(minValue, maxValue, options = {}) {
+  const roundedScale = buildRoundedChartScale(minValue, maxValue, options);
+  const roundedMinValue = Math.max(0, Math.floor(roundedScale.minPrice));
+  const roundedMaxValue = Math.ceil(roundedScale.maxPrice);
+  const valueRange = Math.max(roundedMaxValue - roundedMinValue, 1);
+  const preferredTickCount = Math.max(options.preferredTickCount ?? 6, 2);
+  const desiredStep = Math.max(Math.ceil(valueRange / (preferredTickCount - 1)), 1);
+  const step = Math.max(Math.ceil(getNiceStepSize(desiredStep)), 1);
+  const axisScale = buildAxisFromStep(roundedMinValue, roundedMaxValue, step);
+
+  return {
+    minPrice: Math.max(0, Math.round(axisScale.minPrice)),
+    maxPrice: Math.round(axisScale.maxPrice),
+    step: Math.max(Math.round(axisScale.step), 1),
+    ticks: axisScale.ticks.map((tickValue) => Math.round(tickValue)),
+  };
+}
+
+export function formatYAxisInteger(value) {
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(Math.round(value));
+}

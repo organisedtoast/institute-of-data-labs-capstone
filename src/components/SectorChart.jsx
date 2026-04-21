@@ -1,27 +1,55 @@
-import { useEffect } from 'react';
-// Import LineChart component from MUI X Charts library
-// This is a pre-built chart component that makes it easy to create line charts
-import { LineChart } from '@mui/x-charts/LineChart';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 
-// Import data and formatter functions from the dataset file
-// dateAxisFormatter: function to format dates on the x-axis
-// priceFormatter: function to format values as plain numbers on the y-axis
 import {
-  dateAxisFormatter,
   filterDataByMonthRange,
   getMonthBoundsFromData,
-  priceFormatter,
 } from '../dataset/SharePrice';
-// Import the dedicated dummy dataset for the sector chart.
-// Keeping this data in its own file makes the chart component easier to read.
 import { SectorPrice } from '../dataset/SectorPrice';
-import ChartDateRangeControls from './ChartDateRangeControls';
 import useChartDateRange from '../hooks/useChartDateRange';
+import ChartDateRangeControls from './ChartDateRangeControls';
+import {
+  buildRoundedIntegerChartScale,
+  formatYAxisInteger,
+  getPreferredTickCount,
+  getRawChartScale,
+} from './sharePriceChartScale';
+import TimeSeriesChartSvg from './TimeSeriesChartSvg';
+import {
+  DEFAULT_CHART_BOTTOM_PADDING,
+  DEFAULT_CHART_TOP_PADDING,
+  buildLinearTimeMapper,
+  buildSvgPath,
+  getChartPlotHeight,
+  getChartYPosition,
+  getClosestDataPoint,
+  getJanuaryPositions,
+} from './timeSeriesChartCore';
 
-// SectorChart component - renders a line chart showing share price over time
+const SECTOR_CHART_HEIGHT = 360;
+const SECTOR_CHART_RIGHT_PADDING = 16;
+const SECTOR_Y_AXIS_WIDTH = 68;
+const SECTOR_CHART_FALLBACK_WIDTH = 540;
+
+const sectorHoverDateFormatter = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  year: 'numeric',
+});
+
+function formatSectorHoverDate(dateString) {
+  return sectorHoverDateFormatter.format(new Date(dateString));
+}
+
 export default function SectorChart() {
+  const svgRef = useRef(null);
+  const chartViewportRef = useRef(null);
+  const [chartWidth, setChartWidth] = useState(0);
+  const [hoverState, setHoverState] = useState({
+    label: '',
+    value: null,
+    x: null,
+  });
   const {
     startDate,
     endDate,
@@ -36,70 +64,162 @@ export default function SectorChart() {
     applyTrailingRange,
   } = useChartDateRange();
 
-  // The sector chart uses local demo data instead of the external stock API.
-  // We still reuse the same hook so the date-picker behaviour stays consistent across the app.
-  // Because the dataset is local and already available, we only filter what is displayed.
   useEffect(() => {
     initializeRangeFromData(SectorPrice);
   }, [initializeRangeFromData]);
 
+  useLayoutEffect(() => {
+    const updateChartWidth = () => {
+      setChartWidth(chartViewportRef.current?.clientWidth || 0);
+    };
+
+    updateChartWidth();
+
+    if (typeof ResizeObserver === 'function' && chartViewportRef.current) {
+      const observer = new ResizeObserver((entries) => {
+        const nextWidth = entries[0]?.contentRect?.width ?? chartViewportRef.current?.clientWidth ?? 0;
+        setChartWidth(nextWidth);
+      });
+
+      observer.observe(chartViewportRef.current);
+
+      return () => {
+        observer.disconnect();
+      };
+    }
+
+    window.addEventListener('resize', updateChartWidth);
+
+    return () => {
+      window.removeEventListener('resize', updateChartWidth);
+    };
+  }, []);
+
   const filteredSectorData = filterDataByMonthRange(SectorPrice, startDate, endDate);
   const { earliestMonth, latestMonth } = getMonthBoundsFromData(SectorPrice);
+  const effectiveChartWidth = chartWidth || SECTOR_CHART_FALLBACK_WIDTH;
+  const plotWidth = Math.max(effectiveChartWidth - SECTOR_CHART_RIGHT_PADDING, 1);
+  const contentWidth = plotWidth + SECTOR_CHART_RIGHT_PADDING;
+  const plotHeight = getChartPlotHeight(SECTOR_CHART_HEIGHT, {
+    topPadding: DEFAULT_CHART_TOP_PADDING,
+    bottomPadding: DEFAULT_CHART_BOTTOM_PADDING,
+  });
 
-  // xAxis configuration array - defines how the horizontal axis (x-axis) behaves
-  // Each object in the array configures one axis
-  const xAxis = [
-    {
-      // dataKey: specifies which property from the dataset to use for this axis
-      // In our case, each data object has a 'date' property
-      dataKey: 'date',
+  const chartGeometry = useMemo(() => {
+    if (!filteredSectorData.length) {
+      return {
+        januaryPositions: [],
+        mapTimeToX: () => 0,
+        mapXToTime: () => 0,
+        maxPrice: 5,
+        minPrice: 0,
+        svgPath: '',
+        ticks: [0, 1, 2, 3, 4, 5],
+      };
+    }
 
-      // scaleType: 'point' treats the data as categorical points
-      // Works with string date values like "2020-01-01"
-      scaleType: 'point',
+    const rawScale = getRawChartScale(filteredSectorData);
+    const roundedScale = buildRoundedIntegerChartScale(
+      rawScale.minPrice,
+      rawScale.maxPrice,
+      { preferredTickCount: getPreferredTickCount(plotHeight) },
+    );
+    const minTime = new Date(filteredSectorData[0].date).getTime();
+    const maxTime = new Date(filteredSectorData[filteredSectorData.length - 1].date).getTime();
+    const linearMapper = buildLinearTimeMapper(minTime, maxTime, plotWidth);
 
-      // valueFormatter: function that formats how the dates appear on the axis
-      // Uses dateAxisFormatter to show "Jan 2020" instead of raw date strings
-      valueFormatter: dateAxisFormatter,
-    },
-  ];
+    return {
+      januaryPositions: getJanuaryPositions(
+        filteredSectorData,
+        minTime,
+        maxTime,
+        linearMapper.mapTimeToX,
+      ),
+      mapTimeToX: linearMapper.mapTimeToX,
+      mapXToTime: linearMapper.mapXToTime,
+      maxPrice: roundedScale.maxPrice,
+      minPrice: roundedScale.minPrice,
+      svgPath: buildSvgPath(
+        filteredSectorData,
+        roundedScale.minPrice,
+        roundedScale.maxPrice,
+        linearMapper.mapTimeToX,
+        SECTOR_CHART_HEIGHT,
+        {
+          topPadding: DEFAULT_CHART_TOP_PADDING,
+          bottomPadding: DEFAULT_CHART_BOTTOM_PADDING,
+        },
+      ),
+      ticks: roundedScale.ticks,
+    };
+  }, [filteredSectorData, plotHeight, plotWidth]);
 
-  // yAxis configuration array - defines how the vertical axis (y-axis) behaves
-  const yAxis = [
-    {
-      // valueFormatter: function that formats the numbers on the y-axis
-      // Uses priceFormatter to show "36.00" instead of percentages
-      valueFormatter: priceFormatter,
+  const clearHoverState = () => {
+    setHoverState({
+      label: '',
+      value: null,
+      x: null,
+    });
+  };
 
-      // Keep the y-axis labels compact and readable.
-      tickLabelStyle: {
-        fontSize: 11,
-      },
-    },
-  ];
+  const getSvgXFromClientX = (clientX) => {
+    const svgRect = svgRef.current?.getBoundingClientRect?.();
 
-  // series configuration array - defines the lines/series to plot on the chart
-  // Each object in the array creates one line on the chart
-  const series = [
-    {
-      // dataKey: specifies which property from the dataset to plot as a line
-      // In our case, each data object has a 'close' property (share price)
-      dataKey: 'close',
+    if (!svgRect || !svgRect.width || !Number.isFinite(clientX)) {
+      return null;
+    }
 
-      // showMark: false hides the individual data point circles on the line
-      // Set to true if you want to see a dot at each data point
-      showMark: false,
+    return ((clientX - svgRect.left) / svgRect.width) * contentWidth;
+  };
 
-      // valueFormatter: formats the value shown in tooltips when hovering over the line
-      valueFormatter: priceFormatter,
+  const updateHoverStateFromSvgX = (svgX) => {
+    if (!filteredSectorData.length || svgX === null || svgX < 0 || svgX > plotWidth) {
+      clearHoverState();
+      return;
+    }
 
-      // Give the sector chart line a dark-orange color so it matches the desired chart styling.
-      color: '#c2410c',
+    const targetTime = chartGeometry.mapXToTime(svgX);
+    const closestPoint = getClosestDataPoint(filteredSectorData, targetTime);
 
-      // Make the line much easier to see by doubling the thickness from the default look.
-      strokeWidth: 4,
-    },
-  ];
+    if (!closestPoint) {
+      clearHoverState();
+      return;
+    }
+
+    setHoverState({
+      label: formatSectorHoverDate(closestPoint.date),
+      value: closestPoint.close,
+      x: chartGeometry.mapTimeToX(new Date(closestPoint.date).getTime()),
+    });
+  };
+
+  const handleMouseMove = (event) => {
+    updateHoverStateFromSvgX(getSvgXFromClientX(event.clientX));
+  };
+
+  const handleMouseLeave = () => {
+    clearHoverState();
+  };
+
+  const handleTouchStart = (event) => {
+    if (!event.touches?.length) {
+      return;
+    }
+
+    updateHoverStateFromSvgX(getSvgXFromClientX(event.touches[0].clientX));
+  };
+
+  const handleTouchMove = (event) => {
+    if (!event.touches?.length) {
+      return;
+    }
+
+    updateHoverStateFromSvgX(getSvgXFromClientX(event.touches[0].clientX));
+  };
+
+  const handleTouchEnd = () => {
+    clearHoverState();
+  };
 
   if (!isRangeValid) {
     return (
@@ -112,7 +232,7 @@ export default function SectorChart() {
       >
         <Box
           sx={{
-            minHeight: 360,
+            minHeight: SECTOR_CHART_HEIGHT,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -149,7 +269,7 @@ export default function SectorChart() {
       >
         <Box
           sx={{
-            minHeight: 360,
+            minHeight: SECTOR_CHART_HEIGHT,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -183,32 +303,84 @@ export default function SectorChart() {
         gap: 2,
       }}
     >
-      {/* LineChart component with all configuration props: */}
-      <LineChart
-        // dataset: the array of data objects to visualize
-        // Each object should have properties matching the dataKeys in xAxis and series
-        dataset={filteredSectorData}
+      <Box sx={{ display: 'flex', alignItems: 'stretch', width: '100%' }}>
+        <Box
+          sx={{
+            position: 'relative',
+            width: SECTOR_Y_AXIS_WIDTH,
+            flexShrink: 0,
+            px: 1,
+            py: `${DEFAULT_CHART_TOP_PADDING}px`,
+            color: '#64748b',
+            fontSize: '10px',
+            backgroundColor: '#ffffff',
+            borderRight: '1px solid #e2e8f0',
+          }}
+        >
+          {chartGeometry.ticks.map((tickValue) => (
+            <Box
+              key={tickValue}
+              data-testid="sector-chart-y-axis-label"
+              sx={{
+                position: 'absolute',
+                right: 8,
+                top: `${getChartYPosition(
+                  tickValue,
+                  chartGeometry.minPrice,
+                  chartGeometry.maxPrice,
+                  SECTOR_CHART_HEIGHT,
+                  {
+                    topPadding: DEFAULT_CHART_TOP_PADDING,
+                    bottomPadding: DEFAULT_CHART_BOTTOM_PADDING,
+                  },
+                )}px`,
+                transform: 'translateY(-50%)',
+                lineHeight: 1,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {formatYAxisInteger(tickValue)}
+            </Box>
+          ))}
+        </Box>
 
-        // xAxis: pass the x-axis configuration array defined above
-        xAxis={xAxis}
-
-        // yAxis: pass the y-axis configuration array defined above
-        yAxis={yAxis}
-
-        // series: pass the series configuration array defined above
-        series={series}
-
-        // height: the height of the chart in pixels
-        height={360}
-
-        // Keep extra left padding so wider y-axis labels are fully visible.
-        margin={{ top: 16, right: 16, left: 80 }}
-
-        // grid: configuration for the chart grid lines
-        // vertical: true shows vertical grid lines
-        // horizontal: true shows horizontal grid lines
-        grid={{ vertical: true, horizontal: true }}
-      />
+        <Box ref={chartViewportRef} sx={{ flex: 1, minWidth: 0 }}>
+          <TimeSeriesChartSvg
+            testId="sector-chart-svg"
+            svgRef={svgRef}
+            chartHeight={SECTOR_CHART_HEIGHT}
+            contentWidth={contentWidth}
+            plotWidth={plotWidth}
+            horizontalGridLines={chartGeometry.ticks.map((tickValue) => ({
+              key: tickValue,
+              testId: 'sector-chart-y-gridline',
+              y: getChartYPosition(
+                tickValue,
+                chartGeometry.minPrice,
+                chartGeometry.maxPrice,
+                SECTOR_CHART_HEIGHT,
+                {
+                  topPadding: DEFAULT_CHART_TOP_PADDING,
+                  bottomPadding: DEFAULT_CHART_BOTTOM_PADDING,
+                },
+              ),
+            }))}
+            verticalMarkers={chartGeometry.januaryPositions.map((position) => ({
+              key: position.year,
+              x: position.x,
+            }))}
+            linePath={chartGeometry.svgPath}
+            hoverState={hoverState.x !== null && hoverState.value !== null ? hoverState : null}
+            hoverValueFormatter={formatYAxisInteger}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchEnd}
+          />
+        </Box>
+      </Box>
 
       <ChartDateRangeControls
         startDate={startDate}

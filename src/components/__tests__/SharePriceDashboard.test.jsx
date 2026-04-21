@@ -633,6 +633,133 @@ describe('SharePriceDashboard preset scrolling', () => {
     });
   });
 
+  it('renders chart-only fiscal-year bands aligned with the visible table columns', async () => {
+    setViewportWidth(1024);
+
+    const { user } = await renderDashboard();
+
+    await user.click(screen.getByRole('button', { name: '10Y' }));
+    await flushDashboardWork();
+
+    const fiscalBands = screen.getAllByTestId('share-price-dashboard-fiscal-band');
+    const headerCells = screen.getAllByTestId('share-price-dashboard-header-cell');
+
+    expect(fiscalBands).toHaveLength(headerCells.length);
+
+    fiscalBands.forEach((bandNode, index) => {
+      expect(bandNode.getAttribute('data-fiscal-year')).toBe(headerCells[index].getAttribute('data-fiscal-year'));
+      expect(Number(bandNode.getAttribute('data-center-x'))).toBeCloseTo(
+        Number(headerCells[index].getAttribute('data-center-x')),
+        6,
+      );
+      expect(Number(bandNode.getAttribute('data-width'))).toBeCloseTo(
+        Number(headerCells[index].getAttribute('data-cell-width')),
+        6,
+      );
+    });
+
+    expect(fiscalBands.some((bandNode) => bandNode.getAttribute('data-is-alternate') === 'true')).toBe(true);
+    expect(fiscalBands.some((bandNode) => bandNode.getAttribute('data-is-alternate') === 'false')).toBe(true);
+  });
+
+  it('reveals the matching FY watermark when hovering a chart band and clears it on leave', async () => {
+    setViewportWidth(1024);
+
+    const { user } = await renderDashboard();
+
+    await user.click(screen.getByRole('button', { name: '10Y' }));
+    await flushDashboardWork();
+
+    const scrollRegion = screen.getByTestId('share-price-dashboard-scroll-region');
+    const svg = scrollRegion.querySelector('svg');
+    const fiscalBands = screen.getAllByTestId('share-price-dashboard-fiscal-band');
+
+    expect(svg).toBeTruthy();
+
+    Object.defineProperty(svg, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        left: 0,
+        top: 0,
+        width: Number(scrollRegion.getAttribute('data-content-width')),
+        height: 280,
+        right: Number(scrollRegion.getAttribute('data-content-width')),
+        bottom: 280,
+      }),
+    });
+
+    const targetBand = fiscalBands[2];
+    const targetX = Number(targetBand.getAttribute('data-center-x'));
+
+    await act(async () => {
+      fireEvent.mouseMove(svg, { clientX: targetX, clientY: 140 });
+    });
+
+    const watermark = screen.getByTestId('share-price-dashboard-fiscal-watermark');
+    expect(watermark.textContent).toBe(`FY ${targetBand.getAttribute('data-fiscal-year')}`);
+
+    await act(async () => {
+      fireEvent.mouseLeave(svg);
+    });
+
+    expect(screen.queryByTestId('share-price-dashboard-fiscal-watermark')).toBeNull();
+  });
+
+  it('reveals the matching FY watermark on mobile long press and clears it on touch end', async () => {
+    setViewportWidth(480);
+
+    const { user } = await renderDashboard();
+
+    await user.click(screen.getByRole('button', { name: '10Y' }));
+    await flushDashboardWork();
+
+    const scrollRegion = screen.getByTestId('share-price-dashboard-scroll-region');
+    const svg = scrollRegion.querySelector('svg');
+    const fiscalBands = screen.getAllByTestId('share-price-dashboard-fiscal-band');
+
+    expect(svg).toBeTruthy();
+
+    Object.defineProperty(svg, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        left: 0,
+        top: 0,
+        width: Number(scrollRegion.getAttribute('data-content-width')),
+        height: 280,
+        right: Number(scrollRegion.getAttribute('data-content-width')),
+        bottom: 280,
+      }),
+    });
+
+    const targetBand = fiscalBands[1];
+    const targetX = Number(targetBand.getAttribute('data-center-x'));
+
+    vi.useFakeTimers();
+
+    try {
+      await act(async () => {
+        fireEvent.touchStart(svg, {
+          touches: [{ clientX: targetX, clientY: 140 }],
+        });
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(450);
+      });
+
+      const watermark = screen.getByTestId('share-price-dashboard-fiscal-watermark');
+      expect(watermark.textContent).toBe(`FY ${targetBand.getAttribute('data-fiscal-year')}`);
+
+      await act(async () => {
+        fireEvent.touchEnd(svg, { touches: [] });
+      });
+
+      expect(screen.queryByTestId('share-price-dashboard-fiscal-watermark')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('lets the default 5Y preset pan immediately on first load', async () => {
     const {
       endInput,

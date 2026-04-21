@@ -35,7 +35,6 @@
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^7.3.9",
     "@mui/material": "^7.3.9",
-    "@mui/x-charts": "^8.28.0",
     "axios": "^1.14.0",
     "dotenv": "^17.4.0",
     "express": "^5.2.1",
