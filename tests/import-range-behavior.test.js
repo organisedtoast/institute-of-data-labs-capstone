@@ -8,6 +8,8 @@ const {
 const {
   ANNUAL_HISTORY_FETCH_VERSION,
   buildStockDocument,
+  normalizeEarningsCalls,
+  selectEarningsReleaseDate,
 } = require("../services/normalizationService");
 
 function buildAnnualRows(startYear, endYear) {
@@ -94,6 +96,94 @@ test("buildStockDocument limits annual rows when an explicit cap is provided", (
   assert.equal(stockDocument.annualData.length, 5);
   assert.equal(stockDocument.annualData[0].fiscalYear, 2025);
   assert.equal(stockDocument.annualData.at(-1).fiscalYear, 2021);
+});
+
+test("selectEarningsReleaseDate uses a same-fiscal-year ROIC call after year-end", () => {
+  const normalizedCalls = normalizeEarningsCalls([
+    { fiscalYear: 2024, date: "2025-02-20" },
+    { fiscalYear: 2023, date: "2024-02-15" },
+  ]);
+
+  assert.deepEqual(
+    selectEarningsReleaseDate({
+      fiscalYear: 2024,
+      fiscalYearEndDate: "2024-12-31",
+      normalizedCalls,
+    }),
+    {
+      date: "2025-02-20",
+      sourceOfTruth: "roic",
+    }
+  );
+});
+
+test("selectEarningsReleaseDate falls back to fiscalYearEndDate plus 90 days when only unrelated later calls exist", () => {
+  const normalizedCalls = normalizeEarningsCalls([
+    { fiscalYear: 2023, date: "2025-02-20" },
+    { fiscalYear: 2022, date: "2024-02-15" },
+  ]);
+
+  assert.deepEqual(
+    selectEarningsReleaseDate({
+      fiscalYear: 2024,
+      fiscalYearEndDate: "2024-12-31",
+      normalizedCalls,
+    }),
+    {
+      date: "2025-03-31",
+      sourceOfTruth: "system",
+    }
+  );
+});
+
+test("selectEarningsReleaseDate falls back when the same-fiscal-year call is before year-end", () => {
+  const normalizedCalls = normalizeEarningsCalls([
+    { fiscalYear: 2024, date: "2024-12-15" },
+  ]);
+
+  assert.deepEqual(
+    selectEarningsReleaseDate({
+      fiscalYear: 2024,
+      fiscalYearEndDate: "2024-12-31",
+      normalizedCalls,
+    }),
+    {
+      date: "2025-03-31",
+      sourceOfTruth: "system",
+    }
+  );
+});
+
+test("selectEarningsReleaseDate falls back when calls have no usable fiscal year", () => {
+  const normalizedCalls = normalizeEarningsCalls([
+    { date: "2025-02-20" },
+  ]);
+
+  assert.deepEqual(
+    selectEarningsReleaseDate({
+      fiscalYear: 2024,
+      fiscalYearEndDate: "2024-12-31",
+      normalizedCalls,
+    }),
+    {
+      date: "2025-03-31",
+      sourceOfTruth: "system",
+    }
+  );
+});
+
+test("selectEarningsReleaseDate falls back when no calls exist", () => {
+  assert.deepEqual(
+    selectEarningsReleaseDate({
+      fiscalYear: 2024,
+      fiscalYearEndDate: "2024-12-31",
+      normalizedCalls: [],
+    }),
+    {
+      date: "2025-03-31",
+      sourceOfTruth: "system",
+    }
+  );
 });
 
 test("resolveStoredImportRange preserves explicit caps and upgrades legacy default caps to uncapped", () => {

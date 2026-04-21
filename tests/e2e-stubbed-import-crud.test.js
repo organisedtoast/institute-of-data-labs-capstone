@@ -117,13 +117,15 @@ function buildPriceRows() {
   return [
     { date: "2022-09-29", close: 160 },
     { date: "2023-08-16", close: 180 },
+    { date: "2023-09-29", close: 185 },
     { date: "2024-09-30", close: 200 },
   ];
 }
 
 function buildEarningsRows() {
   return [
-    { date: "2023-08-15", fiscalYear: 2023 },
+    { date: "2025-01-15", fiscalYear: 2025 },
+    { date: "2024-09-28", fiscalYear: 2024 },
     { date: "2022-08-15", fiscalYear: 2022 },
   ];
 }
@@ -254,6 +256,7 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     assert.equal(firstAnnualEntry.fiscalYear, 2024);
     assert.equal(firstAnnualEntry.fiscalYearEndDate, "2024-06-30");
     assert.equal(firstAnnualEntry.earningsReleaseDate.effectiveValue, "2024-09-28");
+    assert.equal(firstAnnualEntry.earningsReleaseDate.sourceOfTruth, "roic");
     assert.equal(firstAnnualEntry.base.sharePrice.effectiveValue, 200);
     assert.equal(firstAnnualEntry.base.marketCap.effectiveValue, 200000);
     assert.equal(firstAnnualEntry.balanceSheet.netDebtOrCash.effectiveValue, 200);
@@ -264,6 +267,12 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     assert.equal(firstAnnualEntry.valuationMultiples.priceToNta.effectiveValue, 8);
     assert.equal(firstAnnualEntry.valuationMultiples.dividendPayout.effectiveValue, 0.2);
     assert.equal(firstAnnualEntry.epsAndDividends.dyTrailing.effectiveValue, 0.01);
+
+    const secondAnnualEntry = importedDoc.annualData[1];
+    assert.equal(secondAnnualEntry.fiscalYear, 2023);
+    assert.equal(secondAnnualEntry.earningsReleaseDate.effectiveValue, "2023-09-28");
+    assert.equal(secondAnnualEntry.earningsReleaseDate.sourceOfTruth, "system");
+    assert.equal(secondAnnualEntry.base.sharePrice.effectiveValue, 185);
 
     // Forecast and top-level placeholders should exist even before any user
     // enters data. That proves the schema was expanded up front, not only when

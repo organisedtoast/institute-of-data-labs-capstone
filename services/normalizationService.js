@@ -276,17 +276,26 @@ function normalizeEarningsCalls(earningsPayload) {
 }
 
 // Chooses the best earnings release date for a fiscal year.
-// Prefer a real earnings-call date after year-end, otherwise fall back to
-// an estimate around 90 days later.
-function selectEarningsReleaseDate({ fiscalYearEndDate, normalizedCalls }) {
-  if (fiscalYearEndDate) {
-    const matchAfterYearEnd = normalizedCalls.find((call) => call.date >= fiscalYearEndDate);
-    if (matchAfterYearEnd) {
-      return matchAfterYearEnd.date;
+// Prefer a real earnings-call date tied to the same fiscal year and released
+// after year-end, otherwise fall back to an estimate around 90 days later.
+function selectEarningsReleaseDate({ fiscalYear, fiscalYearEndDate, normalizedCalls }) {
+  if (fiscalYearEndDate && Number.isInteger(fiscalYear)) {
+    const matchingFiscalYearCall = normalizedCalls.find((call) => (
+      call.fiscalYear === fiscalYear && call.date >= fiscalYearEndDate
+    ));
+
+    if (matchingFiscalYearCall) {
+      return {
+        date: matchingFiscalYearCall.date,
+        sourceOfTruth: "roic",
+      };
     }
   }
 
-  return addDaysToDateString(fiscalYearEndDate, 90);
+  return {
+    date: addDaysToDateString(fiscalYearEndDate, 90),
+    sourceOfTruth: "system",
+  };
 }
 
 // The helpers below each read one business metric from a row.
@@ -576,12 +585,21 @@ function buildAnnualEntry({
 }) {
   const annualEntry = createEmptyAnnualEntry(fiscalYear, fiscalYearEndDate);
   const earningsReleaseDate = selectEarningsReleaseDate({
+    fiscalYear,
     fiscalYearEndDate,
     normalizedCalls,
   });
 
-  annualEntry.earningsReleaseDate = createMetricField(earningsReleaseDate, earningsReleaseDate ? "roic" : "system");
-  setMetric(annualEntry, "base.sharePrice", earningsReleaseDate ? selectPriceAfterAnchorDate(earningsReleaseDate, normalizedPrices) : null, "roic");
+  annualEntry.earningsReleaseDate = createMetricField(
+    earningsReleaseDate.date,
+    earningsReleaseDate.date ? earningsReleaseDate.sourceOfTruth : "system"
+  );
+  setMetric(
+    annualEntry,
+    "base.sharePrice",
+    earningsReleaseDate.date ? selectPriceAfterAnchorDate(earningsReleaseDate.date, normalizedPrices) : null,
+    "roic"
+  );
   setMetric(annualEntry, "base.sharesOnIssue", getSharesOnIssue(perShareRow), "roic");
   setMetric(annualEntry, "base.returnOnInvestedCapital", getReturnOnInvestedCapital(profitabilityRow), "roic");
 
@@ -719,4 +737,6 @@ function buildStockDocument({
 module.exports = {
   ANNUAL_HISTORY_FETCH_VERSION,
   buildStockDocument,
+  normalizeEarningsCalls,
+  selectEarningsReleaseDate,
 };
