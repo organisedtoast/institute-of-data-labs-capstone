@@ -73,6 +73,21 @@ const baseProps = {
   onApplyTrailingRange: vi.fn(),
 };
 
+function buildMonthlySeries(startYear, endYear) {
+  const rows = [];
+
+  for (let year = startYear; year <= endYear; year += 1) {
+    for (let month = 1; month <= 12; month += 1) {
+      rows.push({
+        date: `${year}-${String(month).padStart(2, '0')}-01`,
+        close: 80 + ((year - startYear) * 6) + month,
+      });
+    }
+  }
+
+  return rows;
+}
+
 beforeEach(() => {
   originalResizeObserver = global.ResizeObserver;
   global.ResizeObserver = undefined;
@@ -97,6 +112,10 @@ describe('SectorChart', () => {
       expect(labelNode.textContent).not.toMatch(/\$/);
       expect(labelNode.textContent).not.toMatch(/\.\d/);
     });
+
+    const xAxisLabels = screen.getAllByTestId('sector-chart-x-axis-label');
+    expect(xAxisLabels.length).toBeGreaterThan(0);
+    expect(xAxisLabels[0].textContent).toBe('2024');
   });
 
   it('shows a custom invalid range message for reversed month inputs', async () => {
@@ -142,5 +161,70 @@ describe('SectorChart', () => {
     fireEvent.scroll(scrollRegion);
 
     expect(onPresetPanOffsetChange).toHaveBeenCalledWith(4);
+  });
+
+  it('uses a sticky left rail for the Y-axis during preset scrolling', async () => {
+    render(
+      <SectorChart
+        {...baseProps}
+        isPresetWindowMode
+        maxPresetPanOffset={6}
+        presetPanOffsetMonths={0}
+      />,
+    );
+
+    const scrollRegion = await screen.findByTestId('sector-chart-scroll-region');
+    const yAxisRail = screen.getByTestId('sector-chart-y-axis-rail');
+    const yAxisLabels = screen.getAllByTestId('sector-chart-y-axis-label');
+    const visibleSurface = screen.getByTestId('sector-chart-visible-surface');
+    const svg = screen.getByTestId('sector-chart-svg');
+
+    expect(scrollRegion).toBeTruthy();
+    expect(yAxisLabels.length).toBeGreaterThan(0);
+    expect(yAxisRail.getAttribute('data-sticky-behavior')).toBe('left-rail');
+    expect(visibleSurface.contains(yAxisRail)).toBe(true);
+    expect(visibleSurface.contains(svg)).toBe(true);
+    expect(yAxisRail.nextElementSibling?.contains(svg)).toBe(true);
+  });
+
+  it('renders calendar-year x-axis labels from January positions', async () => {
+    render(
+      <SectorChart
+        {...baseProps}
+        series={buildMonthlySeries(2022, 2025)}
+        startDate="2022-01"
+        endDate="2025-12"
+        minAvailableMonth="2022-01"
+        maxAvailableMonth="2025-12"
+      />,
+    );
+
+    const xAxisLabels = await screen.findAllByTestId('sector-chart-x-axis-label');
+    const renderedYears = xAxisLabels.map((labelNode) => labelNode.textContent);
+
+    expect(renderedYears).toContain('2022');
+    expect(renderedYears).toContain('2023');
+    expect(renderedYears).toContain('2024');
+    expect(renderedYears).toContain('2025');
+  });
+
+  it('filters long-range calendar-year x-axis labels for readability', async () => {
+    render(
+      <SectorChart
+        {...baseProps}
+        series={buildMonthlySeries(2010, 2025)}
+        startDate="2010-01"
+        endDate="2025-12"
+        minAvailableMonth="2010-01"
+        maxAvailableMonth="2025-12"
+      />,
+    );
+
+    const xAxisLabels = await screen.findAllByTestId('sector-chart-x-axis-label');
+    const renderedYears = xAxisLabels.map((labelNode) => labelNode.textContent);
+
+    expect(renderedYears).toContain('2010');
+    expect(renderedYears).toContain('2025');
+    expect(renderedYears.length).toBeLessThan(16);
   });
 });

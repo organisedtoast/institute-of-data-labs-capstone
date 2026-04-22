@@ -549,6 +549,7 @@ export default function SharePriceDashboard({
     ticks: [],
   });
   const presetBootstrapFrameRef = useRef(null);
+  const measurementFrameRef = useRef(null);
   const animationFrameRef = useRef(null);
   const contractionTimeoutRef = useRef(null);
   const longPressTimeoutRef = useRef(null);
@@ -557,6 +558,32 @@ export default function SharePriceDashboard({
     startClientX: 0,
     startClientY: 0,
   });
+
+  const attachTimelineScrollRef = (node) => {
+    timelineScrollRef.current = node;
+
+    if (!node) {
+      return;
+    }
+
+    const measuredContainerWidth = node.clientWidth;
+    const measuredViewportWidth = Math.max(measuredContainerWidth - fixedLeftRailWidth, 0);
+
+    setScrollState((previousScrollState) => {
+      if (
+        previousScrollState.containerWidth === measuredContainerWidth
+        && previousScrollState.viewportWidth === measuredViewportWidth
+      ) {
+        return previousScrollState;
+      }
+
+      return {
+        containerWidth: measuredContainerWidth,
+        scrollLeft: previousScrollState.scrollLeft,
+        viewportWidth: measuredViewportWidth,
+      };
+    });
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -636,6 +663,7 @@ export default function SharePriceDashboard({
   const annualMetrics = dashboardData?.annualMetrics || [];
   const shouldUseShortLabels = useMediaQueryMatch(MOBILE_LABEL_BREAKPOINT_QUERY);
   const activePresetConfig = PRESET_BUTTONS.find((preset) => preset.key === activePreset) || null;
+  const fixedLengthPresetConfigs = PRESET_BUTTONS.filter((preset) => Boolean(preset.monthCount));
   const minAvailableMonth = priceRows.length ? getMonthStringFromDate(priceRows[0].date) : '';
   const maxAvailableMonth = priceRows.length ? getMonthStringFromDate(priceRows[priceRows.length - 1].date) : '';
   const isPresetWindowMode = rangeMode === 'preset' && Boolean(activePresetConfig?.monthCount);
@@ -680,6 +708,29 @@ export default function SharePriceDashboard({
         maxAvailableMonth,
       )
     : freeRangeEndMonth;
+  const fullHistoryMatchesFixedPreset = useMemo(() => {
+    if (!minAvailableMonth || !maxAvailableMonth) {
+      return false;
+    }
+
+    return fixedLengthPresetConfigs.some((preset) => {
+      const presetRange = getTrailingRange({
+        monthCount: preset.monthCount,
+        minAvailableMonth,
+        maxAvailableMonth,
+      });
+
+      return presetRange.startMonth === minAvailableMonth && presetRange.endMonth === maxAvailableMonth;
+    });
+  }, [fixedLengthPresetConfigs, maxAvailableMonth, minAvailableMonth]);
+  // MAX keeps free-range scrolling semantics, but short histories that already collapse to a
+  // fixed preset should reuse the preset layout so the chart/table geometry stays consistent.
+  const usesPresetTimelineLayout = isPresetWindowMode || (
+    activePreset === 'MAX'
+    && currentStartMonth === minAvailableMonth
+    && currentEndMonth === maxAvailableMonth
+    && fullHistoryMatchesFixedPreset
+  );
   const isRangeValid = !currentStartMonth || !currentEndMonth || compareMonthStrings(currentStartMonth, currentEndMonth) <= 0;
   const startBoundaryDate = currentStartMonth ? `${currentStartMonth}-01` : '';
   const endBoundaryDate = currentEndMonth ? getMonthEndDate(currentEndMonth) : '';
@@ -814,7 +865,7 @@ export default function SharePriceDashboard({
     );
   }, [shortLabelLeftRailWidth]);
 
-  const isCompactPresetTable = isPresetWindowMode
+  const isCompactPresetTable = usesPresetTimelineLayout
     && tablePoints.length >= 8
     && Boolean(scrollState.containerWidth)
     && scrollState.containerWidth < 560;
@@ -826,7 +877,7 @@ export default function SharePriceDashboard({
     : (shouldUseShortLabels ? shortLabelLeftRailWidth : fullLabelLeftRailWidth);
 
   const timelineLayout = useMemo(() => {
-    if (isPresetWindowMode) {
+    if (usesPresetTimelineLayout) {
       const timelineViewportWidth = Math.max(
         (scrollState.containerWidth || (fixedLeftRailWidth + RIGHT_TIMELINE_MIN_WIDTH)) - fixedLeftRailWidth,
         1,
@@ -860,7 +911,7 @@ export default function SharePriceDashboard({
       headerFontSize: { xs: '11px', sm: '12px' },
       bodyFontSize: { xs: '11px', sm: '12px', md: '13px' },
     };
-  }, [columnDensity, fixedLeftRailWidth, isCompactPresetTable, isPresetWindowMode, scrollState.containerWidth, tablePoints.length]);
+  }, [columnDensity, fixedLeftRailWidth, isCompactPresetTable, scrollState.containerWidth, tablePoints.length, usesPresetTimelineLayout]);
 
   useLayoutEffect(() => {
     const scrollElement = timelineScrollRef.current;
@@ -935,12 +986,39 @@ export default function SharePriceDashboard({
     // Fixed-length presets use scroll to PAN the selected month range itself, while MAX/custom
     // ranges use scroll inside the already-selected range for long-history chart/table layouts.
     updateScrollWindow();
+    // Some cards report their final width one frame after mount, so we re-measure once more
+    // on the next frame instead of waiting for the user to manually resize the browser.
+    measurementFrameRef.current = requestAnimationFrame(() => {
+      measurementFrameRef.current = null;
+      updateScrollWindow();
+    });
+
     scrollElement.addEventListener('scroll', updateScrollWindow, { passive: true });
-    window.addEventListener('resize', updateScrollWindow);
+
+    let resizeObserver = null;
+
+    if (typeof ResizeObserver === 'function') {
+      resizeObserver = new ResizeObserver(() => {
+        updateScrollWindow();
+      });
+      resizeObserver.observe(scrollElement);
+    } else {
+      window.addEventListener('resize', updateScrollWindow);
+    }
 
     return () => {
       scrollElement.removeEventListener('scroll', updateScrollWindow);
-      window.removeEventListener('resize', updateScrollWindow);
+
+      if (measurementFrameRef.current) {
+        cancelAnimationFrame(measurementFrameRef.current);
+        measurementFrameRef.current = null;
+      }
+
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      } else {
+        window.removeEventListener('resize', updateScrollWindow);
+      }
     };
   }, [
     activePreset,
@@ -989,11 +1067,16 @@ export default function SharePriceDashboard({
         presetBootstrapFrameRef.current = null;
       }
 
+      if (measurementFrameRef.current) {
+        cancelAnimationFrame(measurementFrameRef.current);
+        measurementFrameRef.current = null;
+      }
+
     };
   }, []);
 
   const visibleWindow = useMemo(() => {
-    if (isPresetWindowMode) {
+    if (usesPresetTimelineLayout) {
       return {
         left: 0,
         right: timelineLayout.plotWidth,
@@ -1024,7 +1107,7 @@ export default function SharePriceDashboard({
       right: rightEdge,
       width: Math.max(rightEdge - clampedScrollLeft, 1),
     };
-  }, [isPresetWindowMode, scrollState.scrollLeft, scrollState.viewportWidth, timelineLayout.contentWidth, timelineLayout.plotWidth]);
+  }, [scrollState.scrollLeft, scrollState.viewportWidth, timelineLayout.contentWidth, timelineLayout.plotWidth, usesPresetTimelineLayout]);
 
   const chartXGeometry = useMemo(() => {
     return createChartXGeometry({
@@ -1565,7 +1648,7 @@ export default function SharePriceDashboard({
           data-plot-width={String(timelineLayout.plotWidth)}
           data-year-cell-width={String(timelineLayout.yearCellWidth)}
           data-left-rail-width={String(fixedLeftRailWidth)}
-          ref={timelineScrollRef}
+          ref={attachTimelineScrollRef}
         >
           {/*
             The fixed-length presets reuse this same horizontal scroller, but they map scroll

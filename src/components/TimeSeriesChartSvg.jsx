@@ -26,6 +26,9 @@ export default function TimeSeriesChartSvg({
   lineColor = '#c2410c',
   lineWidth = 4,
   bottomMarkers = [],
+  showBottomAxis = false,
+  xAxisLabels = [],
+  xAxisLabelOffset = 16,
   hoverState = null,
   hoverValueFormatter = (value) => String(value),
   watermark = null,
@@ -131,6 +134,37 @@ export default function TimeSeriesChartSvg({
             marker.dataAttributes,
           )}
         />
+      ))}
+
+      {showBottomAxis || xAxisLabels.length ? (
+        <line
+          data-testid="time-series-chart-x-axis-baseline"
+          x1="0"
+          y1={topPadding + plotHeight}
+          x2={plotWidth}
+          y2={topPadding + plotHeight}
+          stroke="#cbd5e1"
+        />
+      ) : null}
+
+      {xAxisLabels.map((label) => (
+        <text
+          key={label.key}
+          {...applyDataAttributes(
+            {
+              'data-testid': label.testId,
+              x: label.x,
+              y: topPadding + plotHeight + (label.yOffset ?? xAxisLabelOffset),
+              textAnchor: label.textAnchor ?? 'middle',
+              fontSize: label.fontSize ?? 10,
+              fontWeight: label.fontWeight ?? 600,
+              fill: label.fill ?? '#64748b',
+            },
+            label.dataAttributes,
+          )}
+        >
+          {label.text}
+        </text>
       ))}
 
       {hoverState?.x !== null && hoverState?.x !== undefined && hoverState?.value !== null && hoverState?.value !== undefined ? (

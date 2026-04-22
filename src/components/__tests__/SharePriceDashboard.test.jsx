@@ -133,10 +133,12 @@ const DASHBOARD_TEST_ID = 'share-price-dashboard-scroll-region';
 let originalRequestAnimationFrame;
 let originalCancelAnimationFrame;
 let originalMatchMedia;
+let originalResizeObserver;
 let currentMatchMediaWidth = 1024;
 let mountedContainer;
 let mountedRoot;
 let pendingAnimationFrameHandles = new Set();
+let activeResizeObservers = [];
 
 function setViewportWidth(width) {
   currentMatchMediaWidth = width;
@@ -230,6 +232,49 @@ function buildLongHistoryDashboardPayload(overrides = {}) {
   });
 }
 
+function buildShortHistoryDashboardPayload(overrides = {}) {
+  const prices = [];
+
+  for (let year = 2024; year <= 2026; year += 1) {
+    const startMonth = year === 2024 ? 4 : 1;
+    const endMonth = year === 2026 ? 4 : 12;
+
+    for (let month = startMonth; month <= endMonth; month += 1) {
+      prices.push({
+        date: `${year}-${String(month).padStart(2, '0')}-01`,
+        close: 35 + ((year - 2024) * 8) + (month / 10),
+      });
+    }
+  }
+
+  const annualMetrics = [
+    {
+      fiscalYear: 2025,
+      fiscalYearEndDate: '2025-01-31',
+      earningsReleaseDate: '2025-03-15',
+      sharePrice: 70.64,
+      sharesOnIssue: 189800000,
+      marketCap: 13400000000,
+    },
+    {
+      fiscalYear: 2026,
+      fiscalYearEndDate: '2026-01-31',
+      earningsReleaseDate: '2026-03-15',
+      sharePrice: 53.43,
+      sharesOnIssue: 202200000,
+      marketCap: 10800000000,
+    },
+  ];
+
+  return buildDashboardPayload({
+    identifier: 'RBRK',
+    companyName: 'Rubrik, Inc.',
+    prices,
+    annualMetrics,
+    ...overrides,
+  });
+}
+
 
 function createDeferredResponse() {
   let resolveResponse;
@@ -264,9 +309,18 @@ async function configureScrollRegion(scrollRegion, clientWidth = 920) {
   });
 
   await act(async () => {
-    window.dispatchEvent(new Event('resize'));
+    activeResizeObservers.slice().forEach((observer) => {
+      observer.notify(scrollRegion);
+    });
+    await Promise.resolve();
+  });
+
+  await act(async () => {
     await new Promise((resolve) => {
       window.setTimeout(resolve, 0);
+    });
+    activeResizeObservers.slice().forEach((observer) => {
+      observer.notify(scrollRegion);
     });
   });
 
@@ -407,7 +461,6 @@ async function dragPresetWindowOlderByMonths({
   await act(async () => {
     scrollController.setScrollLeft(nextScrollLeft);
     fireEvent.scroll(scrollRegion);
-    window.dispatchEvent(new Event('resize'));
   });
 
   await flushDashboardWork();
@@ -430,6 +483,8 @@ describe('SharePriceDashboard preset scrolling', () => {
     originalRequestAnimationFrame = window.requestAnimationFrame;
     originalCancelAnimationFrame = window.cancelAnimationFrame;
     originalMatchMedia = window.matchMedia;
+    originalResizeObserver = global.ResizeObserver;
+    activeResizeObservers = [];
 
     window.matchMedia = (query) => {
       const maxWidthMatch = query.match(/\(max-width:\s*(\d+)px\)/);
@@ -461,6 +516,46 @@ describe('SharePriceDashboard preset scrolling', () => {
       window.clearTimeout(handle);
     };
 
+    class MockResizeObserver {
+      constructor(callback) {
+        this.callback = callback;
+        this.observedElements = new Set();
+        activeResizeObservers.push(this);
+      }
+
+      observe = (element) => {
+        this.observedElements.add(element);
+      };
+
+      unobserve = (element) => {
+        this.observedElements.delete(element);
+      };
+
+      disconnect = () => {
+        this.observedElements.clear();
+        activeResizeObservers = activeResizeObservers.filter((observer) => observer !== this);
+      };
+
+      notify = (element) => {
+        if (!this.observedElements.has(element)) {
+          return;
+        }
+
+        this.callback([
+          {
+            target: element,
+            contentRect: {
+              width: element.clientWidth,
+              height: 0,
+            },
+          },
+        ]);
+      };
+    }
+
+    global.ResizeObserver = MockResizeObserver;
+    window.ResizeObserver = MockResizeObserver;
+
     globalThis.requestAnimationFrame = window.requestAnimationFrame;
     globalThis.cancelAnimationFrame = window.cancelAnimationFrame;
   });
@@ -486,10 +581,13 @@ describe('SharePriceDashboard preset scrolling', () => {
     window.requestAnimationFrame = originalRequestAnimationFrame;
     window.cancelAnimationFrame = originalCancelAnimationFrame;
     window.matchMedia = originalMatchMedia;
+    global.ResizeObserver = originalResizeObserver;
+    window.ResizeObserver = originalResizeObserver;
     globalThis.requestAnimationFrame = originalRequestAnimationFrame;
     globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
     vi.restoreAllMocks();
     currentMatchMediaWidth = 1024;
+    activeResizeObservers = [];
   });
 
   it('renders the dashboard smoke test without hanging', async () => {
@@ -877,6 +975,123 @@ describe('SharePriceDashboard preset scrolling', () => {
     expect(fiscalYearLabels).toHaveLength(36);
     expect(fiscalYearLabels[0]).toBe('1990-12');
     expect(fiscalYearLabels[35]).toBe('2025-12');
+  });
+
+  it('makes short-history MAX match the fixed preset layout when the range already collapses to the full history', async () => {
+    const {
+      endInput,
+      scrollController,
+      scrollRegion,
+      startInput,
+      user,
+    } = await renderDashboard({
+      payload: buildShortHistoryDashboardPayload(),
+    });
+
+    const readLayoutMetrics = () => ({
+      contentWidth: scrollRegion.getAttribute('data-content-width'),
+      plotWidth: scrollRegion.getAttribute('data-plot-width'),
+      yearCellWidth: scrollRegion.getAttribute('data-year-cell-width'),
+    });
+    const readVisibleTickPositions = () => {
+      return screen.getAllByTestId('share-price-dashboard-fiscal-tick').map((node) => {
+        return node.getAttribute('data-x');
+      });
+    };
+
+    await user.click(screen.getByRole('button', { name: 'MAX' }));
+    await flushDashboardWork();
+
+    expect(startInput.value).toBe('2024-04');
+    expect(endInput.value).toBe('2026-04');
+
+    const maxMetrics = readLayoutMetrics();
+    const maxTickPositions = readVisibleTickPositions();
+
+    await act(async () => {
+      scrollController.setScrollLeft(scrollController.getScrollLeft() + 140);
+      fireEvent.scroll(scrollRegion);
+    });
+    await flushDashboardWork();
+
+    expect(startInput.value).toBe('2024-04');
+    expect(endInput.value).toBe('2026-04');
+
+    for (const presetLabel of ['3Y', '5Y', '10Y']) {
+      await user.click(screen.getByRole('button', { name: presetLabel }));
+      await flushDashboardWork();
+
+      expect(startInput.value).toBe('2024-04');
+      expect(endInput.value).toBe('2026-04');
+    }
+
+    const fixedPresetMetrics = readLayoutMetrics();
+    const fixedPresetTickPositions = readVisibleTickPositions();
+
+    expect(maxMetrics).toEqual(fixedPresetMetrics);
+    expect(maxTickPositions).toEqual(fixedPresetTickPositions);
+  });
+
+  it('sizes a short-history preset to the real card width on initial render without a window resize', async () => {
+    const payload = buildShortHistoryDashboardPayload();
+    const deferredResponse = createDeferredResponse();
+    const originalClientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+
+    fetchDashboardData.mockImplementation(() => deferredResponse.responsePromise);
+
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get() {
+        if (this.getAttribute?.('data-testid') === DASHBOARD_TEST_ID) {
+          return 920;
+        }
+
+        return originalClientWidthDescriptor?.get
+          ? originalClientWidthDescriptor.get.call(this)
+          : 0;
+      },
+    });
+
+    try {
+      mountDashboard(
+        <SharePriceDashboard
+          identifier="RBRK"
+          name="Rubrik, Inc."
+          scaleAnimationDurationMs={0}
+        />,
+      );
+
+      await act(async () => {
+        deferredResponse.resolveResponse(payload);
+        await deferredResponse.responsePromise;
+        await Promise.resolve();
+      });
+
+      await flushDashboardWork();
+      await flushDashboardWork();
+
+      const scrollRegion = screen.getByTestId(DASHBOARD_TEST_ID);
+      const leftRailWidth = Number(scrollRegion.getAttribute('data-left-rail-width'));
+      const expectedContentWidth = 920 - leftRailWidth;
+
+      expect(scrollRegion.getAttribute('data-scroll-mode')).toBe('preset');
+      expect(Number(scrollRegion.getAttribute('data-content-width'))).toBe(expectedContentWidth);
+      expect(Number(scrollRegion.getAttribute('data-plot-width'))).toBe(expectedContentWidth - 24);
+
+      await act(async () => {
+        window.dispatchEvent(new Event('resize'));
+      });
+      await flushDashboardWork();
+
+      expect(Number(scrollRegion.getAttribute('data-content-width'))).toBe(expectedContentWidth);
+      expect(Number(scrollRegion.getAttribute('data-plot-width'))).toBe(expectedContentWidth - 24);
+    } finally {
+      if (originalClientWidthDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalClientWidthDescriptor);
+      } else {
+        delete HTMLElement.prototype.clientWidth;
+      }
+    }
   });
 
   it('populates older annual entries when a fixed-length preset is panned left', async () => {

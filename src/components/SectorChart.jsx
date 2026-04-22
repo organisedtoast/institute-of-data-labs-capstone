@@ -11,7 +11,6 @@ import {
 } from './sharePriceChartScale';
 import TimeSeriesChartSvg from './TimeSeriesChartSvg';
 import {
-  DEFAULT_CHART_BOTTOM_PADDING,
   DEFAULT_CHART_TOP_PADDING,
   buildLinearTimeMapper,
   buildSvgPath,
@@ -25,7 +24,9 @@ const SECTOR_CHART_HEIGHT = 360;
 const SECTOR_CHART_RIGHT_PADDING = 16;
 const SECTOR_Y_AXIS_WIDTH = 68;
 const SECTOR_CHART_FALLBACK_WIDTH = 540;
+const SECTOR_CHART_BOTTOM_PADDING = 36;
 const PRESET_PAN_STEP_PX = 28;
+const SECTOR_X_AXIS_MIN_LABEL_SPACING_PX = 56;
 
 const sectorHoverDateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -34,6 +35,39 @@ const sectorHoverDateFormatter = new Intl.DateTimeFormat('en-US', {
 
 function formatSectorHoverDate(dateString) {
   return sectorHoverDateFormatter.format(new Date(dateString));
+}
+
+function buildVisibleSectorXAxisLabels(januaryPositions) {
+  if (!Array.isArray(januaryPositions) || januaryPositions.length === 0) {
+    return [];
+  }
+
+  if (januaryPositions.length <= 2) {
+    return januaryPositions;
+  }
+
+  // We keep every January guide line for time reference, but filter the text labels
+  // separately so long ranges stay readable instead of collapsing into overlapping years.
+  const firstPosition = januaryPositions[0];
+  const lastPosition = januaryPositions[januaryPositions.length - 1];
+  const visibleLabels = [firstPosition];
+
+  for (let index = 1; index < januaryPositions.length - 1; index += 1) {
+    const candidate = januaryPositions[index];
+    const previousVisibleLabel = visibleLabels[visibleLabels.length - 1];
+
+    if ((candidate.x - previousVisibleLabel.x) >= SECTOR_X_AXIS_MIN_LABEL_SPACING_PX) {
+      visibleLabels.push(candidate);
+    }
+  }
+
+  if ((lastPosition.x - visibleLabels[visibleLabels.length - 1].x) < SECTOR_X_AXIS_MIN_LABEL_SPACING_PX) {
+    visibleLabels[visibleLabels.length - 1] = lastPosition;
+  } else {
+    visibleLabels.push(lastPosition);
+  }
+
+  return visibleLabels;
 }
 
 export default function SectorChart({
@@ -76,7 +110,9 @@ export default function SectorChart({
     if (typeof ResizeObserver === 'function' && chartViewportRef.current) {
       const observer = new ResizeObserver((entries) => {
         const nextWidth = entries[0]?.contentRect?.width ?? chartViewportRef.current?.clientWidth ?? 0;
-        setChartWidth(nextWidth);
+        // The scroll viewport includes the sticky Y-axis rail, so subtract it before sizing
+        // the SVG area. This keeps the plotted chart width aligned with the visible viewport.
+        setChartWidth(Math.max(nextWidth - SECTOR_Y_AXIS_WIDTH, 0));
       });
 
       observer.observe(chartViewportRef.current);
@@ -141,13 +177,14 @@ export default function SectorChart({
   const contentWidth = plotWidth + SECTOR_CHART_RIGHT_PADDING;
   const plotHeight = getChartPlotHeight(SECTOR_CHART_HEIGHT, {
     topPadding: DEFAULT_CHART_TOP_PADDING,
-    bottomPadding: DEFAULT_CHART_BOTTOM_PADDING,
+    bottomPadding: SECTOR_CHART_BOTTOM_PADDING,
   });
 
   const chartGeometry = useMemo(() => {
     if (!filteredSectorData.length) {
       return {
         januaryPositions: [],
+        xAxisLabels: [],
         mapTimeToX: () => 0,
         mapXToTime: () => 0,
         maxPrice: 5,
@@ -166,14 +203,16 @@ export default function SectorChart({
     const minTime = new Date(filteredSectorData[0].date).getTime();
     const maxTime = new Date(filteredSectorData[filteredSectorData.length - 1].date).getTime();
     const linearMapper = buildLinearTimeMapper(minTime, maxTime, plotWidth);
+    const januaryPositions = getJanuaryPositions(
+      filteredSectorData,
+      minTime,
+      maxTime,
+      linearMapper.mapTimeToX,
+    );
 
     return {
-      januaryPositions: getJanuaryPositions(
-        filteredSectorData,
-        minTime,
-        maxTime,
-        linearMapper.mapTimeToX,
-      ),
+      januaryPositions,
+      xAxisLabels: buildVisibleSectorXAxisLabels(januaryPositions),
       mapTimeToX: linearMapper.mapTimeToX,
       mapXToTime: linearMapper.mapXToTime,
       maxPrice: roundedScale.maxPrice,
@@ -186,7 +225,7 @@ export default function SectorChart({
         SECTOR_CHART_HEIGHT,
         {
           topPadding: DEFAULT_CHART_TOP_PADDING,
-          bottomPadding: DEFAULT_CHART_BOTTOM_PADDING,
+          bottomPadding: SECTOR_CHART_BOTTOM_PADDING,
         },
       ),
       ticks: roundedScale.ticks,
@@ -336,9 +375,10 @@ export default function SectorChart({
     );
   }
 
-  const presetPanTrackWidth = Math.max(effectiveChartWidth, SECTOR_CHART_FALLBACK_WIDTH)
-    + (Math.max(maxPresetPanOffset, 0) * PRESET_PAN_STEP_PX);
-  const scrollSurfaceWidth = isPresetWindowMode ? presetPanTrackWidth : effectiveChartWidth;
+  const visibleChartSurfaceWidth = SECTOR_Y_AXIS_WIDTH + effectiveChartWidth;
+  const scrollSurfaceWidth = isPresetWindowMode
+    ? visibleChartSurfaceWidth + (Math.max(maxPresetPanOffset, 0) * PRESET_PAN_STEP_PX)
+    : visibleChartSurfaceWidth;
 
   return (
     <Box
@@ -360,93 +400,121 @@ export default function SectorChart({
         data-testid="sector-chart-scroll-region"
         data-scroll-mode={isPresetWindowMode ? 'preset' : 'range'}
       >
-        <Box sx={{ width: scrollSurfaceWidth, display: 'flex', alignItems: 'stretch' }}>
         <Box
           sx={{
+            width: scrollSurfaceWidth,
             position: 'relative',
-            width: SECTOR_Y_AXIS_WIDTH,
-            flexShrink: 0,
-            px: 1,
-            py: `${DEFAULT_CHART_TOP_PADDING}px`,
-            color: '#64748b',
-            fontSize: '10px',
-            backgroundColor: '#ffffff',
-            borderRight: '1px solid #e2e8f0',
           }}
         >
-          {chartGeometry.ticks.map((tickValue) => (
-            <Box
-              key={tickValue}
-              data-testid="sector-chart-y-axis-label"
-              sx={{
-                position: 'absolute',
-                right: 8,
-                top: `${getChartYPosition(
-                  tickValue,
-                  chartGeometry.minPrice,
-                  chartGeometry.maxPrice,
-                  SECTOR_CHART_HEIGHT,
-                  {
-                    topPadding: DEFAULT_CHART_TOP_PADDING,
-                    bottomPadding: DEFAULT_CHART_BOTTOM_PADDING,
-                  },
-                )}px`,
-                transform: 'translateY(-50%)',
-                lineHeight: 1,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {formatYAxisInteger(tickValue)}
-            </Box>
-          ))}
-        </Box>
+          {/* Preset mode scrolls across a wider hidden surface, but the visible chart stays
+              pinned so the Y-axis rail and current time window behave like the stock cards. */}
+          <Box
+            sx={{
+              width: visibleChartSurfaceWidth,
+              position: isPresetWindowMode ? 'sticky' : 'relative',
+              left: isPresetWindowMode ? 0 : 'auto',
+              top: 0,
+            }}
+            data-testid="sector-chart-visible-surface"
+          >
+            <Box sx={{ display: 'flex', alignItems: 'stretch', width: visibleChartSurfaceWidth }}>
+              {/* Keeping the Y-axis inside the same scroller lets CSS sticky pin it to the left
+                  edge while the chart body continues to move underneath on horizontal scroll. */}
+              <Box
+                data-testid="sector-chart-y-axis-rail"
+                data-sticky-behavior="left-rail"
+                sx={{
+                  position: 'sticky',
+                  left: 0,
+                  zIndex: 2,
+                  width: SECTOR_Y_AXIS_WIDTH,
+                  flexShrink: 0,
+                  px: 1,
+                  py: `${DEFAULT_CHART_TOP_PADDING}px`,
+                  color: '#64748b',
+                  fontSize: '10px',
+                  backgroundColor: '#ffffff',
+                  borderRight: '1px solid #e2e8f0',
+                }}
+              >
+                {chartGeometry.ticks.map((tickValue) => (
+                  <Box
+                    key={tickValue}
+                    data-testid="sector-chart-y-axis-label"
+                    sx={{
+                      position: 'absolute',
+                      right: 8,
+                      top: `${getChartYPosition(
+                        tickValue,
+                        chartGeometry.minPrice,
+                        chartGeometry.maxPrice,
+                        SECTOR_CHART_HEIGHT,
+                        {
+                          topPadding: DEFAULT_CHART_TOP_PADDING,
+                          bottomPadding: SECTOR_CHART_BOTTOM_PADDING,
+                        },
+                      )}px`,
+                      transform: 'translateY(-50%)',
+                      lineHeight: 1,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {formatYAxisInteger(tickValue)}
+                  </Box>
+                ))}
+              </Box>
 
-        <Box
-          sx={{
-            flex: 1,
-            minWidth: 0,
-            position: isPresetWindowMode ? 'sticky' : 'relative',
-            left: isPresetWindowMode ? 0 : 'auto',
-          }}
-        >
-          <Box sx={{ width: effectiveChartWidth }}>
-            <TimeSeriesChartSvg
-              testId="sector-chart-svg"
-              svgRef={svgRef}
-              chartHeight={SECTOR_CHART_HEIGHT}
-              contentWidth={contentWidth}
-              plotWidth={plotWidth}
-              horizontalGridLines={chartGeometry.ticks.map((tickValue) => ({
-                key: tickValue,
-                testId: 'sector-chart-y-gridline',
-                y: getChartYPosition(
-                  tickValue,
-                  chartGeometry.minPrice,
-                  chartGeometry.maxPrice,
-                  SECTOR_CHART_HEIGHT,
-                  {
-                    topPadding: DEFAULT_CHART_TOP_PADDING,
-                    bottomPadding: DEFAULT_CHART_BOTTOM_PADDING,
-                  },
-                ),
-              }))}
-              verticalMarkers={chartGeometry.januaryPositions.map((position) => ({
-                key: position.year,
-                x: position.x,
-              }))}
-              linePath={chartGeometry.svgPath}
-              hoverState={hoverState.x !== null && hoverState.value !== null ? hoverState : null}
-              hoverValueFormatter={formatYAxisInteger}
-              onMouseMove={handleMouseMove}
-              onMouseLeave={handleMouseLeave}
-              onTouchStart={handleTouchStart}
-              onTouchMove={handleTouchMove}
-              onTouchEnd={handleTouchEnd}
-              onTouchCancel={handleTouchEnd}
-            />
+              <Box sx={{ width: effectiveChartWidth, flexShrink: 0 }}>
+                <TimeSeriesChartSvg
+                  testId="sector-chart-svg"
+                  svgRef={svgRef}
+                  chartHeight={SECTOR_CHART_HEIGHT}
+                  contentWidth={contentWidth}
+                  plotWidth={plotWidth}
+                  horizontalGridLines={chartGeometry.ticks.map((tickValue) => ({
+                    key: tickValue,
+                    testId: 'sector-chart-y-gridline',
+                    y: getChartYPosition(
+                      tickValue,
+                      chartGeometry.minPrice,
+                      chartGeometry.maxPrice,
+                      SECTOR_CHART_HEIGHT,
+                      {
+                        topPadding: DEFAULT_CHART_TOP_PADDING,
+                        bottomPadding: SECTOR_CHART_BOTTOM_PADDING,
+                      },
+                    ),
+                  }))}
+                  verticalMarkers={chartGeometry.januaryPositions.map((position) => ({
+                    key: position.year,
+                    x: position.x,
+                  }))}
+                  showBottomAxis
+                  xAxisLabels={chartGeometry.xAxisLabels.map((position) => ({
+                    key: position.year,
+                    text: String(position.year),
+                    x: position.x,
+                    testId: 'sector-chart-x-axis-label',
+                    dataAttributes: {
+                      year: position.year,
+                      x: position.x,
+                    },
+                  }))}
+                  linePath={chartGeometry.svgPath}
+                  hoverState={hoverState.x !== null && hoverState.value !== null ? hoverState : null}
+                  hoverValueFormatter={formatYAxisInteger}
+                  bottomPadding={SECTOR_CHART_BOTTOM_PADDING}
+                  onMouseMove={handleMouseMove}
+                  onMouseLeave={handleMouseLeave}
+                  onTouchStart={handleTouchStart}
+                  onTouchMove={handleTouchMove}
+                  onTouchEnd={handleTouchEnd}
+                  onTouchCancel={handleTouchEnd}
+                />
+              </Box>
+            </Box>
           </Box>
         </Box>
-      </Box>
       </Box>
 
       <ChartDateRangeControls
