@@ -8,6 +8,7 @@ const normalize = require("../services/normalizationService");
 const WatchlistStock = require("../models/WatchlistStock");
 const { recalculateDerived } = require("../utils/derivedCalc");
 const { mergeAnnualEntry } = require("../services/stockMergeService");
+const { fetchOptionalEarningsCalls } = require("../services/optionalEarningsCallsService");
 
 async function fetchWithContext(label, fetcher, tickerSymbol, fetchOptions) {
   try {
@@ -49,7 +50,7 @@ async function refreshStock(req, res, next) {
       fetchWithContext("annual per-share", roicService.fetchAnnualPerShare, ticker, annualFetchOptions),
       fetchWithContext("annual profitability", roicService.fetchAnnualProfitability, ticker, annualFetchOptions),
       fetchWithContext("historical prices", roicService.fetchStockPrices, ticker),
-      fetchWithContext("earnings calls", roicService.fetchEarningsCalls, ticker),
+      fetchOptionalEarningsCalls(fetchWithContext, ticker),
       fetchWithContext("annual income statement", roicService.fetchAnnualIncomeStatement, ticker, annualFetchOptions),
       fetchWithContext("annual balance sheet", roicService.fetchAnnualBalanceSheet, ticker, annualFetchOptions),
       fetchWithContext("annual cash flow", roicService.fetchAnnualCashFlow, ticker, annualFetchOptions),

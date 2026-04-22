@@ -7,6 +7,7 @@ const { parseRequestedImportRangeYears } = require("../services/importRangeServi
 const normalize = require("../services/normalizationService");
 const WatchlistStock = require("../models/WatchlistStock");
 const { assertActiveLensName } = require("../services/lensService");
+const { fetchOptionalEarningsCalls } = require("../services/optionalEarningsCallsService");
 
 async function fetchWithContext(label, fetcher, tickerSymbol, fetchOptions) {
   try {
@@ -55,7 +56,7 @@ async function importStock(req, res, next) {
       fetchWithContext("annual per-share", roicService.fetchAnnualPerShare, tickerSymbol, annualFetchOptions),
       fetchWithContext("annual profitability", roicService.fetchAnnualProfitability, tickerSymbol, annualFetchOptions),
       fetchWithContext("historical prices", roicService.fetchStockPrices, tickerSymbol),
-      fetchWithContext("earnings calls", roicService.fetchEarningsCalls, tickerSymbol),
+      fetchOptionalEarningsCalls(fetchWithContext, tickerSymbol),
       fetchWithContext("annual income statement", roicService.fetchAnnualIncomeStatement, tickerSymbol, annualFetchOptions),
       fetchWithContext("annual balance sheet", roicService.fetchAnnualBalanceSheet, tickerSymbol, annualFetchOptions),
       fetchWithContext("annual cash flow", roicService.fetchAnnualCashFlow, tickerSymbol, annualFetchOptions),

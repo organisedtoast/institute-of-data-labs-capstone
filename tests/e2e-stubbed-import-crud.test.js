@@ -1,10 +1,14 @@
-// This end-to-end harness uses fake ROIC responses but the real Express app,
-// real MongoDB writes, and real normalization logic. It is the safest place to
-// prove the grouped schema, override routes, and derived calculations all work
-// together without depending on the live third-party API.
+// Purpose of this test file:
+// This is an end-to-end harness that uses fake ROIC responses but still runs
+// the real Express app, real MongoDB writes, real normalization logic, and the
+// real override/refresh routes. It is the safest place to prove the full
+// watchlist import workflow works without depending on the live third-party
+// API, so the assertions can stay exact and stable for a beginner starter.
 
 require("dotenv").config();
 
+// Use a dedicated port so this test file does not conflict with other tests or
+// with a local dev server.
 process.env.PORT = "3101";
 
 const assert = require("node:assert/strict");
@@ -17,6 +21,8 @@ const TEST_YEARS = 3;
 const TEST_COMPANY_OVERRIDE = "Stubbed Company Override";
 const BASE_URL = `http://127.0.0.1:${process.env.PORT}`;
 
+// The normalized document records which ROIC endpoints were used during import.
+// This lets the test prove that source metadata is being stored too.
 const EXPECTED_ROIC_ENDPOINTS = [
   "/v2/company/profile/{identifier}",
   "/v2/fundamental/per-share/{identifier}",
@@ -30,8 +36,12 @@ const EXPECTED_ROIC_ENDPOINTS = [
   "/v2/fundamental/enterprise-value/{identifier}",
   "/v2/fundamental/multiples/{identifier}",
 ];
+// We record annual fetch calls so the test can later prove that refresh reused
+// the same year-cap options as the original import.
 const annualFetchCalls = [];
 
+// The next helpers build predictable fake ROIC payloads.
+// Because the data is fixed, the assertions later in the test can be exact.
 function buildPerShareRows() {
   return [
     { fiscalYear: 2024, fiscalYearEndDate: "2024-06-30", bs_sh_out: 1000, eps: 10, div_per_shr: 2, book_val_per_sh: 25 },
@@ -130,6 +140,8 @@ function buildEarningsRows() {
   ];
 }
 
+// This fake ROIC service is the key idea in this file:
+// upstream is stubbed, but our own backend stack is still real.
 const stubbedRoicService = {
   async fetchCompanyProfile() {
     return {
@@ -175,10 +187,14 @@ const stubbedRoicService = {
 };
 
 const roicService = require("../services/roicService");
+// Replace the ROIC service methods in place before the server starts so every
+// backend route uses the fake responses above.
 Object.assign(roicService, stubbedRoicService);
 
 const { startServer, stopServer } = require("../server");
 
+// Helper for making real HTTP requests to the running Express app.
+// Returning `{ status, ok, body }` keeps the test readable.
 async function requestJson(path, options = {}) {
   const response = await fetch(`${BASE_URL}${path}`, {
     ...options,
@@ -204,6 +220,8 @@ async function requestJson(path, options = {}) {
   };
 }
 
+// Build a useful failure message so a beginner can quickly see which step
+// failed and what the API actually returned.
 function buildFailureMessage(step, response) {
   return [
     `${step} failed.`,
@@ -212,6 +230,7 @@ function buildFailureMessage(step, response) {
   ].join("\n");
 }
 
+// Cleanup helper so repeated runs do not trip over a leftover test document.
 async function deleteIfPresent() {
   const response = await requestJson(`/api/watchlist/${TEST_TICKER}`, { method: "DELETE" });
   if (response.status !== 200 && response.status !== 404) {
@@ -220,12 +239,16 @@ async function deleteIfPresent() {
 }
 
 test("stubbed import populates grouped annual fields, placeholders, overrides, and lens-backed category data", async () => {
+  // Start the real server. Even though ROIC is stubbed, routing, MongoDB
+  // writes, schema validation, normalization, and overrides are all real.
   await startServer();
 
   try {
+    // Reset per-test state before starting the workflow.
     annualFetchCalls.length = 0;
     await deleteIfPresent();
 
+    // Import a stock through the real API using the stubbed upstream data.
     const importResponse = await requestJson("/api/watchlist/import", {
       method: "POST",
       body: JSON.stringify({
@@ -238,6 +261,8 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     assert.equal(importResponse.status, 201, buildFailureMessage("Import route", importResponse));
     const importedDoc = importResponse.body;
 
+    // Start with top-level checks: identity, category, import metadata,
+    // and proof that annual fetch options were forwarded correctly.
     assert.equal(importedDoc.tickerSymbol, TEST_TICKER);
     assert.equal(importedDoc.investmentCategory, TEST_CATEGORY);
     assert.equal(importedDoc.sourceMeta.importRangeYears, TEST_YEARS);
@@ -252,6 +277,8 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     assert.equal(importedDoc.priceCurrency, "USD");
     assert.equal(importedDoc.annualData.length, TEST_YEARS);
 
+    // Then inspect one annual row in detail.
+    // These assertions prove the grouped schema and derived calculations were populated.
     const firstAnnualEntry = importedDoc.annualData[0];
     assert.equal(firstAnnualEntry.fiscalYear, 2024);
     assert.equal(firstAnnualEntry.fiscalYearEndDate, "2024-06-30");
@@ -268,6 +295,9 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     assert.equal(firstAnnualEntry.valuationMultiples.dividendPayout.effectiveValue, 0.2);
     assert.equal(firstAnnualEntry.epsAndDividends.dyTrailing.effectiveValue, 0.01);
 
+    // The second row demonstrates the earnings-date fallback rule.
+    // Fiscal year 2023 has no matching same-year post-year-end call, so the
+    // system should use the fallback date instead of a ROIC date.
     const secondAnnualEntry = importedDoc.annualData[1];
     assert.equal(secondAnnualEntry.fiscalYear, 2023);
     assert.equal(secondAnnualEntry.earningsReleaseDate.effectiveValue, "2023-08-29");
@@ -282,6 +312,8 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     assert.equal(importedDoc.growthForecasts.revenueCagr3y.sourceOfTruth, "system");
     assert.equal(importedDoc.analystRevisions.revenueFy1Last1m.sourceOfTruth, "system");
 
+    // Annual override route: user edits one annual row and derived fields such
+    // as market cap should recalculate from the new effective share price.
     const annualOverrideResponse = await requestJson(`/api/watchlist/${TEST_TICKER}/annual/2024/overrides`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -294,6 +326,7 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     assert.equal(annualOverrideResponse.body.annualData[0].base.sharePrice.sourceOfTruth, "user");
     assert.equal(annualOverrideResponse.body.annualData[0].base.marketCap.effectiveValue, 250000);
 
+    // Forecast override route: same idea, but for forward-looking fields.
     const forecastOverrideResponse = await requestJson(`/api/watchlist/${TEST_TICKER}/forecast/fy1/overrides`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -309,6 +342,8 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
       assert.equal(forecastOverrideResponse.body.forecastData.fy1.enterpriseValue.effectiveValue, 275190);
     assert.ok(forecastOverrideResponse.body.forecastData.fy1.pe.effectiveValue);
 
+    // Top-level override route: covers grouped fields that do not belong to
+    // one annual row or one forecast bucket.
     const topLevelOverrideResponse = await requestJson(`/api/watchlist/${TEST_TICKER}/metrics/overrides`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -320,6 +355,7 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     assert.equal(topLevelOverrideResponse.body.growthForecasts.revenueCagr3y.effectiveValue, 0.15);
     assert.equal(topLevelOverrideResponse.body.analystRevisions.revenueFy1Last1m.effectiveValue, 2);
 
+    // Standard PATCH routes should still work for ordinary editable fields too.
     const patchCategoryResponse = await requestJson(`/api/watchlist/${TEST_TICKER}`, {
       method: "PATCH",
       body: JSON.stringify({ investmentCategory: "Lender" }),
@@ -334,6 +370,8 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     assert.equal(patchCompanyResponse.status, 200, buildFailureMessage("Patch companyName", patchCompanyResponse));
     assert.equal(patchCompanyResponse.body.companyName.effectiveValue, TEST_COMPANY_OVERRIDE);
 
+    // Refresh should re-fetch ROIC-backed values while keeping user overrides intact.
+    // We also verify the original year-cap options are reused on refresh.
     const refreshResponse = await requestJson(`/api/watchlist/${TEST_TICKER}/refresh`, {
       method: "POST",
     });
@@ -349,6 +387,8 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     assert.equal(refreshResponse.body.forecastData.fy1.sharesOnIssue.sourceOfTruth, "user");
     assert.equal(refreshResponse.body.growthForecasts.revenueCagr3y.sourceOfTruth, "user");
 
+    // Basic CRUD checks after the main workflow:
+    // the stock should be retrievable, appear in the list, and then delete cleanly.
     const getOneResponse = await requestJson(`/api/watchlist/${TEST_TICKER}`);
     assert.equal(getOneResponse.status, 200, buildFailureMessage("Get imported ticker", getOneResponse));
 
@@ -362,6 +402,7 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     const getAfterDeleteResponse = await requestJson(`/api/watchlist/${TEST_TICKER}`);
     assert.equal(getAfterDeleteResponse.status, 404, buildFailureMessage("Get deleted ticker", getAfterDeleteResponse));
   } finally {
+    // Always clean up and stop the server, even if an assertion fails.
     try {
       await deleteIfPresent();
     } finally {
