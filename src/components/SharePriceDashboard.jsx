@@ -55,7 +55,7 @@ const MIN_SHORT_LABEL_LEFT_RAIL_WIDTH = 76;
 const MIN_COMPACT_SHORT_LABEL_LEFT_RAIL_WIDTH = 68;
 const FISCAL_BAND_FILL = 'rgba(148, 163, 184, 0.08)';
 const ACTIVE_FISCAL_BAND_FILL = 'rgba(148, 163, 184, 0.12)';
-const FY_WATERMARK_OPACITY = 0.16;
+const FY_WATERMARK_OPACITY = 0.9;
 const LONG_PRESS_ACTIVATION_MS = 400;
 const LONG_PRESS_MOVE_TOLERANCE_PX = 10;
 
@@ -1301,20 +1301,19 @@ export default function SharePriceDashboard({
     // expands quickly and contracts more slowly so scroll-driven re-scaling feels calmer.
     const { minPrice, maxPrice, ticks } = renderedScale;
     const fiscalYearBands = chartXGeometry.anchorPositions.map((anchorPosition, index) => {
-      const unclippedStartX = anchorPosition.x - (timelineLayout.yearCellWidth / 2);
-      const unclippedEndX = anchorPosition.x + (timelineLayout.yearCellWidth / 2);
-      const startX = Math.max(0, unclippedStartX);
-      const endX = Math.min(timelineLayout.plotWidth, unclippedEndX);
+      const previousAnchor = index > 0 ? chartXGeometry.anchorPositions[index - 1] : null;
+      const startX = previousAnchor ? previousAnchor.x : 0;
+      const endX = anchorPosition.x;
 
       return {
         fiscalYear: anchorPosition.fiscalYear,
-        centerX: anchorPosition.x,
+        centerX: startX + ((endX - startX) / 2),
         startX,
         endX,
         width: Math.max(endX - startX, 0),
         isAlternate: index % 2 === 1,
       };
-    }).filter((band) => band.width > 0);
+    }).filter((band) => band && band.width > 0);
 
     return {
       anchorPositions: chartXGeometry.anchorPositions,
@@ -1758,6 +1757,8 @@ export default function SharePriceDashboard({
                         x: position.x,
                       }))}
                       linePath={chartGeometry.svgPath}
+                      lineColor="#f97316"
+                      lineWidth={5}
                       bottomMarkers={chartGeometry.pointPositions.map((position) => ({
                         key: position.date,
                         testId: 'share-price-dashboard-fiscal-tick',
@@ -1777,9 +1778,15 @@ export default function SharePriceDashboard({
                       watermark={activeFiscalBand ? {
                         testId: 'share-price-dashboard-fiscal-watermark',
                         x: activeFiscalBand.centerX,
-                        y: CHART_TOP_PADDING + (CHART_PLOT_HEIGHT / 2),
+                        y: CHART_TOP_PADDING + CHART_PLOT_HEIGHT - 12,
                         text: `FY ${activeFiscalBand.fiscalYear}`,
+                        fontSize: 16,
+                        fontWeight: 700,
+                        fill: '#dc2626',
                         opacity: FY_WATERMARK_OPACITY,
+                        stroke: 'rgba(255, 255, 255, 0.95)',
+                        strokeWidth: 2,
+                        paintOrder: 'stroke',
                         dataAttributes: {
                           'fiscal-year': activeFiscalBand.fiscalYear,
                         },
@@ -1989,7 +1996,14 @@ export default function SharePriceDashboard({
             </Box>
 
             {isRemovable ? (
-              <Button color="error" size="small" onClick={onRemove}>
+              <Button
+                color="error"
+                size="small"
+                onClick={onRemove}
+                sx={{
+                  color: 'error.main',
+                }}
+              >
                 Remove stock
               </Button>
             ) : null}

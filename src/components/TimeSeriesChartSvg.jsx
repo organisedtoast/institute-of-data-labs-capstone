@@ -218,6 +218,9 @@ export default function TimeSeriesChartSvg({
               fontWeight: watermark.fontWeight ?? 700,
               fill: watermark.fill ?? '#64748b',
               opacity: watermark.opacity ?? 0.16,
+              stroke: watermark.stroke ?? 'none',
+              strokeWidth: watermark.strokeWidth ?? 0,
+              paintOrder: watermark.paintOrder,
             },
             watermark.dataAttributes,
           )}

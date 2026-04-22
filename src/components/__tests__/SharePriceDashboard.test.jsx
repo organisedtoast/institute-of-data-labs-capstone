@@ -275,6 +275,62 @@ function buildShortHistoryDashboardPayload(overrides = {}) {
   });
 }
 
+function buildIrregularFiscalYearDashboardPayload(overrides = {}) {
+  const prices = [];
+
+  for (let year = 2022; year <= 2025; year += 1) {
+    for (let month = 1; month <= 12; month += 1) {
+      prices.push({
+        date: `${year}-${String(month).padStart(2, '0')}-01`,
+        close: 45 + ((year - 2022) * 9) + (month / 10),
+      });
+    }
+  }
+
+  const annualMetrics = [
+    {
+      fiscalYear: 2022,
+      fiscalYearEndDate: '2022-02-28',
+      earningsReleaseDate: '2022-04-15',
+      sharePrice: 52.15,
+      sharesOnIssue: 320000000,
+      marketCap: 16600000000,
+    },
+    {
+      fiscalYear: 2023,
+      fiscalYearEndDate: '2023-04-30',
+      earningsReleaseDate: '2023-06-15',
+      sharePrice: 60.45,
+      sharesOnIssue: 324000000,
+      marketCap: 19500000000,
+    },
+    {
+      fiscalYear: 2024,
+      fiscalYearEndDate: '2024-12-31',
+      earningsReleaseDate: '2025-02-20',
+      sharePrice: 67.8,
+      sharesOnIssue: 329000000,
+      marketCap: 22300000000,
+    },
+    {
+      fiscalYear: 2025,
+      fiscalYearEndDate: '2025-02-28',
+      earningsReleaseDate: '2025-04-20',
+      sharePrice: 74.25,
+      sharesOnIssue: 333000000,
+      marketCap: 24700000000,
+    },
+  ];
+
+  return buildDashboardPayload({
+    identifier: 'IRFY',
+    companyName: 'Irregular Fiscal Years Ltd.',
+    prices,
+    annualMetrics,
+    ...overrides,
+  });
+}
+
 
 function createDeferredResponse() {
   let resolveResponse;
@@ -747,18 +803,66 @@ describe('SharePriceDashboard preset scrolling', () => {
 
     fiscalBands.forEach((bandNode, index) => {
       expect(bandNode.getAttribute('data-fiscal-year')).toBe(headerCells[index].getAttribute('data-fiscal-year'));
-      expect(Number(bandNode.getAttribute('data-center-x'))).toBeCloseTo(
-        Number(headerCells[index].getAttribute('data-center-x')),
-        6,
-      );
-      expect(Number(bandNode.getAttribute('data-width'))).toBeCloseTo(
-        Number(headerCells[index].getAttribute('data-cell-width')),
-        6,
-      );
+
+      const startX = Number(bandNode.getAttribute('data-start-x'));
+      const width = Number(bandNode.getAttribute('data-width'));
+      const anchorX = Number(headerCells[index].getAttribute('data-center-x'));
+
+      expect(width).toBeGreaterThan(0);
+      expect(startX).toBeLessThanOrEqual(anchorX);
+      expect(startX + width).toBeCloseTo(anchorX, 6);
     });
 
     expect(fiscalBands.some((bandNode) => bandNode.getAttribute('data-is-alternate') === 'true')).toBe(true);
     expect(fiscalBands.some((bandNode) => bandNode.getAttribute('data-is-alternate') === 'false')).toBe(true);
+  });
+
+  it('anchors each irregular fiscal-year band to the previous and current fiscal year-end ticks', async () => {
+    setViewportWidth(1024);
+
+    const { user } = await renderDashboard({
+      payload: buildIrregularFiscalYearDashboardPayload(),
+    });
+
+    await user.click(screen.getByRole('button', { name: 'MAX' }));
+    await flushDashboardWork();
+
+    const fiscalBands = screen.getAllByTestId('share-price-dashboard-fiscal-band');
+    const headerCells = screen.getAllByTestId('share-price-dashboard-header-cell');
+    const headerCenterByYear = new Map(
+      headerCells.map((cellNode) => [
+        cellNode.getAttribute('data-fiscal-year'),
+        Number(cellNode.getAttribute('data-center-x')),
+      ]),
+    );
+
+    expect(fiscalBands.map((bandNode) => bandNode.getAttribute('data-fiscal-year'))).toEqual([
+      '2022',
+      '2023',
+      '2024',
+      '2025',
+    ]);
+    expect(Number(fiscalBands[0].getAttribute('data-start-x'))).toBe(0);
+    expect(Number(fiscalBands[0].getAttribute('data-center-x'))).toBeCloseTo(
+      headerCenterByYear.get('2022') / 2,
+      6,
+    );
+    expect(Number(fiscalBands[1].getAttribute('data-start-x'))).toBeCloseTo(
+      headerCenterByYear.get('2022'),
+      6,
+    );
+    expect(Number(fiscalBands[1].getAttribute('data-width'))).toBeCloseTo(
+      headerCenterByYear.get('2023') - headerCenterByYear.get('2022'),
+      6,
+    );
+    expect(Number(fiscalBands[2].getAttribute('data-start-x'))).toBeCloseTo(
+      headerCenterByYear.get('2023'),
+      6,
+    );
+    expect(Number(fiscalBands[2].getAttribute('data-width'))).toBeCloseTo(
+      headerCenterByYear.get('2024') - headerCenterByYear.get('2023'),
+      6,
+    );
   });
 
   it('reveals the matching FY watermark when hovering a chart band and clears it on leave', async () => {
@@ -796,6 +900,12 @@ describe('SharePriceDashboard preset scrolling', () => {
 
     const watermark = screen.getByTestId('share-price-dashboard-fiscal-watermark');
     expect(watermark.textContent).toBe(`FY ${targetBand.getAttribute('data-fiscal-year')}`);
+    expect(watermark.getAttribute('opacity')).toBe('0.9');
+    expect(watermark.getAttribute('fill')).toBe('#dc2626');
+    expect(watermark.getAttribute('font-size')).toBe('16');
+    expect(watermark.getAttribute('stroke')).toBe('rgba(255, 255, 255, 0.95)');
+    expect(watermark.getAttribute('stroke-width')).toBe('2');
+    expect(Number(watermark.getAttribute('y'))).toBeCloseTo(248, 6);
 
     await act(async () => {
       fireEvent.mouseLeave(svg);
@@ -857,6 +967,52 @@ describe('SharePriceDashboard preset scrolling', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('uses fiscal year-end anchors as the hover boundary for irregular fiscal year ends', async () => {
+    setViewportWidth(1024);
+
+    const { user } = await renderDashboard({
+      payload: buildIrregularFiscalYearDashboardPayload(),
+    });
+
+    await user.click(screen.getByRole('button', { name: 'MAX' }));
+    await flushDashboardWork();
+
+    const scrollRegion = screen.getByTestId('share-price-dashboard-scroll-region');
+    const svg = scrollRegion.querySelector('svg');
+    const fiscalBands = screen.getAllByTestId('share-price-dashboard-fiscal-band');
+
+    expect(svg).toBeTruthy();
+
+    Object.defineProperty(svg, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        left: 0,
+        top: 0,
+        width: Number(scrollRegion.getAttribute('data-content-width')),
+        height: 280,
+        right: Number(scrollRegion.getAttribute('data-content-width')),
+        bottom: 280,
+      }),
+    });
+
+    const boundaryBand = fiscalBands.find((bandNode) => bandNode.getAttribute('data-fiscal-year') === '2024');
+    expect(boundaryBand).toBeTruthy();
+
+    const boundaryX = Number(boundaryBand.getAttribute('data-center-x')) + (Number(boundaryBand.getAttribute('data-width')) / 2);
+
+    await act(async () => {
+      fireEvent.mouseMove(svg, { clientX: boundaryX - 2, clientY: 140 });
+    });
+
+    expect(screen.getByTestId('share-price-dashboard-fiscal-watermark').textContent).toBe('FY 2024');
+
+    await act(async () => {
+      fireEvent.mouseMove(svg, { clientX: boundaryX + 2, clientY: 140 });
+    });
+
+    expect(screen.getByTestId('share-price-dashboard-fiscal-watermark').textContent).toBe('FY 2025');
   });
 
   it('lets the default 5Y preset pan immediately on first load', async () => {

@@ -41,15 +41,12 @@ export default function StockSearchResults() {
   };
 
   return (
-    <Card sx={{ maxWidth: 960, width: '100%', mx: 'auto', mb: 3, borderRadius: 2 }}>
+    <Card sx={{ maxWidth: 1200, width: '100%', mx: 'auto', mb: 3, borderRadius: 2 }}>
       <CardContent>
         <Stack spacing={2}>
           <Box sx={{ textAlign: 'center' }}>
             <Typography variant="h5" component="h1">
               Search results
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Use the navbar search to find a stock by ticker or company name, then choose one result to add it as a new stock card.
             </Typography>
           </Box>
 
