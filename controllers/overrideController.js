@@ -4,12 +4,15 @@
 // document is being edited.
 
 const {
+  ANALYST_REVISION_FIELDS,
   FORECAST_RELATIVE_METRIC_PATHS,
+  GROWTH_FORECAST_FIELDS,
   TOP_LEVEL_METRIC_PATHS,
 } = require("../catalog/fieldCatalog");
 const WatchlistStock = require("../models/WatchlistStock");
 const { recalculateDerived } = require("../utils/derivedCalc");
-const { flattenObjectPaths, getNestedValue } = require("../utils/pathUtils");
+const { createMetricField } = require("../utils/metricField");
+const { flattenObjectPaths, getNestedValue, setNestedValue } = require("../utils/pathUtils");
 const { resolveEffectiveValue } = require("../utils/effectiveValue");
 
 function applyMetricOverrides(target, allowedPaths, payload) {
@@ -25,7 +28,15 @@ function applyMetricOverrides(target, allowedPaths, payload) {
   }
 
   for (const { path, value } of flattened) {
-    const metricField = getNestedValue(target, path);
+    let metricField = getNestedValue(target, path);
+    if (!metricField) {
+      // New yearly placeholder rows may not exist on older stock documents yet.
+      // We create the shared metric-field shape lazily so an override can still
+      // land in the correct annual row without requiring a manual migration.
+      setNestedValue(target, path, createMetricField(null, "system"));
+      metricField = getNestedValue(target, path);
+    }
+
     if (!metricField) {
       const error = new Error(`Unknown override field: ${path}`);
       error.statusCode = 400;
@@ -98,6 +109,9 @@ async function setAnnualOverride(req, res, next) {
       "epsAndDividends.epsTrailing",
       "epsAndDividends.dyTrailing",
       "epsAndDividends.dpsTrailing",
+      ...FORECAST_RELATIVE_METRIC_PATHS.map((path) => `forecastData.${path}`),
+      ...GROWTH_FORECAST_FIELDS.map((fieldName) => `growthForecasts.${fieldName}`),
+      ...ANALYST_REVISION_FIELDS.map((fieldName) => `analystRevisions.${fieldName}`),
     ];
 
     applyMetricOverrides(annualEntry, allowedPaths, req.body);

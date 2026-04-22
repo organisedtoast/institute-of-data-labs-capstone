@@ -52,11 +52,77 @@ function buildWatchlistStock(overrides = {}) {
   };
 }
 
+function buildMetricsViewPayload() {
+  return {
+    columns: [
+      {
+        key: 'annual-2023',
+        kind: 'annual',
+        label: 'FY 2023',
+        shortLabel: '2023',
+        fiscalYear: 2023,
+        fiscalYearEndDate: '2023-12-31',
+      },
+      {
+        key: 'annual-2024',
+        kind: 'annual',
+        label: 'FY 2024',
+        shortLabel: '2024',
+        fiscalYear: 2024,
+        fiscalYearEndDate: '2024-12-31',
+      },
+    ],
+    rows: [
+      {
+        rowKey: '710::annualData[].forecastData.fy1.ebit',
+        fieldPath: 'annualData[].forecastData.fy1.ebit',
+        label: 'EBIT FY+1',
+        shortLabel: 'EBIT FY+1',
+        section: 'EBIT Forecast',
+        shortSection: 'EBIT Forecast',
+        order: 710,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [
+          {
+            columnKey: 'annual-2023',
+            value: null,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: {
+              kind: 'annual',
+              fiscalYear: 2023,
+              payloadPath: 'forecastData.fy1.ebit',
+            },
+          },
+          {
+            columnKey: 'annual-2024',
+            value: 42,
+            sourceOfTruth: 'user',
+            isOverridden: true,
+            isOverrideable: true,
+            overrideTarget: {
+              kind: 'annual',
+              fiscalYear: 2024,
+              payloadPath: 'forecastData.fy1.ebit',
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
 describe('watchlistDashboardApi', () => {
   beforeEach(() => {
     axios.get.mockReset();
     axios.patch.mockReset();
     axios.post.mockReset();
+    // The dashboard now performs one extra read to fetch the richer metrics-view payload.
+    // Most tests in this file only care about the watchlist + prices calls, so we give the
+    // third GET a safe default response unless a test wants to assert its exact contents.
+    axios.get.mockResolvedValue({ data: { columns: [], rows: [] } });
   });
 
   it('builds the dashboard payload from watchlist metrics and price rows', () => {
@@ -97,6 +163,53 @@ describe('watchlistDashboardApi', () => {
         marketCap: 3200000000000,
       },
     ]);
+    expect(payload.metricsColumns).toEqual([]);
+    expect(payload.metricsRows).toEqual([]);
+  });
+
+  it('normalizes annual metrics-mode rows from the backend metrics-view payload', () => {
+    const payload = buildDashboardPayload(
+      buildWatchlistStock(),
+      { prices: [] },
+      'aapl',
+      buildMetricsViewPayload(),
+    );
+
+    expect(payload.metricsColumns).toEqual([
+      {
+        key: 'annual-2023',
+        kind: 'annual',
+        label: 'FY 2023',
+        shortLabel: '2023',
+        fiscalYear: 2023,
+        fiscalYearEndDate: '2023-12-31',
+        earningsReleaseDate: null,
+        bucket: null,
+      },
+      {
+        key: 'annual-2024',
+        kind: 'annual',
+        label: 'FY 2024',
+        shortLabel: '2024',
+        fiscalYear: 2024,
+        fiscalYearEndDate: '2024-12-31',
+        earningsReleaseDate: null,
+        bucket: null,
+      },
+    ]);
+    expect(payload.metricsRows[0].fieldPath).toBe('annualData[].forecastData.fy1.ebit');
+    expect(payload.metricsRows[0].cells[1]).toEqual({
+      columnKey: 'annual-2024',
+      value: 42,
+      sourceOfTruth: 'user',
+      isOverridden: true,
+      isOverrideable: true,
+      overrideTarget: {
+        kind: 'annual',
+        fiscalYear: 2024,
+        payloadPath: 'forecastData.fy1.ebit',
+      },
+    });
   });
 
   it('preserves the Mongo-backed fiscal year on each normalized annual metric row', () => {
@@ -147,14 +260,19 @@ describe('watchlistDashboardApi', () => {
         data: {
           prices: [{ date: '2024-01-02', close: 185.64 }],
         },
+      })
+      .mockResolvedValueOnce({
+        data: buildMetricsViewPayload(),
       });
 
     const payload = await fetchDashboardData('aapl', { signal: abortSignal });
 
     expect(axios.get).toHaveBeenNthCalledWith(1, '/api/watchlist/AAPL', { signal: abortSignal });
     expect(axios.get).toHaveBeenNthCalledWith(2, '/api/stock-prices/AAPL', { signal: abortSignal });
+    expect(axios.get).toHaveBeenNthCalledWith(3, '/api/watchlist/AAPL/metrics-view', { signal: abortSignal });
     expect(payload.companyName).toBe('Apple Inc.');
     expect(payload.prices).toEqual([{ date: '2024-01-02', close: 185.64 }]);
+    expect(payload.metricsRows[0].fieldPath).toBe('annualData[].forecastData.fy1.ebit');
   });
 
   it('updates the investment category through the canonical watchlist route', async () => {

@@ -43,6 +43,12 @@ function buildMetricGroupSchema(fieldNames) {
   return new mongoose.Schema(definition, { _id: false });
 }
 
+// These shared grouped schemas must be declared before `annualDataSchema`
+// because each annual row reuses them for its own per-year placeholders.
+const forecastBucketSchema = buildMetricGroupSchema(FORECAST_BUCKET_FIELDS);
+const growthForecastSchema = buildMetricGroupSchema(GROWTH_FORECAST_FIELDS);
+const analystRevisionsSchema = buildMetricGroupSchema(ANALYST_REVISION_FIELDS);
+
 const annualDataSchema = new mongoose.Schema({
   fiscalYear: { type: Number, required: true },
   fiscalYearEndDate: { type: String, default: null },
@@ -75,11 +81,23 @@ const annualDataSchema = new mongoose.Schema({
     type: buildMetricGroupSchema(ANNUAL_GROUP_FIELDS.epsAndDividends),
     default: () => ({}),
   },
+  // These per-year placeholder groups let the UI keep one consistent annual
+  // table even for fields that the external API does not currently supply.
+  // Each fiscal year can therefore hold its own FY+1 / FY+2 style assumptions.
+  forecastData: {
+    fy1: { type: forecastBucketSchema, default: () => createEmptyForecastBucket() },
+    fy2: { type: forecastBucketSchema, default: () => createEmptyForecastBucket() },
+    fy3: { type: forecastBucketSchema, default: () => createEmptyForecastBucket() },
+  },
+  growthForecasts: {
+    type: growthForecastSchema,
+    default: () => createEmptyGrowthForecasts(),
+  },
+  analystRevisions: {
+    type: analystRevisionsSchema,
+    default: () => createEmptyAnalystRevisions(),
+  },
 }, { _id: false });
-
-const forecastBucketSchema = buildMetricGroupSchema(FORECAST_BUCKET_FIELDS);
-const growthForecastSchema = buildMetricGroupSchema(GROWTH_FORECAST_FIELDS);
-const analystRevisionsSchema = buildMetricGroupSchema(ANALYST_REVISION_FIELDS);
 
 // The main stock document now carries three layers:
 // - top-level stock identity and metadata

@@ -27,7 +27,9 @@ import {
 } from './timeSeriesChartCore';
 import {
   fetchDashboardData,
+  updateDashboardMetricOverride,
   updateDashboardInvestmentCategory,
+  updateDashboardRowPreference,
 } from '../services/watchlistDashboardApi';
 
 const CHART_HEIGHT = 280;
@@ -41,6 +43,7 @@ const CHART_PLOT_HEIGHT = getChartPlotHeight(CHART_HEIGHT, {
 const RIGHT_TIMELINE_MIN_WIDTH = 720;
 const HEADER_ROW_HEIGHT = 36;
 const DATA_ROW_HEIGHT = 32;
+const METRICS_DATA_ROW_HEIGHT = 44;
 const SCALE_EXPANSION_DURATION_MS = 120;
 const SCALE_CONTRACTION_DURATION_MS = 280;
 const SCALE_CONTRACTION_DELAY_MS = 160;
@@ -48,6 +51,7 @@ const SCALE_WINDOW_STEP_PX = 16;
 const PRESET_PAN_STEP_PX = 28;
 const Y_AXIS_LABEL_MIN_SPACING_PX = 32;
 const MOBILE_LABEL_BREAKPOINT_QUERY = '(max-width: 560px)';
+const MOBILE_METRIC_EDITOR_BREAKPOINT_QUERY = '(max-width: 640px)';
 const PRESET_MIN_COLUMN_WIDTH = 56;
 const PRESET_COMPACT_MIN_COLUMN_WIDTH = 48;
 const MIN_FULL_LABEL_LEFT_RAIL_WIDTH = 120;
@@ -282,6 +286,163 @@ function areScaleValuesClose(leftScale, rightScale) {
     Math.abs((leftScale?.minPrice ?? 0) - (rightScale?.minPrice ?? 0)) <= allowedDifference &&
     Math.abs((leftScale?.maxPrice ?? 0) - (rightScale?.maxPrice ?? 0)) <= allowedDifference
   );
+}
+
+function formatPlainNumber(value, maximumFractionDigits = 2) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return '--';
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits,
+  }).format(Number(value));
+}
+
+function shouldUseCompactMagnitude(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return false;
+  }
+
+  return Math.abs(Number(value)) >= 1000;
+}
+
+function formatMetricPercent(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return '--';
+  }
+
+  const numericValue = Number(value);
+  const displayValue = Math.abs(numericValue) <= 1 ? numericValue * 100 : numericValue;
+  return `${displayValue.toFixed(1)}%`;
+}
+
+function inferMetricDisplayKind(fieldPath) {
+  const normalizedFieldPath = String(fieldPath || '').toLowerCase();
+
+  if (normalizedFieldPath.includes('date')) {
+    return 'date';
+  }
+
+  if (
+    normalizedFieldPath.includes('margin')
+    || normalizedFieldPath.includes('cagr')
+    || normalizedFieldPath.includes('dividendpayout')
+    || normalizedFieldPath.includes('returnoninvestedcapital')
+    || normalizedFieldPath.includes('revisions')
+    || normalizedFieldPath.endsWith('.dy')
+    || normalizedFieldPath.includes('dytrailing')
+  ) {
+    return 'percent';
+  }
+
+  if (
+    normalizedFieldPath.includes('sharesonissue')
+    || normalizedFieldPath.includes('changeinshares')
+  ) {
+    return 'shares';
+  }
+
+  if (
+    normalizedFieldPath.includes('evsales')
+    || normalizedFieldPath.includes('evebit')
+    || normalizedFieldPath.includes('netdebttoebitda')
+    || normalizedFieldPath.includes('intercoverage')
+    || normalizedFieldPath.includes('leverageratio')
+    || normalizedFieldPath.includes('pricetonta')
+    || normalizedFieldPath.includes('.pe')
+  ) {
+    return 'ratio';
+  }
+
+  if (
+    normalizedFieldPath.includes('shareprice')
+    || normalizedFieldPath.includes('marketcap')
+    || normalizedFieldPath.includes('enterprisevalue')
+    || normalizedFieldPath.includes('revenue')
+    || normalizedFieldPath.includes('grossprofit')
+    || normalizedFieldPath.includes('cash')
+    || normalizedFieldPath.includes('debt')
+    || normalizedFieldPath.includes('assets')
+    || normalizedFieldPath.includes('liabilities')
+    || normalizedFieldPath.includes('equity')
+    || normalizedFieldPath.includes('ebit')
+    || normalizedFieldPath.includes('ebitda')
+    || normalizedFieldPath.includes('npat')
+    || normalizedFieldPath.includes('npbt')
+    || normalizedFieldPath.includes('fcf')
+    || normalizedFieldPath.includes('capex')
+    || normalizedFieldPath.includes('earnings')
+    || normalizedFieldPath.includes('dps')
+    || normalizedFieldPath.includes('eps')
+    || normalizedFieldPath.includes('bookvalue')
+  ) {
+    return 'currency';
+  }
+
+  return 'number';
+}
+
+function formatMetricCellValue(value, fieldPath, options = {}) {
+  const displayKind = inferMetricDisplayKind(fieldPath);
+
+  if (displayKind === 'date') {
+    return formatFiscalReleaseLabel(value, options.compact);
+  }
+
+  if (displayKind === 'percent') {
+    return formatMetricPercent(value);
+  }
+
+  if (displayKind === 'shares') {
+    return formatCompactNumber(value);
+  }
+
+  if (displayKind === 'ratio') {
+    return formatPlainNumber(value, options.compact ? 1 : 2);
+  }
+
+  if (displayKind === 'currency') {
+    // The expanded metrics table should keep the same "read it at a glance"
+    // feel as the stock card summary rows. Large money values like revenue or
+    // market cap are easier to scan when they use compact units instead of
+    // showing every digit and cents that do not add meaning at that scale.
+    return (options.compact || shouldUseCompactMagnitude(value))
+      ? formatCurrency(value, { compact: true })
+      : formatCurrency(value);
+  }
+
+  return (options.compact || shouldUseCompactMagnitude(value))
+    ? formatCompactNumber(value)
+    : formatPlainNumber(value, 2);
+}
+
+function getMetricEditorInputType(fieldPath, value) {
+  if (inferMetricDisplayKind(fieldPath) === 'date') {
+    return 'date';
+  }
+
+  if (typeof value === 'number') {
+    return 'number';
+  }
+
+  return 'text';
+}
+
+function coerceMetricEditorValue(rawValue, fieldPath) {
+  if (rawValue === '') {
+    return null;
+  }
+
+  if (inferMetricDisplayKind(fieldPath) === 'date') {
+    return rawValue;
+  }
+
+  const numericValue = Number(rawValue);
+  if (!Number.isNaN(numericValue)) {
+    return numericValue;
+  }
+
+  return rawValue;
 }
 
 function getColumnDensity(columnCount) {
@@ -522,7 +683,14 @@ export default function SharePriceDashboard({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [investmentCategoryError, setInvestmentCategoryError] = useState('');
+  const [metricsActionError, setMetricsActionError] = useState('');
   const [isUpdatingInvestmentCategory, setIsUpdatingInvestmentCategory] = useState(false);
+  const [isSavingMetricOverride, setIsSavingMetricOverride] = useState(false);
+  const [isUpdatingRowPreference, setIsUpdatingRowPreference] = useState(false);
+  const [isMetricsOpen, setIsMetricsOpen] = useState(false);
+  const [isHiddenRowsOpen, setIsHiddenRowsOpen] = useState(false);
+  const [metricEditorState, setMetricEditorState] = useState(null);
+  const [metricEditorValue, setMetricEditorValue] = useState('');
   const [freeRangeStartMonth, setFreeRangeStartMonth] = useState('');
   const [freeRangeEndMonth, setFreeRangeEndMonth] = useState('');
   const [rangeMode, setRangeMode] = useState('preset');
@@ -563,10 +731,49 @@ export default function SharePriceDashboard({
     startClientX: 0,
     startClientY: 0,
   });
+  const metricCellLongPressTimeoutRef = useRef(null);
+  const metricCellTouchStateRef = useRef({
+    isActive: false,
+    startClientX: 0,
+    startClientY: 0,
+  });
 
   const attachTimelineScrollRef = useCallback((node) => {
     timelineScrollRef.current = node;
   }, []);
+
+  const applyMetricsViewUpdate = useCallback((metricsUpdate) => {
+    setDashboardData((previousDashboardData) => {
+      if (!previousDashboardData) {
+        return previousDashboardData;
+      }
+
+      return {
+        ...previousDashboardData,
+        metricsColumns: Array.isArray(metricsUpdate?.metricsColumns)
+          ? metricsUpdate.metricsColumns
+          : previousDashboardData.metricsColumns,
+        metricsRows: Array.isArray(metricsUpdate?.metricsRows)
+          ? metricsUpdate.metricsRows
+          : previousDashboardData.metricsRows,
+      };
+    });
+  }, []);
+
+  const reloadDashboardPayload = useCallback(async () => {
+    const nextDashboardData = await fetchDashboardData(identifier);
+
+    setDashboardData((previousDashboardData) => {
+      if (!previousDashboardData) {
+        return nextDashboardData;
+      }
+
+      return {
+        ...nextDashboardData,
+        investmentCategory: nextDashboardData.investmentCategory || previousDashboardData.investmentCategory,
+      };
+    });
+  }, [identifier]);
 
   useEffect(() => {
     let isMounted = true;
@@ -608,6 +815,11 @@ export default function SharePriceDashboard({
 
         setDashboardData(nextDashboardData);
         setInvestmentCategoryError('');
+        setMetricsActionError('');
+        setMetricEditorState(null);
+        setMetricEditorValue('');
+        setIsHiddenRowsOpen(false);
+        setIsMetricsOpen(false);
         setFreeRangeStartMonth(defaultRange.startMonth);
         setFreeRangeEndMonth(defaultRange.endMonth);
         setRangeMode('preset');
@@ -644,7 +856,10 @@ export default function SharePriceDashboard({
 
   const priceRows = dashboardData?.prices || [];
   const annualMetrics = dashboardData?.annualMetrics || [];
+  const metricsColumns = dashboardData?.metricsColumns || [];
+  const metricsRows = dashboardData?.metricsRows || [];
   const shouldUseShortLabels = useMediaQueryMatch(MOBILE_LABEL_BREAKPOINT_QUERY);
+  const shouldUseBottomSheetMetricEditor = useMediaQueryMatch(MOBILE_METRIC_EDITOR_BREAKPOINT_QUERY);
   const activePresetConfig = PRESET_BUTTONS.find((preset) => preset.key === activePreset) || null;
   const fixedLengthPresetConfigs = PRESET_BUTTONS.filter((preset) => Boolean(preset.monthCount));
   const minAvailableMonth = priceRows.length ? getMonthStringFromDate(priceRows[0].date) : '';
@@ -742,6 +957,12 @@ export default function SharePriceDashboard({
       return annualRow.fiscalYearEndDate >= startBoundaryDate && annualRow.fiscalYearEndDate <= endBoundaryDate;
     });
   }, [annualMetrics, endBoundaryDate, isRangeValid, startBoundaryDate]);
+  const visibleMetricRows = useMemo(() => {
+    return metricsRows.filter((row) => row.isEnabled !== false);
+  }, [metricsRows]);
+  const hiddenMetricRows = useMemo(() => {
+    return metricsRows.filter((row) => row.isEnabled === false);
+  }, [metricsRows]);
 
   const dashboardFieldRows = useMemo(() => {
     return [
@@ -809,13 +1030,44 @@ export default function SharePriceDashboard({
         formatter: metric.formatter,
       }));
   }, [dashboardFieldRows]);
+  const supplementalMetricsColumns = useMemo(() => {
+    if (!isMetricsOpen) {
+      return [];
+    }
+
+    return metricsColumns.filter((column) => column.kind !== 'annual');
+  }, [isMetricsOpen, metricsColumns]);
+  const metricsRowDefinitions = useMemo(() => {
+    if (!isMetricsOpen) {
+      return [];
+    }
+
+    return visibleMetricRows.map((metricRow, metricIndex) => ({
+      key: metricRow.rowKey,
+      label: metricRow.label,
+      shortLabel: metricRow.shortLabel,
+      section: metricRow.section,
+      shortSection: metricRow.shortSection,
+      showSectionLabel: metricIndex === 0 || metricRow.section !== visibleMetricRows[metricIndex - 1]?.section,
+      fieldPath: metricRow.fieldPath,
+      height: METRICS_DATA_ROW_HEIGHT,
+      backgroundColor: metricIndex % 2 === 0 ? '#ffffff' : '#fafafa',
+      borderTop: 'none',
+      borderBottom: metricIndex < visibleMetricRows.length - 1 ? '1px solid #f1f5f9' : 'none',
+      isHeader: false,
+      cells: metricRow.cells,
+    }));
+  }, [isMetricsOpen, visibleMetricRows]);
 
   const columnDensity = useMemo(() => {
     return getColumnDensity(tablePoints.length);
   }, [tablePoints.length]);
 
   const shortLabelLeftRailWidth = useMemo(() => {
-    const longestShortLabelLength = dashboardFieldRows.reduce((maximumLength, fieldRow) => {
+    const allVisibleRows = isMetricsOpen
+      ? [...dashboardFieldRows, ...visibleMetricRows]
+      : dashboardFieldRows;
+    const longestShortLabelLength = allVisibleRows.reduce((maximumLength, fieldRow) => {
       return Math.max(maximumLength, String(fieldRow.shortLabel || '').length);
     }, 0);
 
@@ -825,10 +1077,13 @@ export default function SharePriceDashboard({
       MIN_SHORT_LABEL_LEFT_RAIL_WIDTH,
       Math.ceil(longestShortLabelLength * 6.5) + 18,
     );
-  }, [dashboardFieldRows]);
+  }, [dashboardFieldRows, isMetricsOpen, visibleMetricRows]);
 
   const fullLabelLeftRailWidth = useMemo(() => {
-    const longestFullLabelLength = dashboardFieldRows.reduce((maximumLength, fieldRow) => {
+    const allVisibleRows = isMetricsOpen
+      ? [...dashboardFieldRows, ...visibleMetricRows]
+      : dashboardFieldRows;
+    const longestFullLabelLength = allVisibleRows.reduce((maximumLength, fieldRow) => {
       return Math.max(maximumLength, String(fieldRow.label || '').length);
     }, 0);
 
@@ -839,7 +1094,7 @@ export default function SharePriceDashboard({
       MIN_FULL_LABEL_LEFT_RAIL_WIDTH,
       Math.ceil(longestFullLabelLength * 6.6) + 18,
     );
-  }, [dashboardFieldRows]);
+  }, [dashboardFieldRows, isMetricsOpen, visibleMetricRows]);
 
   const compactShortLabelLeftRailWidth = useMemo(() => {
     return Math.max(
@@ -870,14 +1125,16 @@ export default function SharePriceDashboard({
         ? tablePoints.length * minimumColumnWidth
         : minimumColumnWidth;
       const minimumIntrinsicContentWidth = minimumIntrinsicPlotWidth + CHART_RIGHT_PADDING;
-      const contentWidth = Math.max(timelineViewportWidth, minimumIntrinsicContentWidth, 1);
-      const plotWidth = Math.max(contentWidth - CHART_RIGHT_PADDING, 1);
+      const chartContentWidth = Math.max(timelineViewportWidth, minimumIntrinsicContentWidth, 1);
+      const plotWidth = Math.max(chartContentWidth - CHART_RIGHT_PADDING, 1);
       const yearCellWidth = tablePoints.length
         ? Math.max(Math.floor(plotWidth / tablePoints.length), minimumColumnWidth)
         : minimumColumnWidth;
+      const contentWidth = chartContentWidth + (supplementalMetricsColumns.length * yearCellWidth);
 
       return {
         plotWidth,
+        chartContentWidth,
         contentWidth,
         yearCellWidth,
         headerFontSize: isCompactPresetTable ? { xs: '10px', sm: '11px' } : { xs: '11px', sm: '12px' },
@@ -886,15 +1143,26 @@ export default function SharePriceDashboard({
     }
 
     const plotWidth = Math.max(RIGHT_TIMELINE_MIN_WIDTH, tablePoints.length * columnDensity.columnWidth);
+    const chartContentWidth = plotWidth + CHART_RIGHT_PADDING;
+    const contentWidth = chartContentWidth + (supplementalMetricsColumns.length * columnDensity.columnWidth);
 
     return {
       plotWidth,
-      contentWidth: plotWidth + CHART_RIGHT_PADDING,
+      chartContentWidth,
+      contentWidth,
       yearCellWidth: columnDensity.columnWidth,
       headerFontSize: { xs: '11px', sm: '12px' },
       bodyFontSize: { xs: '11px', sm: '12px', md: '13px' },
     };
-  }, [columnDensity, fixedLeftRailWidth, isCompactPresetTable, scrollState.containerWidth, tablePoints.length, usesPresetTimelineLayout]);
+  }, [
+    columnDensity,
+    fixedLeftRailWidth,
+    isCompactPresetTable,
+    scrollState.containerWidth,
+    supplementalMetricsColumns.length,
+    tablePoints.length,
+    usesPresetTimelineLayout,
+  ]);
 
   useLayoutEffect(() => {
     const scrollElement = timelineScrollRef.current;
@@ -1378,6 +1646,47 @@ export default function SharePriceDashboard({
   const baseSurfaceWidth = fixedLeftRailWidth + timelineLayout.contentWidth;
   const presetPanTrackWidth = Math.max(scrollState.containerWidth || baseSurfaceWidth, baseSurfaceWidth) + (maxPresetPanOffset * PRESET_PAN_STEP_PX);
   const scrollSurfaceWidth = isPresetWindowMode ? presetPanTrackWidth : baseSurfaceWidth;
+  const visibleAnnualMetricColumnKeys = useMemo(() => {
+    return new Set(tablePoints.map((annualRow) => `annual-${annualRow.fiscalYear}`));
+  }, [tablePoints]);
+  const renderedMetricsColumns = useMemo(() => {
+    const visibleHistoricalColumns = metricsColumns.filter((column) => {
+      return column.kind === 'annual' && visibleAnnualMetricColumnKeys.has(column.key);
+    });
+
+    return [...visibleHistoricalColumns, ...supplementalMetricsColumns];
+  }, [metricsColumns, supplementalMetricsColumns, visibleAnnualMetricColumnKeys]);
+  const renderedMetricCellByRowKey = useMemo(() => {
+    const cellMap = new Map();
+
+    visibleMetricRows.forEach((metricRow) => {
+      cellMap.set(
+        metricRow.rowKey,
+        new Map((metricRow.cells || []).map((cell) => [cell.columnKey, cell])),
+      );
+    });
+
+    return cellMap;
+  }, [visibleMetricRows]);
+  const metricsColumnCenterByKey = useMemo(() => {
+    const columnCenters = new Map();
+
+    chartGeometry.pointPositions.forEach((position, index) => {
+      const annualRow = tablePoints[index];
+      if (!annualRow) {
+        return;
+      }
+
+      columnCenters.set(`annual-${annualRow.fiscalYear}`, position.x);
+    });
+
+    supplementalMetricsColumns.forEach((column, index) => {
+      const centerX = timelineLayout.plotWidth + CHART_RIGHT_PADDING + ((index + 0.5) * timelineLayout.yearCellWidth);
+      columnCenters.set(column.key, centerX);
+    });
+
+    return columnCenters;
+  }, [chartGeometry.pointPositions, supplementalMetricsColumns, tablePoints, timelineLayout.plotWidth, timelineLayout.yearCellWidth]);
 
   const handlePresetClick = (preset) => {
     const nextRange = getTrailingRange({
@@ -1410,6 +1719,151 @@ export default function SharePriceDashboard({
     if (longPressTimeoutRef.current) {
       clearTimeout(longPressTimeoutRef.current);
       longPressTimeoutRef.current = null;
+    }
+  };
+
+  const clearMetricCellLongPressTimeout = () => {
+    if (metricCellLongPressTimeoutRef.current) {
+      clearTimeout(metricCellLongPressTimeoutRef.current);
+      metricCellLongPressTimeoutRef.current = null;
+    }
+  };
+
+  const openMetricEditor = (cell, fieldPath, anchorRect) => {
+    if (!cell?.isOverrideable || !cell?.overrideTarget) {
+      return;
+    }
+
+    setMetricsActionError('');
+    setMetricEditorState({
+      overrideTarget: cell.overrideTarget,
+      fieldPath,
+      anchorRect,
+    });
+    setMetricEditorValue(cell.value === null || cell.value === undefined ? '' : String(cell.value));
+  };
+
+  const closeMetricEditor = () => {
+    setMetricEditorState(null);
+    setMetricEditorValue('');
+  };
+
+  const handleMetricCellContextMenu = (event, metricRow, cell) => {
+    if (!cell?.isOverrideable) {
+      return;
+    }
+
+    event.preventDefault();
+    openMetricEditor(cell, metricRow.fieldPath, event.currentTarget.getBoundingClientRect());
+  };
+
+  const handleMetricCellTouchStart = (event, metricRow, cell) => {
+    if (!cell?.isOverrideable || !event.touches?.length) {
+      return;
+    }
+
+    const touch = event.touches[0];
+    metricCellTouchStateRef.current = {
+      isActive: false,
+      startClientX: touch.clientX,
+      startClientY: touch.clientY,
+    };
+
+    clearMetricCellLongPressTimeout();
+    metricCellLongPressTimeoutRef.current = window.setTimeout(() => {
+      metricCellTouchStateRef.current.isActive = true;
+      openMetricEditor(cell, metricRow.fieldPath, event.currentTarget.getBoundingClientRect());
+    }, LONG_PRESS_ACTIVATION_MS + 150);
+  };
+
+  const handleMetricCellTouchMove = (event) => {
+    if (!event.touches?.length) {
+      return;
+    }
+
+    const touch = event.touches[0];
+    const deltaX = Math.abs(touch.clientX - metricCellTouchStateRef.current.startClientX);
+    const deltaY = Math.abs(touch.clientY - metricCellTouchStateRef.current.startClientY);
+
+    if (deltaX > LONG_PRESS_MOVE_TOLERANCE_PX || deltaY > LONG_PRESS_MOVE_TOLERANCE_PX) {
+      clearMetricCellLongPressTimeout();
+    }
+  };
+
+  const handleMetricCellTouchEnd = () => {
+    clearMetricCellLongPressTimeout();
+    metricCellTouchStateRef.current.isActive = false;
+  };
+
+  const handleSaveMetricOverride = async () => {
+    if (!metricEditorState?.overrideTarget) {
+      return;
+    }
+
+    setIsSavingMetricOverride(true);
+    setMetricsActionError('');
+
+    try {
+      await updateDashboardMetricOverride(
+        identifier,
+        metricEditorState.overrideTarget,
+        coerceMetricEditorValue(metricEditorValue, metricEditorState.fieldPath),
+      );
+      await reloadDashboardPayload();
+      closeMetricEditor();
+    } catch (requestError) {
+      setMetricsActionError(
+        requestError.response?.data?.message
+          || requestError.response?.data?.error
+          || 'Unable to save that override right now.',
+      );
+    } finally {
+      setIsSavingMetricOverride(false);
+    }
+  };
+
+  const handleClearMetricOverride = async () => {
+    if (!metricEditorState?.overrideTarget) {
+      return;
+    }
+
+    setIsSavingMetricOverride(true);
+    setMetricsActionError('');
+
+    try {
+      await updateDashboardMetricOverride(
+        identifier,
+        metricEditorState.overrideTarget,
+        null,
+      );
+      await reloadDashboardPayload();
+      closeMetricEditor();
+    } catch (requestError) {
+      setMetricsActionError(
+        requestError.response?.data?.message
+          || requestError.response?.data?.error
+          || 'Unable to clear that override right now.',
+      );
+    } finally {
+      setIsSavingMetricOverride(false);
+    }
+  };
+
+  const handleMetricRowEnabledState = async (rowKey, isEnabled) => {
+    setIsUpdatingRowPreference(true);
+    setMetricsActionError('');
+
+    try {
+      const response = await updateDashboardRowPreference(identifier, rowKey, isEnabled);
+      applyMetricsViewUpdate(response);
+    } catch (requestError) {
+      setMetricsActionError(
+        requestError.response?.data?.message
+          || requestError.response?.data?.error
+          || 'Unable to save row visibility right now.',
+      );
+    } finally {
+      setIsUpdatingRowPreference(false);
     }
   };
 
@@ -1525,6 +1979,7 @@ export default function SharePriceDashboard({
   useEffect(() => {
     return () => {
       clearLongPressTimeout();
+      clearMetricCellLongPressTimeout();
     };
   }, []);
 
@@ -1540,7 +1995,7 @@ export default function SharePriceDashboard({
 
     try {
       const updatedCategory = await updateDashboardInvestmentCategory(identifier, nextInvestmentCategory);
-
+      await reloadDashboardPayload();
       setDashboardData((previousDashboardData) => {
         if (!previousDashboardData) {
           return previousDashboardData;
@@ -1905,6 +2360,217 @@ export default function SharePriceDashboard({
                     </Box>
                   </Box>
                 ))}
+
+                {isMetricsOpen ? (
+                  <>
+                    <Box
+                      key="detail-metrics-header"
+                      data-testid="share-price-dashboard-detail-metrics-header"
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'stretch',
+                        width: baseSurfaceWidth,
+                        height: `${HEADER_ROW_HEIGHT}px`,
+                        backgroundColor: '#f8fafc',
+                        borderTop: '1px solid #e2e8f0',
+                        borderBottom: '2px solid #e2e8f0',
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          position: 'sticky',
+                          left: 0,
+                          zIndex: 2,
+                          width: fixedLeftRailWidth,
+                          flexShrink: 0,
+                          px: 1.25,
+                          fontSize: { xs: '11px', sm: '12px' },
+                          fontWeight: 600,
+                          color: '#64748b',
+                          display: 'flex',
+                          alignItems: 'center',
+                          backgroundColor: '#f8fafc',
+                          borderRight: '1px solid #e2e8f0',
+                          whiteSpace: 'nowrap',
+                          }}
+                      >
+                        DETAIL METRICS
+                      </Box>
+
+                      <Box
+                        sx={{
+                          position: 'relative',
+                          width: timelineLayout.contentWidth,
+                          flexShrink: 0,
+                          height: `${HEADER_ROW_HEIGHT}px`,
+                        }}
+                      />
+                    </Box>
+                    {metricsRowDefinitions.map((tableRow) => (
+                      <Box
+                        key={tableRow.key}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'stretch',
+                          width: baseSurfaceWidth,
+                          height: `${tableRow.height}px`,
+                          backgroundColor: tableRow.backgroundColor,
+                          borderTop: tableRow.borderTop,
+                          borderBottom: tableRow.borderBottom,
+                        }}
+                      >
+                        <Box
+                          title={shouldUseShortLabels ? tableRow.label : undefined}
+                          aria-label={tableRow.label}
+                          sx={{
+                            position: 'sticky',
+                            left: 0,
+                            zIndex: 2,
+                            width: fixedLeftRailWidth,
+                            flexShrink: 0,
+                            px: 1.25,
+                            py: 0.5,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'center',
+                            alignItems: 'flex-start',
+                            gap: tableRow.showSectionLabel ? 0.2 : 0,
+                            backgroundColor: tableRow.backgroundColor,
+                            borderRight: '1px solid #e2e8f0',
+                            textAlign: 'left',
+                          }}
+                        >
+                          {tableRow.showSectionLabel ? (
+                            <Box
+                              sx={{
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                color: '#94a3b8',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.04em',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                width: '100%',
+                                textAlign: 'left',
+                              }}
+                            >
+                              {shouldUseShortLabels ? tableRow.shortSection : tableRow.section}
+                            </Box>
+                          ) : null}
+                          <Box
+                            sx={{
+                              fontSize: { xs: '11px', sm: '12px', md: '13px' },
+                              fontWeight: 400,
+                              color: '#475569',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              width: '100%',
+                              textAlign: 'left',
+                            }}
+                          >
+                            {shouldUseShortLabels ? tableRow.shortLabel : tableRow.label}
+                          </Box>
+                        </Box>
+
+                        <Box
+                          sx={{
+                            position: 'relative',
+                            width: timelineLayout.contentWidth,
+                            flexShrink: 0,
+                            height: `${tableRow.height}px`,
+                          }}
+                        >
+                          {renderedMetricsColumns.map((column) => {
+                            const metricCell = renderedMetricCellByRowKey.get(tableRow.key)?.get(column.key);
+                            const centerX = metricsColumnCenterByKey.get(column.key);
+
+                            if (!metricCell || !Number.isFinite(centerX)) {
+                              return null;
+                            }
+
+                            return (
+                              <Box
+                                key={`${tableRow.key}-${column.key}`}
+                                role={metricCell.isOverrideable ? 'button' : undefined}
+                                tabIndex={metricCell.isOverrideable ? 0 : undefined}
+                                data-testid="share-price-dashboard-metric-cell"
+                                data-row-key={tableRow.key}
+                                data-column-key={column.key}
+                                onContextMenu={(event) => handleMetricCellContextMenu(event, tableRow, metricCell)}
+                                onTouchStart={(event) => handleMetricCellTouchStart(event, tableRow, metricCell)}
+                                onTouchMove={handleMetricCellTouchMove}
+                                onTouchEnd={handleMetricCellTouchEnd}
+                                onTouchCancel={handleMetricCellTouchEnd}
+                                sx={{
+                                  position: 'absolute',
+                                  left: `${centerX}px`,
+                                  transform: 'translateX(-50%)',
+                                  height: `${tableRow.height}px`,
+                                  fontSize: timelineLayout.bodyFontSize,
+                                  fontWeight: metricCell.isOverridden ? 600 : 400,
+                                  color: metricCell.isOverridden ? '#6d28d9' : '#334155',
+                                  textAlign: 'center',
+                                  width: `${timelineLayout.yearCellWidth}px`,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  lineHeight: 1.1,
+                                  px: 0.35,
+                                  cursor: metricCell.isOverrideable ? 'context-menu' : 'default',
+                                  userSelect: 'none',
+                                }}
+                              >
+                                {metricCell.isOverrideable ? (
+                                  <Box
+                                    component="span"
+                                    aria-hidden="true"
+                                    sx={{
+                                      color: '#64748b',
+                                      fontSize: '12px',
+                                      lineHeight: 1,
+                                      mr: 0.45,
+                                    }}
+                                  >
+                                    •
+                                  </Box>
+                                ) : null}
+                                {formatMetricCellValue(metricCell.value, tableRow.fieldPath, { compact: isCompactPresetTable })}
+                              </Box>
+                            );
+                          })}
+
+                          <Button
+                            size="small"
+                            data-testid="share-price-dashboard-metric-row-hide-button"
+                            disabled={isUpdatingRowPreference}
+                            onClick={() => handleMetricRowEnabledState(tableRow.key, false)}
+                            sx={{
+                              position: 'absolute',
+                              right: 6,
+                              top: '50%',
+                              transform: 'translateY(-50%)',
+                              minWidth: 0,
+                              px: 0.75,
+                              py: 0,
+                              fontSize: '10px',
+                              lineHeight: 1.2,
+                              zIndex: 2,
+                              backgroundColor: 'rgba(255, 255, 255, 0.92)',
+                              border: '1px solid #e2e8f0',
+                            }}
+                          >
+                            HIDE
+                          </Button>
+                        </Box>
+                      </Box>
+                    ))}
+                  </>
+                ) : null}
               </Box>
             </Box>
           </Box>
@@ -1915,6 +2581,63 @@ export default function SharePriceDashboard({
             <Typography variant="body2" color="text.secondary" align="center">
               Annual metric rows only appear when a fiscal year-end falls inside the selected month range.
             </Typography>
+          </Box>
+        ) : null}
+
+        {isMetricsOpen && hiddenMetricRows.length > 0 ? (
+          <Box sx={{ px: 2, py: 1.5, borderTop: '1px solid #f1f5f9' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', mb: isHiddenRowsOpen ? 1.5 : 0 }}>
+              <Button
+                size="small"
+                onClick={() => setIsHiddenRowsOpen((previousState) => !previousState)}
+              >
+                {isHiddenRowsOpen ? 'HIDE HIDDEN ROWS' : `HIDDEN ROWS (${hiddenMetricRows.length})`}
+              </Button>
+            </Box>
+
+            {isHiddenRowsOpen ? (
+              <Box
+                data-testid="share-price-dashboard-hidden-rows"
+                sx={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 1,
+                }}
+              >
+                {hiddenMetricRows.map((metricRow) => (
+                  <Box
+                    key={metricRow.rowKey}
+                    sx={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 1,
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 1.5,
+                      px: 1.5,
+                      py: 1,
+                    }}
+                  >
+                    <Box>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {metricRow.label}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                        {metricRow.section}
+                      </Typography>
+                    </Box>
+                    <Button
+                      size="small"
+                      disabled={isUpdatingRowPreference}
+                      onClick={() => handleMetricRowEnabledState(metricRow.rowKey, true)}
+                    >
+                      SHOW ROW
+                    </Button>
+                  </Box>
+                ))}
+              </Box>
+            ) : null}
           </Box>
         ) : null}
       </Box>
@@ -2019,9 +2742,29 @@ export default function SharePriceDashboard({
             ) : null}
           </Box>
 
+          <Box sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
+            <Button
+              size="small"
+              onClick={() => {
+                setMetricsActionError('');
+                setMetricEditorState(null);
+                setMetricEditorValue('');
+                setIsMetricsOpen((previousState) => !previousState);
+              }}
+            >
+              {isMetricsOpen ? 'HIDE METRICS' : 'SHOW METRICS'}
+            </Button>
+          </Box>
+
           {investmentCategoryError ? (
             <Typography variant="body2" color="error" align="center">
               {investmentCategoryError}
+            </Typography>
+          ) : null}
+
+          {metricsActionError ? (
+            <Typography variant="body2" color="error" align="center">
+              {metricsActionError}
             </Typography>
           ) : null}
         </CardActions>
@@ -2103,6 +2846,60 @@ export default function SharePriceDashboard({
 
         {cardBody}
       </Box>
+
+      {metricEditorState ? (
+        <Box
+          data-testid="share-price-dashboard-metric-editor"
+          sx={{
+            position: 'fixed',
+            zIndex: 1400,
+            left: shouldUseBottomSheetMetricEditor
+              ? 12
+              : Math.max((metricEditorState.anchorRect?.left || 0) - 16, 12),
+            right: shouldUseBottomSheetMetricEditor ? 12 : 'auto',
+            top: shouldUseBottomSheetMetricEditor
+              ? 'auto'
+              : Math.min(
+                  (metricEditorState.anchorRect?.bottom || 0) + 8,
+                  ((typeof window !== 'undefined' ? window.innerHeight : 800) - 220),
+                ),
+            bottom: shouldUseBottomSheetMetricEditor ? 12 : 'auto',
+            width: shouldUseBottomSheetMetricEditor ? 'auto' : 280,
+            border: '1px solid #cbd5e1',
+            borderRadius: shouldUseBottomSheetMetricEditor ? 2 : 1.5,
+            backgroundColor: '#ffffff',
+            boxShadow: '0 18px 40px rgba(15, 23, 42, 0.18)',
+            p: 1.5,
+          }}
+        >
+          <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>
+            Edit metric override
+          </Typography>
+          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mb: 1 }}>
+            Right click on desktop or long press on touch to edit overrideable values.
+          </Typography>
+          <TextField
+            fullWidth
+            label="Override value"
+            size="small"
+            type={getMetricEditorInputType(metricEditorState.fieldPath, metricEditorValue)}
+            value={metricEditorValue}
+            onChange={(event) => setMetricEditorValue(event.target.value)}
+            InputLabelProps={{ shrink: true }}
+          />
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 1, mt: 1.5 }}>
+            <Button size="small" onClick={closeMetricEditor} disabled={isSavingMetricOverride}>
+              CANCEL
+            </Button>
+            <Button size="small" onClick={handleClearMetricOverride} disabled={isSavingMetricOverride}>
+              CLEAR OVERRIDE
+            </Button>
+            <Button size="small" onClick={handleSaveMetricOverride} disabled={isSavingMetricOverride}>
+              SAVE OVERRIDE
+            </Button>
+          </Box>
+        </Box>
+      ) : null}
     </Card>
   );
 }

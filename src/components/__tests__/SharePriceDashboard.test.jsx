@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
@@ -8,7 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SharePriceDashboard from '../SharePriceDashboard';
 import {
   fetchDashboardData,
+  updateDashboardMetricOverride,
   updateDashboardInvestmentCategory,
+  updateDashboardRowPreference,
 } from '../../services/watchlistDashboardApi';
 import {
   buildRoundedChartScale,
@@ -74,7 +76,9 @@ function createMockComponent(tagName, omittedPropNames = []) {
 
 vi.mock('../../services/watchlistDashboardApi', () => ({
   fetchDashboardData: vi.fn(),
+  updateDashboardMetricOverride: vi.fn(),
   updateDashboardInvestmentCategory: vi.fn(),
+  updateDashboardRowPreference: vi.fn(),
 }));
 
 vi.mock('@mui/material/Box', () => ({
@@ -284,8 +288,192 @@ function buildDashboardPayload(overrides = {}) {
     priceCurrency: 'USD',
     prices,
     annualMetrics,
+    metricsColumns: [],
+    metricsRows: [],
     ...overrides,
   };
+}
+
+function buildMetricsModePayload(overrides = {}) {
+  return buildDashboardPayload({
+    metricsColumns: [
+      {
+        key: 'annual-2023',
+        kind: 'annual',
+        label: 'FY 2023',
+        shortLabel: '2023',
+        fiscalYear: 2023,
+        fiscalYearEndDate: '2023-12-31',
+      },
+      {
+        key: 'annual-2024',
+        kind: 'annual',
+        label: 'FY 2024',
+        shortLabel: '2024',
+        fiscalYear: 2024,
+        fiscalYearEndDate: '2024-12-31',
+      },
+      {
+        key: 'annual-2025',
+        kind: 'annual',
+        label: 'FY 2025',
+        shortLabel: '2025',
+        fiscalYear: 2025,
+        fiscalYearEndDate: '2025-12-31',
+      },
+    ],
+    metricsRows: [
+      {
+        rowKey: '710::annualData[].forecastData.fy1.ebit',
+        fieldPath: 'annualData[].forecastData.fy1.ebit',
+        label: 'EBIT FY+1',
+        shortLabel: 'EBIT FY+1',
+        section: 'Income Statement',
+        shortSection: 'Income',
+        order: 710,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [
+          {
+            columnKey: 'annual-2023',
+            value: 12,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2023, payloadPath: 'forecastData.fy1.ebit' },
+          },
+          {
+            columnKey: 'annual-2024',
+            value: 18,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy1.ebit' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 24,
+            sourceOfTruth: 'user',
+            isOverridden: true,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy1.ebit' },
+          },
+        ],
+      },
+      {
+        rowKey: '715::annualData[].forecastData.fy1.revenue',
+        fieldPath: 'annualData[].forecastData.fy1.revenue',
+        label: 'Revenue FY+1',
+        shortLabel: 'Revenue FY+1',
+        section: 'Income Statement',
+        shortSection: 'Income',
+        order: 715,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [
+          {
+            columnKey: 'annual-2023',
+            value: 32,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2023, payloadPath: 'forecastData.fy1.revenue' },
+          },
+          {
+            columnKey: 'annual-2024',
+            value: 38,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy1.revenue' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 44,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy1.revenue' },
+          },
+        ],
+      },
+      {
+        rowKey: '810::annualData[].forecastData.fy1.cash',
+        fieldPath: 'annualData[].forecastData.fy1.cash',
+        label: 'Cash FY+1',
+        shortLabel: 'Cash FY+1',
+        section: 'Balance Sheet',
+        shortSection: 'Balance',
+        order: 810,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [
+          {
+            columnKey: 'annual-2023',
+            value: 8,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2023, payloadPath: 'forecastData.fy1.cash' },
+          },
+          {
+            columnKey: 'annual-2024',
+            value: 11,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy1.cash' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 14,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy1.cash' },
+          },
+        ],
+      },
+      {
+        rowKey: '1110::annualData[].growthForecasts.revenueCagr3y',
+        fieldPath: 'annualData[].growthForecasts.revenueCagr3y',
+        label: 'Revenue forecast CAGR 3Y',
+        shortLabel: 'Rev CAGR 3Y',
+        section: 'Growth & Forecasts',
+        shortSection: 'Growth',
+        order: 1110,
+        surface: 'detail',
+        isEnabled: false,
+        cells: [
+          {
+            columnKey: 'annual-2023',
+            value: null,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2023, payloadPath: 'growthForecasts.revenueCagr3y' },
+          },
+          {
+            columnKey: 'annual-2024',
+            value: null,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'growthForecasts.revenueCagr3y' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: null,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'growthForecasts.revenueCagr3y' },
+          },
+        ],
+      },
+    ],
+    ...overrides,
+  });
 }
 
 function buildLongHistoryDashboardPayload(overrides = {}) {
@@ -566,8 +754,12 @@ async function renderDashboard(options = {}) {
     />,
   );
 
-  const startInput = screen.getByLabelText('Start month');
-  const endInput = screen.getByLabelText('End month');
+  // Some test scenarios can briefly render an extra disabled month input during
+  // setup. We always want the main dashboard controls, which are the first
+  // labelled month inputs rendered inside the stock card surface.
+  const mountedQueries = within(mountedContainer);
+  const startInput = mountedQueries.getAllByLabelText('Start month')[0];
+  const endInput = mountedQueries.getAllByLabelText('End month')[0];
 
   await act(async () => {
     deferredResponse.resolveResponse(payload);
@@ -577,7 +769,7 @@ async function renderDashboard(options = {}) {
 
   await flushDashboardWork();
 
-  const scrollRegion = screen.getByTestId(DASHBOARD_TEST_ID);
+  const scrollRegion = mountedQueries.getByTestId(DASHBOARD_TEST_ID);
   const scrollController = await configureScrollRegion(scrollRegion);
   const minAvailableMonth = getMonthStringFromDate(payload.prices?.[0]?.date);
 
@@ -617,7 +809,9 @@ async function dragPresetWindowOlderByMonths({
 describe('SharePriceDashboard preset scrolling', () => {
   beforeEach(() => {
     fetchDashboardData.mockReset();
+    updateDashboardMetricOverride.mockReset();
     updateDashboardInvestmentCategory.mockReset();
+    updateDashboardRowPreference.mockReset();
     updateDashboardInvestmentCategory.mockResolvedValue({
       identifier: 'AAPL',
       investmentCategory: 'Mature Compounder',
@@ -1599,6 +1793,106 @@ describe('SharePriceDashboard preset scrolling', () => {
     await flushDashboardWork();
 
     expect(startInput.value).toBe('2022-12');
+  });
+
+});
+
+// Metrics mode is a second, richer state of the same stock card. These tests
+// prove that the detail rows stay inside the existing annual table instead of
+// creating a separate forecast-only surface.
+describe('SharePriceDashboard metrics mode', () => {
+  beforeEach(() => {
+    fetchDashboardData.mockReset();
+    updateDashboardInvestmentCategory.mockReset();
+  });
+
+  it('opens one annual metrics table, keeps non-empty rows visible, and places empty rows under hidden rows', async () => {
+    const { user } = await renderDashboard({
+      payload: buildMetricsModePayload(),
+    });
+
+    expect(screen.queryByText('DETAIL METRICS')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    expect(screen.getByText('DETAIL METRICS')).not.toBeNull();
+    const detailMetricsHeader = screen.getByTestId('share-price-dashboard-detail-metrics-header');
+    expect(within(detailMetricsHeader).queryByText('2023')).toBeNull();
+    expect(within(detailMetricsHeader).queryByText('2024')).toBeNull();
+    expect(within(detailMetricsHeader).queryByText('2025')).toBeNull();
+    expect(screen.getAllByText('Income Statement')).toHaveLength(1);
+    expect(screen.getAllByText('Balance Sheet')).toHaveLength(1);
+    expect(screen.getByText('EBIT FY+1')).not.toBeNull();
+    expect(screen.getByText('Revenue FY+1')).not.toBeNull();
+    expect(screen.getByText('Cash FY+1')).not.toBeNull();
+    expect(screen.getAllByTestId('share-price-dashboard-metric-row-hide-button').length).toBe(3);
+    expect(screen.getByText('$12.00')).not.toBeNull();
+    expect(screen.getByText('$18.00')).not.toBeNull();
+    expect(screen.getByText('$24.00')).not.toBeNull();
+    expect(screen.queryByText('Revenue forecast CAGR 3Y')).toBeNull();
+
+    // Completely empty rows should stay out of the main metrics table by default,
+    // but the user can still discover them in the dedicated hidden-rows section.
+    await user.click(screen.getByRole('button', { name: 'HIDDEN ROWS (1)' }));
+
+    expect(screen.getByTestId('share-price-dashboard-hidden-rows')).not.toBeNull();
+    expect(screen.getByText('Revenue forecast CAGR 3Y')).not.toBeNull();
+  });
+
+  it('formats large metrics values with compact units instead of raw full-length decimals', async () => {
+    const { user } = await renderDashboard({
+      payload: buildMetricsModePayload({
+        metricsRows: [
+          {
+            rowKey: '710::annualData[].forecastData.fy1.ebit',
+            fieldPath: 'annualData[].forecastData.fy1.ebit',
+            label: 'EBIT FY+1',
+            shortLabel: 'EBIT FY+1',
+            section: 'EBIT Forecast',
+            shortSection: 'EBIT Forecast',
+            order: 710,
+            surface: 'detail',
+            isEnabled: true,
+            cells: [
+              {
+                columnKey: 'annual-2023',
+                value: 1250000000.99,
+                sourceOfTruth: 'system',
+                isOverridden: false,
+                isOverrideable: true,
+                overrideTarget: { kind: 'annual', fiscalYear: 2023, payloadPath: 'forecastData.fy1.ebit' },
+              },
+              {
+                columnKey: 'annual-2024',
+                value: 2400000.99,
+                sourceOfTruth: 'system',
+                isOverridden: false,
+                isOverrideable: true,
+                overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy1.ebit' },
+              },
+              {
+                columnKey: 'annual-2025',
+                value: 3800.4,
+                sourceOfTruth: 'system',
+                isOverridden: false,
+                isOverrideable: true,
+                overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy1.ebit' },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    expect(screen.getByText('$1.3B')).not.toBeNull();
+    expect(screen.getByText('$2.4M')).not.toBeNull();
+    expect(screen.getByText('$3.8K')).not.toBeNull();
+    expect(screen.queryByText('$1,250,000,000.99')).toBeNull();
+    expect(screen.queryByText('$2,400,000.99')).toBeNull();
   });
 
 });

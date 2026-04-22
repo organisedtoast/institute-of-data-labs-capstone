@@ -31,6 +31,10 @@ const {
   setTopLevelMetricOverride,
 } = require("../controllers/overrideController");
 const { refreshStock } = require("../controllers/refreshController");
+const {
+  getStockMetricsView,
+  updateStockMetricsRowPreference,
+} = require("../controllers/stockMetricsViewController");
  
 // Import routes
 router.post("/import", importStock);
@@ -46,6 +50,8 @@ router.delete("/:ticker", validateTicker, deleteStock);
 router.patch("/:ticker/annual/:fiscalYear/overrides", validateTicker, validateFiscalYear, setAnnualOverride);
 router.patch("/:ticker/forecast/:bucket/overrides", validateTicker, setForecastOverride);
 router.patch("/:ticker/metrics/overrides", validateTicker, setTopLevelMetricOverride);
+router.get("/:ticker/metrics-view", validateTicker, getStockMetricsView);
+router.patch("/:ticker/metrics-row-preferences", validateTicker, updateStockMetricsRowPreference);
 router.post("/:ticker/refresh", refreshStock);
  
 module.exports = router;
