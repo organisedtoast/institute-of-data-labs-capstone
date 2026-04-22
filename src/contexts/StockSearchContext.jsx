@@ -6,6 +6,12 @@ import StockSearchContext from './stockSearchContext';
 
 const DEFAULT_IMPORT_CATEGORY = 'Firm Specific Turnaround';
 const STOCK_SEARCH_FALLBACK_MESSAGE = 'Search is unavailable right now. Please try again in a moment.';
+const PENDING_STOCK_ACTION_ADD = 'add';
+const PENDING_STOCK_ACTION_OPEN = 'open';
+
+function normalizeTickerIdentifier(value) {
+  return String(value || '').trim().toUpperCase();
+}
 
 function isDevelopmentEnvironment() {
   return Boolean(import.meta.env?.DEV);
@@ -55,7 +61,7 @@ function getApiErrorMessage(requestError, fallbackMessage) {
 }
 
 function mapWatchlistStockToCard(stockDocument) {
-  const identifier = String(stockDocument?.tickerSymbol || '').trim().toUpperCase();
+  const identifier = normalizeTickerIdentifier(stockDocument?.tickerSymbol);
 
   if (!identifier) {
     return null;
@@ -104,7 +110,7 @@ export function StockSearchProvider({ children }) {
   const [searchResults, setSearchResults] = useState([]);
   const [searchStatus, setSearchStatus] = useState('idle');
   const [searchError, setSearchError] = useState('');
-  const [pendingStockToAdd, setPendingStockToAdd] = useState(null);
+  const [pendingStockAction, setPendingStockAction] = useState(null);
 
   const loadStocks = useCallback(async (options = {}) => {
     const { prioritizeTicker = '', showLoading = true } = options;
@@ -145,12 +151,42 @@ export function StockSearchProvider({ children }) {
     setSearchError('');
   }, []);
 
+  // We intentionally use the watchlist we already loaded into frontend state as
+  // the source of truth for the `SEE STOCK` label. That means the label reflects
+  // what this page currently knows about `/api/watchlist`, which is fast and simple
+  // even though it can be briefly stale if another tab changes the database.
+  const watchlistTickerSet = useMemo(() => {
+    return new Set(
+      stocks
+        .map((stock) => normalizeTickerIdentifier(stock?.identifier))
+        .filter(Boolean),
+    );
+  }, [stocks]);
+
+  const isStockInWatchlist = useCallback((identifierToCheck) => {
+    const normalizedIdentifier = normalizeTickerIdentifier(identifierToCheck);
+    return normalizedIdentifier !== '' && watchlistTickerSet.has(normalizedIdentifier);
+  }, [watchlistTickerSet]);
+
   const queuePendingStockToAdd = useCallback((selectedStock) => {
-    setPendingStockToAdd(selectedStock);
+    setPendingStockAction({
+      mode: PENDING_STOCK_ACTION_ADD,
+      stock: selectedStock,
+    });
   }, []);
 
-  const clearPendingStockToAdd = useCallback(() => {
-    setPendingStockToAdd(null);
+  // Opening an existing stock is a different user action from importing one.
+  // We keep a separate mode here so the Stocks page can "show what already exists"
+  // without accidentally going through the import-or-add code path.
+  const queuePendingStockToOpenExisting = useCallback((selectedStock) => {
+    setPendingStockAction({
+      mode: PENDING_STOCK_ACTION_OPEN,
+      stock: selectedStock,
+    });
+  }, []);
+
+  const clearPendingStockAction = useCallback(() => {
+    setPendingStockAction(null);
   }, []);
 
   const runStockSearch = useCallback(async () => {
@@ -193,7 +229,7 @@ export function StockSearchProvider({ children }) {
   }, [searchText]);
 
   const addStockFromResult = useCallback(async (selectedStock) => {
-    const normalizedIdentifier = selectedStock?.identifier?.trim().toUpperCase();
+    const normalizedIdentifier = normalizeTickerIdentifier(selectedStock?.identifier);
 
     if (!normalizedIdentifier) {
       setSearchStatus('error');
@@ -244,6 +280,38 @@ export function StockSearchProvider({ children }) {
     }
   }, [loadStocks]);
 
+  const openExistingStock = useCallback(async (selectedStock) => {
+    const normalizedIdentifier = normalizeTickerIdentifier(selectedStock?.identifier);
+
+    if (!normalizedIdentifier) {
+      setSearchStatus('error');
+      setSearchError('The selected stock was missing a ticker symbol.');
+      return false;
+    }
+
+    // This helper never imports. Its only job is to refresh/prioritize the card
+    // that already exists in the loaded watchlist so the user can jump straight to it.
+    setSearchStatus('loading');
+    setSearchError('');
+
+    const nextStocks = await loadStocks({
+      prioritizeTicker: normalizedIdentifier,
+      showLoading: false,
+    });
+
+    if (!Array.isArray(nextStocks)) {
+      setSearchStatus('error');
+      setSearchError(`Unable to open ${normalizedIdentifier} right now.`);
+      return false;
+    }
+
+    setSearchText('');
+    setSearchResults([]);
+    setSearchStatus('success');
+    setSearchError('');
+    return true;
+  }, [loadStocks]);
+
   const removeStockByIdentifier = useCallback(async (identifierToRemove) => {
     const normalizedIdentifier = String(identifierToRemove || '').trim().toUpperCase();
 
@@ -277,21 +345,27 @@ export function StockSearchProvider({ children }) {
       searchResults,
       searchStatus,
       searchError,
-      pendingStockToAdd,
+      pendingStockAction,
+      isStockInWatchlist,
       setSearchText,
       runStockSearch,
       addStockFromResult,
+      openExistingStock,
       removeStockByIdentifier,
       clearSearchFeedback,
       queuePendingStockToAdd,
-      clearPendingStockToAdd,
+      queuePendingStockToOpenExisting,
+      clearPendingStockAction,
     };
   }, [
     addStockFromResult,
-    clearPendingStockToAdd,
+    clearPendingStockAction,
     clearSearchFeedback,
-    pendingStockToAdd,
+    isStockInWatchlist,
+    openExistingStock,
+    pendingStockAction,
     queuePendingStockToAdd,
+    queuePendingStockToOpenExisting,
     removeStockByIdentifier,
     runStockSearch,
     searchError,

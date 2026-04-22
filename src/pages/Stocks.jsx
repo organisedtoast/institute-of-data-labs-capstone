@@ -14,27 +14,39 @@ function Stocks() {
     stocksStatus,
     stocksError,
     addStockFromResult,
+    openExistingStock,
     removeStockByIdentifier,
-    pendingStockToAdd,
-    clearPendingStockToAdd,
+    pendingStockAction,
+    clearPendingStockAction,
   } = useStockSearch();
 
   useEffect(() => {
-    if (!pendingStockToAdd) {
+    if (!pendingStockAction) {
       return undefined;
     }
 
-    const stockToAdd = pendingStockToAdd;
-    clearPendingStockToAdd();
+    const { mode, stock } = pendingStockAction;
+    clearPendingStockAction();
 
-    const addPendingStockOnStocksPage = async () => {
-      await addStockFromResult(stockToAdd);
+    // The search flow can arrive here in two different modes:
+    // - add/import a missing stock
+    // - open and prioritize a stock that already exists
+    //
+    // Handling both modes in one place keeps navigation from Home to Stocks
+    // consistent for beginners reading the code.
+    const handlePendingStockActionOnStocksPage = async () => {
+      if (mode === 'open') {
+        await openExistingStock(stock);
+        return;
+      }
+
+      await addStockFromResult(stock);
     };
 
-    addPendingStockOnStocksPage();
+    handlePendingStockActionOnStocksPage();
 
     return undefined;
-  }, [addStockFromResult, clearPendingStockToAdd, pendingStockToAdd]);
+  }, [addStockFromResult, clearPendingStockAction, openExistingStock, pendingStockAction]);
 
   return (
     <Box sx={{ px: 2, py: 3 }}>
