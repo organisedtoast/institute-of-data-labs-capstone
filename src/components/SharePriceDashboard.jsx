@@ -2498,6 +2498,7 @@ export default function SharePriceDashboard({
                                 data-testid="share-price-dashboard-metric-cell"
                                 data-row-key={tableRow.key}
                                 data-column-key={column.key}
+                                data-is-overridden={metricCell.isOverridden ? 'true' : 'false'}
                                 onContextMenu={(event) => handleMetricCellContextMenu(event, tableRow, metricCell)}
                                 onTouchStart={(event) => handleMetricCellTouchStart(event, tableRow, metricCell)}
                                 onTouchMove={handleMetricCellTouchMove}
@@ -2693,7 +2694,10 @@ export default function SharePriceDashboard({
             gap: 1,
           }}
         >
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 1.5 }}>
+          <Box
+            data-testid="share-price-dashboard-investment-category-row"
+            sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}
+          >
             <Box
               sx={{
                 border: '1px solid',
@@ -2727,8 +2731,13 @@ export default function SharePriceDashboard({
                 ))}
               </select>
             </Box>
+          </Box>
 
-            {isRemovable ? (
+          {isRemovable ? (
+            <Box
+              data-testid="share-price-dashboard-remove-stock-row"
+              sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}
+            >
               <Button
                 color="error"
                 size="small"
@@ -2739,8 +2748,8 @@ export default function SharePriceDashboard({
               >
                 Remove stock
               </Button>
-            ) : null}
-          </Box>
+            </Box>
+          ) : null}
 
           <Box sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
             <Button

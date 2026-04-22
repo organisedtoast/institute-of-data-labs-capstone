@@ -24,6 +24,13 @@ const metricFieldSchema = new mongoose.Schema({
     enum: ["roic", "user", "derived", "system"],
     default: "system",
   },
+  // We keep the last non-user source separately so "clear override" knows
+  // which source to fall back to instead of getting stuck on `"user"`.
+  baseSourceOfTruth: {
+    type: String,
+    enum: ["roic", "derived", "system"],
+    default: "system",
+  },
   lastOverriddenAt: { type: Date, default: null },
 }, { _id: false });
 

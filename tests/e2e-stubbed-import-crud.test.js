@@ -326,6 +326,20 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     assert.equal(annualOverrideResponse.body.annualData[0].base.sharePrice.sourceOfTruth, "user");
     assert.equal(annualOverrideResponse.body.annualData[0].base.marketCap.effectiveValue, 250000);
 
+    // Clearing an override should not leave the field stuck in user-owned
+    // state. This branch proves the backend falls back to the original ROIC
+    // value/source instead of keeping the old purple-text metadata alive.
+    const annualClearResponse = await requestJson(`/api/watchlist/${TEST_TICKER}/annual/2024/overrides`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        balanceSheet: { cash: null },
+      }),
+    });
+    assert.equal(annualClearResponse.status, 200, buildFailureMessage("Clear annual override", annualClearResponse));
+    assert.equal(annualClearResponse.body.annualData[0].balanceSheet.cash.userValue, null);
+    assert.equal(annualClearResponse.body.annualData[0].balanceSheet.cash.sourceOfTruth, "roic");
+    assert.equal(annualClearResponse.body.annualData[0].balanceSheet.cash.effectiveValue, 100);
+
     // Forecast override route: same idea, but for forward-looking fields.
     const forecastOverrideResponse = await requestJson(`/api/watchlist/${TEST_TICKER}/forecast/fy1/overrides`, {
       method: "PATCH",
@@ -339,8 +353,22 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     assert.equal(forecastOverrideResponse.status, 200, buildFailureMessage("Forecast override", forecastOverrideResponse));
     assert.equal(forecastOverrideResponse.body.forecastData.fy1.sharesOnIssue.sourceOfTruth, "user");
     assert.equal(forecastOverrideResponse.body.forecastData.fy1.marketCap.effectiveValue, 275000);
-      assert.equal(forecastOverrideResponse.body.forecastData.fy1.enterpriseValue.effectiveValue, 275190);
+    assert.equal(forecastOverrideResponse.body.forecastData.fy1.enterpriseValue.effectiveValue, 275200);
     assert.ok(forecastOverrideResponse.body.forecastData.fy1.pe.effectiveValue);
+
+    // Forecast placeholders usually start as system-owned nulls. Clearing one
+    // of those overrides should therefore fall back to a system null rather
+    // than pretending the user still owns the cell.
+    const forecastClearResponse = await requestJson(`/api/watchlist/${TEST_TICKER}/forecast/fy1/overrides`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        dps: null,
+      }),
+    });
+    assert.equal(forecastClearResponse.status, 200, buildFailureMessage("Clear forecast override", forecastClearResponse));
+    assert.equal(forecastClearResponse.body.forecastData.fy1.dps.userValue, null);
+    assert.equal(forecastClearResponse.body.forecastData.fy1.dps.sourceOfTruth, "system");
+    assert.equal(forecastClearResponse.body.forecastData.fy1.dps.effectiveValue, null);
 
     // Top-level override route: covers grouped fields that do not belong to
     // one annual row or one forecast bucket.
@@ -354,6 +382,20 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     assert.equal(topLevelOverrideResponse.status, 200, buildFailureMessage("Top-level metric override", topLevelOverrideResponse));
     assert.equal(topLevelOverrideResponse.body.growthForecasts.revenueCagr3y.effectiveValue, 0.15);
     assert.equal(topLevelOverrideResponse.body.analystRevisions.revenueFy1Last1m.effectiveValue, 2);
+
+    // Top-level grouped metrics need the same clear-override behavior as the
+    // annual and forecast routes because the UI editor does not care which
+    // backend bucket the selected cell happened to belong to.
+    const topLevelClearResponse = await requestJson(`/api/watchlist/${TEST_TICKER}/metrics/overrides`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        analystRevisions: { revenueFy1Last1m: null },
+      }),
+    });
+    assert.equal(topLevelClearResponse.status, 200, buildFailureMessage("Clear top-level override", topLevelClearResponse));
+    assert.equal(topLevelClearResponse.body.analystRevisions.revenueFy1Last1m.userValue, null);
+    assert.equal(topLevelClearResponse.body.analystRevisions.revenueFy1Last1m.sourceOfTruth, "system");
+    assert.equal(topLevelClearResponse.body.analystRevisions.revenueFy1Last1m.effectiveValue, null);
 
     // Standard PATCH routes should still work for ordinary editable fields too.
     const patchCategoryResponse = await requestJson(`/api/watchlist/${TEST_TICKER}`, {

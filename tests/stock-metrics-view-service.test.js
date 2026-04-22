@@ -15,11 +15,13 @@ const originalFindOne = WatchlistStock.findOne;
 const originalFind = StockMetricsRowPreference.find;
 const originalResolveVisibleFieldsForStock = lensService.resolveVisibleFieldsForStock;
 
-function buildAnnualMetricField(value) {
+function buildAnnualMetricField(value, overrides = {}) {
   return {
     effectiveValue: value,
     sourceOfTruth: "system",
+    baseSourceOfTruth: "system",
     userValue: null,
+    ...overrides,
   };
 }
 
@@ -169,4 +171,77 @@ test("buildStockMetricsView hides fully empty rows by default but keeps preferen
 
   // A saved "hide row" preference must still win for a row that has data.
   assert.equal(rowByKey.get("500::annualData[].forecastData.fy1.netIncome").isEnabled, false);
+});
+
+test("buildStockMetricsView only marks cells overridden when a user override is still active", async () => {
+  const stockDocument = {
+    tickerSymbol: "AAPL",
+    annualData: [
+      {
+        fiscalYear: 2024,
+        fiscalYearEndDate: "2024-12-31",
+        forecastData: {
+          fy1: {
+            // This row simulates the exact bug we saw in the UI: the document
+            // still says `"user"`, but the userValue is gone because the
+            // override was cleared. Metrics-view should treat that as not
+            // overridden so the frontend can drop the purple styling.
+            ebit: buildAnnualMetricField(18, {
+              sourceOfTruth: "user",
+              baseSourceOfTruth: "system",
+              userValue: null,
+            }),
+            // This row still has an active user override, so the metrics view
+            // should continue telling the UI to style it as overridden.
+            revenue: buildAnnualMetricField(32, {
+              sourceOfTruth: "user",
+              baseSourceOfTruth: "system",
+              userValue: 40,
+            }),
+          },
+        },
+      },
+    ],
+  };
+
+  WatchlistStock.findOne = () => ({
+    lean: async () => stockDocument,
+  });
+
+  lensService.resolveVisibleFieldsForStock = async () => ({
+    detailFields: [
+      {
+        order: 100,
+        fieldPath: "annualData[].forecastData.fy1.ebit",
+        label: "EBIT FY+1",
+        shortLabel: "EBIT FY+1",
+        section: "Income Statement",
+        shortSection: "Income",
+        surface: "detail",
+      },
+      {
+        order: 200,
+        fieldPath: "annualData[].forecastData.fy1.revenue",
+        label: "Revenue FY+1",
+        shortLabel: "Revenue FY+1",
+        section: "Income Statement",
+        shortSection: "Income",
+        surface: "detail",
+      },
+    ],
+  });
+
+  StockMetricsRowPreference.find = () => ({
+    lean: async () => ([]),
+  });
+
+  const { buildStockMetricsView } = loadServiceUnderTest();
+  const metricsView = await buildStockMetricsView("aapl");
+  const rowByKey = new Map(metricsView.rows.map((row) => [row.rowKey, row]));
+
+  // A cleared override should not keep the stale "overridden" flag alive.
+  assert.equal(rowByKey.get("100::annualData[].forecastData.fy1.ebit").cells[0].isOverridden, false);
+
+  // A row with a real userValue must still report itself as overridden.
+  assert.equal(rowByKey.get("200::annualData[].forecastData.fy1.revenue").cells[0].isOverridden, true);
 });

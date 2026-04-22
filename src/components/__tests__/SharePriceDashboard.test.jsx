@@ -735,13 +735,27 @@ async function renderDashboard(options = {}) {
     isRemovable = false,
     name = `${identifier} name`,
     payload = buildDashboardPayload(),
+    payloadSequence = null,
   } = options;
 
   const deferredResponse = createDeferredResponse();
+  const queuedPayloads = Array.isArray(payloadSequence) && payloadSequence.length > 0
+    ? payloadSequence
+    : [payload];
+  let fetchCallCount = 0;
 
   // Releasing the API response after mount keeps the async data load separate
   // from the initial render, which makes the component test much more stable.
-  fetchDashboardData.mockImplementation(() => deferredResponse.responsePromise);
+  fetchDashboardData.mockImplementation(() => {
+    const nextPayload = queuedPayloads[Math.min(fetchCallCount, queuedPayloads.length - 1)];
+    fetchCallCount += 1;
+
+    if (fetchCallCount === 1) {
+      return deferredResponse.responsePromise;
+    }
+
+    return Promise.resolve(nextPayload);
+  });
 
   const user = userEvent.setup();
 
@@ -762,7 +776,7 @@ async function renderDashboard(options = {}) {
   const endInput = mountedQueries.getAllByLabelText('End month')[0];
 
   await act(async () => {
-    deferredResponse.resolveResponse(payload);
+    deferredResponse.resolveResponse(queuedPayloads[0]);
     await deferredResponse.responsePromise;
     await Promise.resolve();
   });
@@ -1036,12 +1050,19 @@ describe('SharePriceDashboard preset scrolling', () => {
   });
 
   it('shows the current investment category next to Remove stock and updates it from the dropdown', async () => {
+    setViewportWidth(420);
+
     const { user } = await renderDashboard({ isRemovable: true });
 
     const categorySelect = screen.getByLabelText('Investment Category');
+    const removeStockButton = screen.getByRole('button', { name: 'Remove stock' });
+    const investmentCategoryRow = screen.getByTestId('share-price-dashboard-investment-category-row');
+    const removeStockRow = screen.getByTestId('share-price-dashboard-remove-stock-row');
 
     expect(categorySelect.value).toBe('Profitable Hi Growth');
-    expect(screen.getByRole('button', { name: 'Remove stock' })).toBeTruthy();
+    expect(removeStockButton).toBeTruthy();
+    expect(within(removeStockRow).getByRole('button', { name: 'Remove stock' })).toBe(removeStockButton);
+    expect(within(investmentCategoryRow).queryByRole('button', { name: 'Remove stock' })).toBeNull();
 
     await user.selectOptions(categorySelect, 'Mature Compounder');
     await flushDashboardWork();
@@ -1803,6 +1824,7 @@ describe('SharePriceDashboard preset scrolling', () => {
 describe('SharePriceDashboard metrics mode', () => {
   beforeEach(() => {
     fetchDashboardData.mockReset();
+    updateDashboardMetricOverride.mockReset();
     updateDashboardInvestmentCategory.mockReset();
   });
 
@@ -1893,6 +1915,69 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(screen.getByText('$3.8K')).not.toBeNull();
     expect(screen.queryByText('$1,250,000,000.99')).toBeNull();
     expect(screen.queryByText('$2,400,000.99')).toBeNull();
+  });
+
+  it('drops the overridden flag after CLEAR OVERRIDE reloads a non-overridden payload', async () => {
+    const initialPayload = buildMetricsModePayload();
+    const clearedPayload = buildMetricsModePayload();
+
+    // The first payload simulates the stock card before the user clears the
+    // override. The same cell comes back in the second payload without the
+    // override flag, which is what should remove the purple styling in the UI.
+    clearedPayload.metricsRows[0].cells[2] = {
+      ...clearedPayload.metricsRows[0].cells[2],
+      sourceOfTruth: 'system',
+      isOverridden: false,
+    };
+
+    updateDashboardMetricOverride.mockResolvedValue({});
+
+    const { user } = await renderDashboard({
+      payloadSequence: [initialPayload, clearedPayload],
+    });
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    const getMetricCell = () => {
+      return screen.getAllByTestId('share-price-dashboard-metric-cell').find((cellNode) => {
+        return (
+          cellNode.getAttribute('data-row-key') === '710::annualData[].forecastData.fy1.ebit'
+          && cellNode.getAttribute('data-column-key') === 'annual-2025'
+        );
+      });
+    };
+
+    const overriddenCellBeforeClear = getMetricCell();
+    expect(overriddenCellBeforeClear).toBeTruthy();
+    expect(overriddenCellBeforeClear.getAttribute('data-is-overridden')).toBe('true');
+
+    // We open the same editor a real user would open from the metrics table,
+    // then trigger the clear path instead of the save path.
+    await act(async () => {
+      fireEvent.contextMenu(overriddenCellBeforeClear);
+    });
+
+    expect(screen.getByTestId('share-price-dashboard-metric-editor')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'CLEAR OVERRIDE' }));
+    await flushDashboardWork();
+    await flushDashboardWork();
+
+    expect(updateDashboardMetricOverride).toHaveBeenCalledWith(
+      'AAPL',
+      {
+        kind: 'annual',
+        fiscalYear: 2025,
+        payloadPath: 'forecastData.fy1.ebit',
+      },
+      null,
+    );
+    expect(screen.queryByTestId('share-price-dashboard-metric-editor')).toBeNull();
+
+    const overriddenCellAfterClear = getMetricCell();
+    expect(overriddenCellAfterClear).toBeTruthy();
+    expect(overriddenCellAfterClear.getAttribute('data-is-overridden')).toBe('false');
   });
 
 });

@@ -1,6 +1,7 @@
 const WatchlistStock = require("../models/WatchlistStock");
 const StockMetricsRowPreference = require("../models/StockMetricsRowPreference");
 const { resolveVisibleFieldsForStock } = require("./lensService");
+const { hasUserOverride } = require("../utils/metricField");
 const { getNestedValue } = require("../utils/pathUtils");
 
 function normalizeTickerSymbol(tickerSymbol) {
@@ -38,7 +39,10 @@ function getMetricFieldValue(metricField) {
     return {
       value: metricField.effectiveValue ?? null,
       sourceOfTruth: metricField.sourceOfTruth || "system",
-      isOverridden: metricField.sourceOfTruth === "user" || metricField.userValue !== null,
+      // Metrics-view shapes UI state for the dashboard. Purple text should
+      // mean there is an active user override right now, not that the field
+      // happened to say `"user"` at some point in the document's history.
+      isOverridden: hasUserOverride(metricField),
     };
   }
 

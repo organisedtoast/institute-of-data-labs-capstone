@@ -13,7 +13,7 @@ const WatchlistStock = require("../models/WatchlistStock");
 const { recalculateDerived } = require("../utils/derivedCalc");
 const { createMetricField } = require("../utils/metricField");
 const { flattenObjectPaths, getNestedValue, setNestedValue } = require("../utils/pathUtils");
-const { resolveEffectiveValue } = require("../utils/effectiveValue");
+const { getBaseSourceOfTruth, resolveEffectiveValue } = require("../utils/effectiveValue");
 
 function applyMetricOverrides(target, allowedPaths, payload) {
   const flattened = flattenObjectPaths(payload);
@@ -44,8 +44,18 @@ function applyMetricOverrides(target, allowedPaths, payload) {
     }
 
     metricField.userValue = value;
-    metricField.lastOverriddenAt = new Date();
-    const resolved = resolveEffectiveValue(metricField, metricField.sourceOfTruth || "system");
+    // Saving an override and clearing an override are two different states:
+    // - save: keep the user value active
+    // - clear: remove the user value and fall back to the last non-user source
+    // Without this branch the document can stay stuck on `"user"`, which is
+    // why the dashboard text was staying purple after "clear override".
+    metricField.lastOverriddenAt = value === null ? null : new Date();
+    const baseSourceOfTruth = getBaseSourceOfTruth(
+      metricField,
+      metricField.sourceOfTruth || "system",
+    );
+    const resolved = resolveEffectiveValue(metricField, baseSourceOfTruth);
+    metricField.baseSourceOfTruth = resolved.baseSourceOfTruth;
     metricField.effectiveValue = resolved.effectiveValue;
     metricField.sourceOfTruth = resolved.sourceOfTruth;
   }
