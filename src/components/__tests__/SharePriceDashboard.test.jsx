@@ -162,6 +162,94 @@ function getMonthOffset(startMonth, endMonth) {
   return ((Number(endYearText) - Number(startYearText)) * 12) + (Number(endMonthText) - Number(startMonthText));
 }
 
+function mapTimestampAcrossAnchors(timestamp, { minTime, maxTime, anchors, plotWidth }) {
+  if (!Number.isFinite(timestamp)) {
+    return 0;
+  }
+
+  if (timestamp <= minTime) {
+    return 0;
+  }
+
+  if (timestamp >= maxTime) {
+    return plotWidth;
+  }
+
+  const segments = [];
+  const firstAnchor = anchors[0];
+  const lastAnchor = anchors[anchors.length - 1];
+
+  segments.push({
+    startTime: minTime,
+    endTime: firstAnchor.time,
+    startX: 0,
+    endX: firstAnchor.x,
+  });
+
+  for (let index = 0; index < anchors.length - 1; index += 1) {
+    segments.push({
+      startTime: anchors[index].time,
+      endTime: anchors[index + 1].time,
+      startX: anchors[index].x,
+      endX: anchors[index + 1].x,
+    });
+  }
+
+  segments.push({
+    startTime: lastAnchor.time,
+    endTime: maxTime,
+    startX: lastAnchor.x,
+    endX: plotWidth,
+  });
+
+  const matchingSegment = segments.find((segment) => {
+    return timestamp >= segment.startTime && timestamp <= segment.endTime;
+  }) || segments[segments.length - 1];
+  const timeRange = matchingSegment.endTime - matchingSegment.startTime;
+
+  if (Math.abs(timeRange) <= 1e-6) {
+    return matchingSegment.endX;
+  }
+
+  const ratio = (timestamp - matchingSegment.startTime) / timeRange;
+  return matchingSegment.startX + (ratio * (matchingSegment.endX - matchingSegment.startX));
+}
+
+function buildExpectedFiscalYearBoundaryPositions({ annualMetrics, prices, headerCells, plotWidth }) {
+  const headerCenterByYear = new Map(
+    headerCells.map((cellNode) => [
+      cellNode.getAttribute('data-fiscal-year'),
+      Number(cellNode.getAttribute('data-center-x')),
+    ]),
+  );
+  const anchors = annualMetrics.map((annualRow) => ({
+    fiscalYear: annualRow.fiscalYear,
+    time: new Date(annualRow.earningsReleaseDate || annualRow.fiscalYearEndDate).getTime(),
+    x: headerCenterByYear.get(String(annualRow.fiscalYear)),
+  }));
+  const minTime = new Date(prices[0].date).getTime();
+  const maxTime = new Date(prices[prices.length - 1].date).getTime();
+
+  return annualMetrics.map((annualRow, index) => {
+    const startX = index === 0
+      ? 0
+      : mapTimestampAcrossAnchors(
+          new Date(annualMetrics[index - 1].fiscalYearEndDate).getTime(),
+          { minTime, maxTime, anchors, plotWidth },
+        );
+    const endX = mapTimestampAcrossAnchors(
+      new Date(annualRow.fiscalYearEndDate).getTime(),
+      { minTime, maxTime, anchors, plotWidth },
+    );
+
+    return {
+      fiscalYear: String(annualRow.fiscalYear),
+      startX,
+      endX,
+    };
+  });
+}
+
 // The component normally fetches a large backend payload. Keeping a local test
 // payload makes the regression deterministic and easier for a beginner to follow.
 function buildDashboardPayload(overrides = {}) {
@@ -657,6 +745,32 @@ describe('SharePriceDashboard preset scrolling', () => {
     expect(endInput.value).toBe('2025-12');
   });
 
+  it('does not log a maximum update depth error when rerendered with the same mounted scroll region', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const { renderResult } = await renderDashboard();
+
+      renderResult.rerender(
+        <SharePriceDashboard
+          identifier="AAPL"
+          name="AAPL name"
+          scaleAnimationDurationMs={0}
+        />,
+      );
+      await flushDashboardWork();
+      await flushDashboardWork();
+
+      const maximumDepthErrors = consoleErrorSpy.mock.calls.filter((call) => {
+        return call.some((value) => String(value).includes('Maximum update depth exceeded'));
+      });
+
+      expect(maximumDepthErrors).toHaveLength(0);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
   it('renders more than three Y-axis gridlines while keeping labels readable', async () => {
     const payload = buildDashboardPayload();
     await renderDashboard({ payload });
@@ -788,16 +902,74 @@ describe('SharePriceDashboard preset scrolling', () => {
     });
   });
 
+  it('maps each fixed column center to the FY release date while keeping the fiscal tick aligned', async () => {
+    setViewportWidth(1024);
+
+    const { user } = await renderDashboard({
+      payload: buildIrregularFiscalYearDashboardPayload(),
+    });
+
+    await user.click(screen.getByRole('button', { name: 'MAX' }));
+    await flushDashboardWork();
+
+    const scrollRegion = screen.getByTestId('share-price-dashboard-scroll-region');
+    const svg = scrollRegion.querySelector('svg');
+    const fiscalTicks = screen.getAllByTestId('share-price-dashboard-fiscal-tick');
+    const headerCells = screen.getAllByTestId('share-price-dashboard-header-cell');
+    const targetHeaderCell = headerCells.find((cellNode) => cellNode.getAttribute('data-fiscal-year') === '2023');
+    const targetTick = fiscalTicks.find((tickNode) => tickNode.getAttribute('data-fiscal-year') === '2023');
+
+    expect(svg).toBeTruthy();
+    expect(targetHeaderCell).toBeTruthy();
+    expect(targetTick).toBeTruthy();
+
+    const targetX = Number(targetHeaderCell.getAttribute('data-center-x'));
+
+    expect(Number(targetTick.getAttribute('data-x'))).toBeCloseTo(targetX, 6);
+
+    Object.defineProperty(svg, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        left: 0,
+        top: 0,
+        width: Number(scrollRegion.getAttribute('data-content-width')),
+        height: 280,
+        right: Number(scrollRegion.getAttribute('data-content-width')),
+        bottom: 280,
+      }),
+    });
+
+    await act(async () => {
+      fireEvent.mouseMove(svg, { clientX: targetX, clientY: 140 });
+    });
+
+    expect(screen.getByText('Jun 1, 2023')).toBeTruthy();
+    expect(screen.queryByText('Apr 1, 2023')).toBeNull();
+  });
+
   it('renders chart-only fiscal-year bands aligned with the visible table columns', async () => {
     setViewportWidth(1024);
 
-    const { user } = await renderDashboard();
+    const payload = buildDashboardPayload();
+    const { user } = await renderDashboard({ payload });
 
     await user.click(screen.getByRole('button', { name: '10Y' }));
     await flushDashboardWork();
 
+    const scrollRegion = screen.getByTestId('share-price-dashboard-scroll-region');
     const fiscalBands = screen.getAllByTestId('share-price-dashboard-fiscal-band');
     const headerCells = screen.getAllByTestId('share-price-dashboard-header-cell');
+    const visibleFiscalYears = headerCells.map((cellNode) => Number(cellNode.getAttribute('data-fiscal-year')));
+    const visibleAnnualMetrics = payload.annualMetrics.filter((annualRow) => visibleFiscalYears.includes(annualRow.fiscalYear));
+    const visiblePrices = payload.prices.filter((priceRow) => {
+      return priceRow.date >= '2015-12-01' && priceRow.date <= '2025-12-31';
+    });
+    const expectedBoundaries = buildExpectedFiscalYearBoundaryPositions({
+      annualMetrics: visibleAnnualMetrics,
+      prices: visiblePrices,
+      headerCells,
+      plotWidth: Number(scrollRegion.getAttribute('data-plot-width')),
+    });
 
     expect(fiscalBands).toHaveLength(headerCells.length);
 
@@ -806,11 +978,11 @@ describe('SharePriceDashboard preset scrolling', () => {
 
       const startX = Number(bandNode.getAttribute('data-start-x'));
       const width = Number(bandNode.getAttribute('data-width'));
-      const anchorX = Number(headerCells[index].getAttribute('data-center-x'));
+      const expectedBoundary = expectedBoundaries[index];
 
       expect(width).toBeGreaterThan(0);
-      expect(startX).toBeLessThanOrEqual(anchorX);
-      expect(startX + width).toBeCloseTo(anchorX, 6);
+      expect(startX).toBeCloseTo(expectedBoundary.startX, 6);
+      expect(startX + width).toBeCloseTo(expectedBoundary.endX, 6);
     });
 
     expect(fiscalBands.some((bandNode) => bandNode.getAttribute('data-is-alternate') === 'true')).toBe(true);
@@ -829,12 +1001,13 @@ describe('SharePriceDashboard preset scrolling', () => {
 
     const fiscalBands = screen.getAllByTestId('share-price-dashboard-fiscal-band');
     const headerCells = screen.getAllByTestId('share-price-dashboard-header-cell');
-    const headerCenterByYear = new Map(
-      headerCells.map((cellNode) => [
-        cellNode.getAttribute('data-fiscal-year'),
-        Number(cellNode.getAttribute('data-center-x')),
-      ]),
-    );
+    const payload = buildIrregularFiscalYearDashboardPayload();
+    const expectedBoundaries = buildExpectedFiscalYearBoundaryPositions({
+      annualMetrics: payload.annualMetrics,
+      prices: payload.prices,
+      headerCells,
+      plotWidth: Number(screen.getByTestId('share-price-dashboard-scroll-region').getAttribute('data-plot-width')),
+    });
 
     expect(fiscalBands.map((bandNode) => bandNode.getAttribute('data-fiscal-year'))).toEqual([
       '2022',
@@ -842,27 +1015,15 @@ describe('SharePriceDashboard preset scrolling', () => {
       '2024',
       '2025',
     ]);
-    expect(Number(fiscalBands[0].getAttribute('data-start-x'))).toBe(0);
-    expect(Number(fiscalBands[0].getAttribute('data-center-x'))).toBeCloseTo(
-      headerCenterByYear.get('2022') / 2,
-      6,
-    );
-    expect(Number(fiscalBands[1].getAttribute('data-start-x'))).toBeCloseTo(
-      headerCenterByYear.get('2022'),
-      6,
-    );
-    expect(Number(fiscalBands[1].getAttribute('data-width'))).toBeCloseTo(
-      headerCenterByYear.get('2023') - headerCenterByYear.get('2022'),
-      6,
-    );
-    expect(Number(fiscalBands[2].getAttribute('data-start-x'))).toBeCloseTo(
-      headerCenterByYear.get('2023'),
-      6,
-    );
-    expect(Number(fiscalBands[2].getAttribute('data-width'))).toBeCloseTo(
-      headerCenterByYear.get('2024') - headerCenterByYear.get('2023'),
-      6,
-    );
+
+    fiscalBands.forEach((bandNode, index) => {
+      const expectedBoundary = expectedBoundaries[index];
+
+      expect(Number(bandNode.getAttribute('data-start-x'))).toBeCloseTo(expectedBoundary.startX, 6);
+      expect(
+        Number(bandNode.getAttribute('data-start-x')) + Number(bandNode.getAttribute('data-width')),
+      ).toBeCloseTo(expectedBoundary.endX, 6);
+    });
   });
 
   it('reveals the matching FY watermark when hovering a chart band and clears it on leave', async () => {
@@ -1000,7 +1161,7 @@ describe('SharePriceDashboard preset scrolling', () => {
     const boundaryBand = fiscalBands.find((bandNode) => bandNode.getAttribute('data-fiscal-year') === '2024');
     expect(boundaryBand).toBeTruthy();
 
-    const boundaryX = Number(boundaryBand.getAttribute('data-center-x')) + (Number(boundaryBand.getAttribute('data-width')) / 2);
+    const boundaryX = Number(boundaryBand.getAttribute('data-start-x')) + Number(boundaryBand.getAttribute('data-width'));
 
     await act(async () => {
       fireEvent.mouseMove(svg, { clientX: boundaryX - 2, clientY: 140 });
@@ -1225,6 +1386,7 @@ describe('SharePriceDashboard preset scrolling', () => {
 
       await flushDashboardWork();
       await flushDashboardWork();
+      await flushDashboardWork();
 
       const scrollRegion = screen.getByTestId(DASHBOARD_TEST_ID);
       const leftRailWidth = Number(scrollRegion.getAttribute('data-left-rail-width'));
@@ -1241,6 +1403,60 @@ describe('SharePriceDashboard preset scrolling', () => {
 
       expect(Number(scrollRegion.getAttribute('data-content-width'))).toBe(expectedContentWidth);
       expect(Number(scrollRegion.getAttribute('data-plot-width'))).toBe(expectedContentWidth - 24);
+    } finally {
+      if (originalClientWidthDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalClientWidthDescriptor);
+      } else {
+        delete HTMLElement.prototype.clientWidth;
+      }
+    }
+  });
+
+  it('re-measures short-history preset width when timeline content appears after loading', async () => {
+    const payload = buildShortHistoryDashboardPayload();
+    const deferredResponse = createDeferredResponse();
+    const originalClientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+
+    fetchDashboardData.mockImplementation(() => deferredResponse.responsePromise);
+
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get() {
+        if (this.getAttribute?.('data-testid') === DASHBOARD_TEST_ID) {
+          return 920;
+        }
+
+        return originalClientWidthDescriptor?.get
+          ? originalClientWidthDescriptor.get.call(this)
+          : 0;
+      },
+    });
+
+    try {
+      mountDashboard(
+        <SharePriceDashboard
+          identifier="RBRK"
+          name="Rubrik, Inc."
+          scaleAnimationDurationMs={0}
+        />,
+      );
+
+      expect(screen.queryByTestId(DASHBOARD_TEST_ID)).toBeNull();
+
+      await act(async () => {
+        deferredResponse.resolveResponse(payload);
+        await deferredResponse.responsePromise;
+        await Promise.resolve();
+      });
+
+      await flushDashboardWork();
+      await flushDashboardWork();
+      await flushDashboardWork();
+
+      const scrollRegion = screen.getByTestId(DASHBOARD_TEST_ID);
+      const leftRailWidth = Number(scrollRegion.getAttribute('data-left-rail-width'));
+
+      expect(Number(scrollRegion.getAttribute('data-content-width'))).toBe(920 - leftRailWidth);
     } finally {
       if (originalClientWidthDescriptor) {
         Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalClientWidthDescriptor);

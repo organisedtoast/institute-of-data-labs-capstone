@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
@@ -365,10 +365,14 @@ function createChartXGeometry({ filteredPriceRows, tablePoints, plotWidth, yearC
   }
 
   const anchorPositions = tablePoints.map((annualRow, columnIndex) => {
+    const anchorDate = annualRow.earningsReleaseDate || annualRow.fiscalYearEndDate;
+
     return {
       fiscalYear: annualRow.fiscalYear,
       date: annualRow.fiscalYearEndDate,
-      time: new Date(annualRow.fiscalYearEndDate).getTime(),
+      anchorDate,
+      fiscalYearEndTime: new Date(annualRow.fiscalYearEndDate).getTime(),
+      time: new Date(anchorDate).getTime(),
       x: (columnIndex * yearCellWidth) + (yearCellWidth / 2),
     };
   });
@@ -550,6 +554,7 @@ export default function SharePriceDashboard({
   });
   const presetBootstrapFrameRef = useRef(null);
   const measurementFrameRef = useRef(null);
+  const postPaintMeasurementFrameRef = useRef(null);
   const animationFrameRef = useRef(null);
   const contractionTimeoutRef = useRef(null);
   const longPressTimeoutRef = useRef(null);
@@ -559,31 +564,9 @@ export default function SharePriceDashboard({
     startClientY: 0,
   });
 
-  const attachTimelineScrollRef = (node) => {
+  const attachTimelineScrollRef = useCallback((node) => {
     timelineScrollRef.current = node;
-
-    if (!node) {
-      return;
-    }
-
-    const measuredContainerWidth = node.clientWidth;
-    const measuredViewportWidth = Math.max(measuredContainerWidth - fixedLeftRailWidth, 0);
-
-    setScrollState((previousScrollState) => {
-      if (
-        previousScrollState.containerWidth === measuredContainerWidth
-        && previousScrollState.viewportWidth === measuredViewportWidth
-      ) {
-        return previousScrollState;
-      }
-
-      return {
-        containerWidth: measuredContainerWidth,
-        scrollLeft: previousScrollState.scrollLeft,
-        viewportWidth: measuredViewportWidth,
-      };
-    });
-  };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -991,6 +974,14 @@ export default function SharePriceDashboard({
     measurementFrameRef.current = requestAnimationFrame(() => {
       measurementFrameRef.current = null;
       updateScrollWindow();
+
+      // Short-history preset cards can mount their scroll region before the browser has
+      // finalized the real card width. One extra post-paint recheck closes that gap
+      // without relying on the user to manually resize the window.
+      postPaintMeasurementFrameRef.current = requestAnimationFrame(() => {
+        postPaintMeasurementFrameRef.current = null;
+        updateScrollWindow();
+      });
     });
 
     scrollElement.addEventListener('scroll', updateScrollWindow, { passive: true });
@@ -1014,6 +1005,11 @@ export default function SharePriceDashboard({
         measurementFrameRef.current = null;
       }
 
+      if (postPaintMeasurementFrameRef.current) {
+        cancelAnimationFrame(postPaintMeasurementFrameRef.current);
+        postPaintMeasurementFrameRef.current = null;
+      }
+
       if (resizeObserver) {
         resizeObserver.disconnect();
       } else {
@@ -1028,6 +1024,8 @@ export default function SharePriceDashboard({
     isPresetWindowMode,
     maxPresetPanOffset,
     presetPanOffsetMonths,
+    filteredPriceRows.length,
+    tablePoints.length,
     timelineLayout.contentWidth,
   ]);
 
@@ -1070,6 +1068,11 @@ export default function SharePriceDashboard({
       if (measurementFrameRef.current) {
         cancelAnimationFrame(measurementFrameRef.current);
         measurementFrameRef.current = null;
+      }
+
+      if (postPaintMeasurementFrameRef.current) {
+        cancelAnimationFrame(postPaintMeasurementFrameRef.current);
+        postPaintMeasurementFrameRef.current = null;
       }
 
     };
@@ -1300,17 +1303,24 @@ export default function SharePriceDashboard({
     // The raw visible scale reacts immediately to that data, but the rendered scale
     // expands quickly and contracts more slowly so scroll-driven re-scaling feels calmer.
     const { minPrice, maxPrice, ticks } = renderedScale;
+    // We intentionally use two date systems here:
+    // release dates place the fixed column/tick centers, but FY end dates define the
+    // actual fiscal periods that the hover bands and watermark should cover.
     const fiscalYearBands = chartXGeometry.anchorPositions.map((anchorPosition, index) => {
       const previousAnchor = index > 0 ? chartXGeometry.anchorPositions[index - 1] : null;
-      const startX = previousAnchor ? previousAnchor.x : 0;
-      const endX = anchorPosition.x;
+      const startX = previousAnchor
+        ? chartXGeometry.mapTimeToX(previousAnchor.fiscalYearEndTime)
+        : 0;
+      const endX = chartXGeometry.mapTimeToX(anchorPosition.fiscalYearEndTime);
+      const clampedStartX = Math.max(startX, 0);
+      const clampedEndX = Math.min(Math.max(endX, clampedStartX), timelineLayout.plotWidth);
 
       return {
         fiscalYear: anchorPosition.fiscalYear,
-        centerX: startX + ((endX - startX) / 2),
-        startX,
-        endX,
-        width: Math.max(endX - startX, 0),
+        centerX: clampedStartX + ((clampedEndX - clampedStartX) / 2),
+        startX: clampedStartX,
+        endX: clampedEndX,
+        width: Math.max(clampedEndX - clampedStartX, 0),
         isAlternate: index % 2 === 1,
       };
     }).filter((band) => band && band.width > 0);
