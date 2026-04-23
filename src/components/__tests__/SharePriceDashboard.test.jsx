@@ -728,23 +728,25 @@ function getCloseRangeForMonths(priceRows, startMonth, endMonth) {
   };
 }
 
-// The dashboard still has async data loading, passive effects, and a preset
-// bootstrap rAF. Once scale animation is disabled through the injected prop,
-// one short macrotask turn plus surrounding microtasks is enough to settle it.
-async function flushDashboardWork() {
-  await act(async () => {
-    await Promise.resolve();
-  });
-
-  await act(async () => {
-    await new Promise((resolve) => {
-      window.setTimeout(resolve, 0);
+// The dashboard uses a mix of promises, timeouts, and requestAnimationFrame
+// callbacks. Running one or more short "event loop turns" keeps the helpers
+// flexible for both the no-animation tests and the animated regression paths.
+async function flushDashboardWork(turnCount = 1) {
+  for (let turn = 0; turn < turnCount; turn += 1) {
+    await act(async () => {
+      await Promise.resolve();
     });
-  });
 
-  await act(async () => {
-    await Promise.resolve();
-  });
+    await act(async () => {
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 0);
+      });
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
 }
 
 function mountDashboard(ui) {
@@ -2346,7 +2348,7 @@ describe('SharePriceDashboard metrics mode', () => {
             name="AAPL name"
             isFocusedMetricsMode={isFocused}
             onMetricsVisibilityChange={setIsFocused}
-            scaleAnimationDurationMs={0}
+            scaleAnimationDurationMs={120}
           />
         </div>
       );
@@ -2366,7 +2368,7 @@ describe('SharePriceDashboard metrics mode', () => {
     const user = userEvent.setup();
 
     await user.click(mountedQueries.getByRole('button', { name: 'SHOW METRICS' }));
-    await flushDashboardWork();
+    await flushDashboardWork(3);
 
     expect(mountedQueries.getByTestId('share-price-dashboard-parent-focus-state').textContent).toBe('focused');
     expect(
@@ -2374,13 +2376,151 @@ describe('SharePriceDashboard metrics mode', () => {
         return String(call[0] || '').includes('Cannot update a component');
       }),
     ).toBe(false);
+    expect(
+      consoleErrorSpy.mock.calls.filter((call) => {
+        return call.some((value) => String(value).includes('Maximum update depth exceeded'));
+      }),
+    ).toHaveLength(0);
+  });
+
+  it('does not restart scale animation when parent focus rerenders keep the same target scale', async () => {
+    const payload = buildMetricsModePayload();
+    const deferredResponse = createDeferredResponse();
+    const requestAnimationFrameSpy = vi.spyOn(window, 'requestAnimationFrame');
+
+    fetchDashboardData.mockImplementation(() => deferredResponse.responsePromise);
+
+    function ParentFocusHarness() {
+      const [isFocused, setIsFocused] = React.useState(false);
+
+      return (
+        <SharePriceDashboard
+          identifier="AAPL"
+          name="AAPL name"
+          isFocusedMetricsMode={isFocused}
+          onMetricsVisibilityChange={setIsFocused}
+          scaleAnimationDurationMs={120}
+        />
+      );
+    }
+
+    mountDashboard(<ParentFocusHarness />);
+
+    await act(async () => {
+      deferredResponse.resolveResponse(payload);
+      await deferredResponse.responsePromise;
+      await Promise.resolve();
+    });
+
+    await flushDashboardWork(3);
+
+    const requestAnimationFramesBeforeToggle = requestAnimationFrameSpy.mock.calls.length;
+    const mountedQueries = within(mountedContainer);
+    const user = userEvent.setup();
+
+    await user.click(mountedQueries.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork(3);
+
+    expect(requestAnimationFrameSpy.mock.calls.length).toBe(requestAnimationFramesBeforeToggle);
+  });
+
+  it('does not log a maximum update depth error after focused metrics hides and remounts sibling cards', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const payloadByIdentifier = {
+      AAPL: buildMetricsModePayload({
+        identifier: 'AAPL',
+        companyName: 'AAPL name',
+      }),
+      MSFT: buildMetricsModePayload({
+        identifier: 'MSFT',
+        companyName: 'MSFT name',
+      }),
+    };
+
+    fetchDashboardData.mockImplementation((identifier) => {
+      return Promise.resolve(payloadByIdentifier[identifier]);
+    });
+
+    function FocusedStocksHarness() {
+      const [focusedIdentifier, setFocusedIdentifier] = React.useState('');
+      const visibleIdentifiers = focusedIdentifier ? [focusedIdentifier] : ['AAPL', 'MSFT'];
+
+      return (
+        <div>
+          {visibleIdentifiers.map((identifier) => (
+            <div key={identifier} data-testid={`share-price-dashboard-harness-${identifier}`}>
+              <SharePriceDashboard
+                identifier={identifier}
+                name={`${identifier} name`}
+                isFocusedMetricsMode={focusedIdentifier === identifier}
+                onMetricsVisibilityChange={(nextIsOpen) => {
+                  setFocusedIdentifier(nextIsOpen ? identifier : '');
+                }}
+                scaleAnimationDurationMs={120}
+              />
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    try {
+      mountDashboard(<FocusedStocksHarness />);
+      await flushDashboardWork(4);
+
+      const user = userEvent.setup();
+      const getDashboardCard = (identifier) => {
+        return screen.queryByTestId(`share-price-dashboard-harness-${identifier}`);
+      };
+
+      expect(getDashboardCard('AAPL')).toBeTruthy();
+      expect(getDashboardCard('MSFT')).toBeTruthy();
+
+      await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'SHOW METRICS' }));
+      await flushDashboardWork(4);
+
+      expect(getDashboardCard('AAPL')).toBeTruthy();
+      expect(getDashboardCard('MSFT')).toBeNull();
+
+      await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'HIDE METRICS' }));
+      await flushDashboardWork(4);
+
+      expect(getDashboardCard('AAPL')).toBeTruthy();
+      expect(getDashboardCard('MSFT')).toBeTruthy();
+
+      await user.click(within(getDashboardCard('MSFT')).getByRole('button', { name: 'SHOW METRICS' }));
+      await flushDashboardWork(4);
+
+      expect(getDashboardCard('AAPL')).toBeNull();
+      expect(getDashboardCard('MSFT')).toBeTruthy();
+      expect(
+        consoleErrorSpy.mock.calls.filter((call) => {
+          return call.some((value) => String(value).includes('Maximum update depth exceeded'));
+        }),
+      ).toHaveLength(0);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 
   // Focused metrics mode is a second reading mode for the same card.
-  // These tests make sure the chart and base rows stay outside the new inner
-  // metrics viewport so the user can keep that context visible while scrolling.
-  it('keeps the chart and base rows outside the focused metrics viewport', async () => {
-    const { user } = await renderDashboard({
+  // These tests protect a very specific bug:
+  // - in normal mode the left rail can use CSS sticky inside the shared horizontal scroller
+  // - in focused mode the detail metrics live inside their own vertical viewport
+  // - when MAX is selected, the dashboard uses long-history horizontal scrolling again
+  // - if we keep the focused left rail inside that inner viewport, the rail can slide away
+  //   with the long-history content and effectively "disappear"
+  //
+  // This regression reproduces the dangerous combination directly:
+  // 1. open focused metrics
+  // 2. switch to MAX so the card uses long-history horizontal scrolling
+  // 3. narrow the visible scroll window
+  // 4. scroll sideways
+  //
+  // The expected behavior is that the row labels still stay visible on the left
+  // while only the value area moves horizontally underneath the focused shell.
+  it('keeps the focused detail metrics left rail visible while MAX scrolls horizontally', async () => {
+    const { user, scrollRegion } = await renderDashboard({
       payload: buildMetricsModePayload(),
       dashboardProps: {
         isFocusedMetricsMode: true,
@@ -2390,30 +2530,110 @@ describe('SharePriceDashboard metrics mode', () => {
     await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
     await flushDashboardWork();
 
-    // The focused metrics viewport should still isolate the detail rows in
-    // their own vertical scroller without changing the shared table width that
-    // keeps the left rail frozen and the annual columns aligned with the chart above.
+    // A narrow scroll region makes the "frozen left rail vs moving values"
+    // split obvious and gives this regression a realistic mobile-sized viewport.
+    await configureScrollRegion(scrollRegion, 360);
+    await flushDashboardWork();
+
+    const mountedQueries = within(mountedContainer);
+
+    await user.click(mountedQueries.getByRole('button', { name: 'MAX' }));
+    await flushDashboardWork();
+
     const scrollRegions = screen.getAllByTestId('share-price-dashboard-scroll-region');
-    const scrollRegion = scrollRegions[scrollRegions.length - 1];
+    const activeScrollRegion = scrollRegions[scrollRegions.length - 1];
     const topRails = screen.getAllByTestId('share-price-dashboard-top-rails').at(-1);
     const metricsViewport = screen.getAllByTestId('share-price-dashboard-metrics-viewport').at(-1);
     const metricsHeaderWrapper = within(metricsViewport).getByTestId('share-price-dashboard-detail-metrics-header-wrapper');
     const metricsHeader = within(metricsViewport).getByTestId('share-price-dashboard-detail-metrics-header');
+    const metricsContent = within(metricsViewport).getByTestId('share-price-dashboard-focused-metrics-content');
     const metricRows = within(metricsViewport).getAllByTestId('share-price-dashboard-metric-row');
     const metricRowLeftRails = within(metricsViewport).getAllByTestId('share-price-dashboard-metric-row-left-rail');
+    const visibleWidth = Number(metricsViewport.getAttribute('data-visible-width'));
+    const fullContentWidth = Number(metricsViewport.getAttribute('data-full-content-width'));
 
     expect(metricsViewport.getAttribute('data-vertical-scroll')).toBe('true');
-    expect(scrollRegion.getAttribute('data-surface-width')).toBe('920');
+    expect(activeScrollRegion.getAttribute('data-scroll-mode')).toBe('range');
     expect(topRails).toBeTruthy();
     expect(within(topRails).getByText('FY end date')).toBeTruthy();
     expect(metricsHeaderWrapper).toBeTruthy();
     expect(metricsHeader).toBeTruthy();
+    expect(within(metricsHeader).getByText('DETAIL METRICS')).toBeTruthy();
     expect(metricRows[0].getAttribute('data-section-start')).toBe('true');
     expect(within(metricsViewport).getByText('EBIT FY+1')).toBeTruthy();
     expect(within(metricsViewport).queryByText('FY end date')).toBeNull();
     expect(metricRows).toHaveLength(3);
     expect(metricRowLeftRails).toHaveLength(3);
     expect(within(metricsViewport).queryAllByTestId('share-price-dashboard-metric-row-hide-button')).toHaveLength(0);
+    expect(visibleWidth).toBeGreaterThan(0);
+    expect(fullContentWidth).toBeGreaterThan(visibleWidth);
+    expect(metricsViewport.getAttribute('data-horizontal-offset')).toBe('0');
+    expect(metricsContent.getAttribute('data-horizontal-offset')).toBe('0');
+
+    // We use a multiple-of-16 scroll amount because the dashboard intentionally
+    // quantizes long-history scroll positions in 16px steps before deriving the
+    // visible chart/table window. That keeps this assertion aligned with the
+    // production geometry instead of relying on a lucky rounding result.
+    await act(async () => {
+      activeScrollRegion.scrollLeft = 160;
+      fireEvent.scroll(activeScrollRegion);
+    });
+    await flushDashboardWork(2);
+
+    expect(metricsViewport.getAttribute('data-horizontal-offset')).toBe('160');
+    expect(metricsContent.getAttribute('data-horizontal-offset')).toBe('160');
+    expect(within(metricsViewport).getByText('EBIT FY+1')).toBeTruthy();
+    expect(metricRowLeftRails[0]).toBeTruthy();
+  });
+
+  // The same focused shell must also recover cleanly when the user leaves MAX
+  // and returns to a fixed-length preset. In that preset world, horizontal
+  // movement no longer means "scroll inside history" - it means "pan the month
+  // window itself" - so the translated detail metrics content should snap back
+  // to an internal horizontal offset of zero.
+  it('resets the focused detail metrics horizontal offset when switching from MAX back to a fixed preset', async () => {
+    const { user, scrollRegion } = await renderDashboard({
+      payload: buildMetricsModePayload(),
+      dashboardProps: {
+        isFocusedMetricsMode: true,
+      },
+    });
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    await configureScrollRegion(scrollRegion, 360);
+    await flushDashboardWork();
+
+    const mountedQueries = within(mountedContainer);
+
+    await user.click(mountedQueries.getByRole('button', { name: 'MAX' }));
+    await flushDashboardWork();
+
+    const activeScrollRegion = screen.getAllByTestId('share-price-dashboard-scroll-region').at(-1);
+
+    await act(async () => {
+      activeScrollRegion.scrollLeft = 160;
+      fireEvent.scroll(activeScrollRegion);
+    });
+    await flushDashboardWork(2);
+
+    let metricsViewport = screen.getAllByTestId('share-price-dashboard-metrics-viewport').at(-1);
+    let metricsContent = within(metricsViewport).getByTestId('share-price-dashboard-focused-metrics-content');
+
+    expect(metricsViewport.getAttribute('data-horizontal-offset')).toBe('160');
+    expect(metricsContent.getAttribute('data-horizontal-offset')).toBe('160');
+
+    await user.click(mountedQueries.getByRole('button', { name: '5Y' }));
+    await flushDashboardWork(2);
+
+    metricsViewport = screen.getAllByTestId('share-price-dashboard-metrics-viewport').at(-1);
+    metricsContent = within(metricsViewport).getByTestId('share-price-dashboard-focused-metrics-content');
+
+    expect(screen.getAllByTestId('share-price-dashboard-scroll-region').at(-1).getAttribute('data-scroll-mode')).toBe('preset');
+    expect(metricsViewport.getAttribute('data-horizontal-offset')).toBe('0');
+    expect(metricsContent.getAttribute('data-horizontal-offset')).toBe('0');
+    expect(within(metricsViewport).getByText('EBIT FY+1')).toBeTruthy();
   });
 
   it('prevents the native context menu while still opening the metric editor', async () => {

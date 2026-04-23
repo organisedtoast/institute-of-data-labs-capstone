@@ -344,6 +344,14 @@ function getScaleSignature(scale) {
   ].join('|');
 }
 
+const EMPTY_RENDERED_SCALE = Object.freeze({
+  minPrice: 0,
+  maxPrice: 0,
+  step: 1,
+  ticks: [],
+});
+const EMPTY_RENDERED_SCALE_SIGNATURE = getScaleSignature(EMPTY_RENDERED_SCALE);
+
 function formatPlainNumber(value, maximumFractionDigits = 2) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return '--';
@@ -769,19 +777,10 @@ export default function SharePriceDashboard({
     scrollLeft: 0,
     viewportWidth: 0,
   });
-  const [renderedScale, setRenderedScale] = useState({
-    minPrice: 0,
-    maxPrice: 0,
-    step: 1,
-    ticks: [],
-  });
+  const [renderedScale, setRenderedScale] = useState(EMPTY_RENDERED_SCALE);
   const [isPresetScrollReady, setIsPresetScrollReady] = useState(false);
-  const renderedScaleRef = useRef({
-    minPrice: 0,
-    maxPrice: 0,
-    step: 1,
-    ticks: [],
-  });
+  const renderedScaleRef = useRef(EMPTY_RENDERED_SCALE);
+  const targetChartScaleRef = useRef(EMPTY_RENDERED_SCALE);
   const presetBootstrapFrameRef = useRef(null);
   const measurementFrameRef = useRef(null);
   const postPaintMeasurementFrameRef = useRef(null);
@@ -1590,12 +1589,15 @@ export default function SharePriceDashboard({
   const targetChartScaleSignature = useMemo(() => {
     return getScaleSignature(targetChartScale);
   }, [targetChartScale]);
+  targetChartScaleRef.current = targetChartScale;
 
   useEffect(() => {
     renderedScaleRef.current = renderedScale;
   }, [renderedScale]);
 
   useEffect(() => {
+    const targetScale = targetChartScaleRef.current;
+
     if (!filteredPriceRows.length) {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
@@ -1607,36 +1609,28 @@ export default function SharePriceDashboard({
         contractionTimeoutRef.current = null;
       }
 
-      setRenderedScale({
-        minPrice: 0,
-        maxPrice: 0,
-        step: 1,
-        ticks: [],
-      });
-      renderedScaleRef.current = {
-        minPrice: 0,
-        maxPrice: 0,
-        step: 1,
-        ticks: [],
-      };
+      const currentScaleSignature = getScaleSignature(renderedScaleRef.current);
+      renderedScaleRef.current = EMPTY_RENDERED_SCALE;
+
+      if (currentScaleSignature !== EMPTY_RENDERED_SCALE_SIGNATURE) {
+        setRenderedScale(EMPTY_RENDERED_SCALE);
+      }
+
       return undefined;
     }
 
     const currentScale = renderedScaleRef.current;
+    const currentScaleSignature = getScaleSignature(currentScale);
 
-    if (
-      currentScale.minPrice === 0 &&
-      currentScale.maxPrice === 0 &&
-      currentScale.ticks.length === 0
-    ) {
-      if (!areScaleValuesClose(currentScale, targetChartScale)) {
-        setRenderedScale(targetChartScale);
-        renderedScaleRef.current = targetChartScale;
+    if (currentScaleSignature === EMPTY_RENDERED_SCALE_SIGNATURE) {
+      if (!areScaleValuesClose(currentScale, targetScale)) {
+        setRenderedScale(targetScale);
+        renderedScaleRef.current = targetScale;
       }
       return undefined;
     }
 
-    if (areScaleValuesClose(currentScale, targetChartScale)) {
+    if (areScaleValuesClose(currentScale, targetScale)) {
       return undefined;
     }
 
@@ -1656,15 +1650,15 @@ export default function SharePriceDashboard({
         contractionTimeoutRef.current = null;
       }
 
-      if (!areScaleValuesClose(renderedScaleRef.current, targetChartScale)) {
-        setRenderedScale(targetChartScale);
-        renderedScaleRef.current = targetChartScale;
+      if (!areScaleValuesClose(renderedScaleRef.current, targetScale)) {
+        setRenderedScale(targetScale);
+        renderedScaleRef.current = targetScale;
       }
       return undefined;
     }
 
-    const isExpandingDown = targetChartScale.minPrice < currentScale.minPrice;
-    const isExpandingUp = targetChartScale.maxPrice > currentScale.maxPrice;
+    const isExpandingDown = targetScale.minPrice < currentScale.minPrice;
+    const isExpandingUp = targetScale.maxPrice > currentScale.maxPrice;
     const shouldExpandImmediately = isExpandingDown || isExpandingUp;
     const transitionDelay = shouldExpandImmediately ? 0 : SCALE_CONTRACTION_DELAY_MS;
     const transitionDuration = shouldExpandImmediately
@@ -1673,10 +1667,12 @@ export default function SharePriceDashboard({
 
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
     }
 
     if (contractionTimeoutRef.current) {
       clearTimeout(contractionTimeoutRef.current);
+      contractionTimeoutRef.current = null;
     }
 
     const animateToScale = () => {
@@ -1684,12 +1680,13 @@ export default function SharePriceDashboard({
       const animationStartTime = performance.now();
 
       const step = (currentTime) => {
+        const latestTargetScale = targetChartScaleRef.current;
         const elapsed = currentTime - animationStartTime;
         const progress = Math.min(elapsed / transitionDuration, 1);
         const easedProgress = 1 - ((1 - progress) ** 3);
         const nextScale = buildRoundedChartScale(
-          animationStartScale.minPrice + ((targetChartScale.minPrice - animationStartScale.minPrice) * easedProgress),
-          animationStartScale.maxPrice + ((targetChartScale.maxPrice - animationStartScale.maxPrice) * easedProgress),
+          animationStartScale.minPrice + ((latestTargetScale.minPrice - animationStartScale.minPrice) * easedProgress),
+          animationStartScale.maxPrice + ((latestTargetScale.maxPrice - animationStartScale.maxPrice) * easedProgress),
           {
             preferredTickCount: preferredYAxisTickCount,
           },
@@ -1703,8 +1700,12 @@ export default function SharePriceDashboard({
         if (progress < 1) {
           animationFrameRef.current = requestAnimationFrame(step);
         } else {
-          renderedScaleRef.current = targetChartScale;
           animationFrameRef.current = null;
+
+          if (renderedScaleRef.current !== latestTargetScale) {
+            renderedScaleRef.current = latestTargetScale;
+            setRenderedScale(latestTargetScale);
+          }
         }
       };
 
@@ -1728,7 +1729,6 @@ export default function SharePriceDashboard({
     filteredPriceRows.length,
     preferredYAxisTickCount,
     scaleAnimationDurationMs,
-    targetChartScale,
     targetChartScaleSignature,
   ]);
 
@@ -1831,6 +1831,12 @@ export default function SharePriceDashboard({
   // The page decides *which* stock is in focus, while the card decides *how*
   // to render the focused layout once that mode is active.
   const usesFocusedMetricsViewport = isMetricsOpen && isFocusedMetricsMode;
+  const focusedMetricsHorizontalOffset = usesPresetTimelineLayout ? 0 : visibleWindow.left;
+  const focusedMetricsVisibleValuesWidth = Math.min(
+    Math.max(scrollState.viewportWidth || timelineLayout.contentWidth, 1),
+    timelineLayout.contentWidth,
+  );
+  const focusedMetricsShellWidth = fixedLeftRailWidth + focusedMetricsVisibleValuesWidth;
   const visibleAnnualMetricColumnKeys = useMemo(() => {
     return new Set(tablePoints.map((annualRow) => `annual-${annualRow.fiscalYear}`));
   }, [tablePoints]);
@@ -2654,6 +2660,240 @@ export default function SharePriceDashboard({
       </>
     );
 
+    const focusedMetricsHeaderContent = (
+      <Box
+        data-testid="share-price-dashboard-detail-metrics-header"
+        sx={{
+          display: 'flex',
+          alignItems: 'stretch',
+          width: `${focusedMetricsShellWidth}px`,
+          height: `${HEADER_ROW_HEIGHT}px`,
+          backgroundColor: '#f8fafc',
+          borderTop: '1px solid #e2e8f0',
+          borderBottom: 'none',
+        }}
+      >
+        <Box
+          sx={{
+            width: fixedLeftRailWidth,
+            flexShrink: 0,
+            px: 1.25,
+            fontSize: { xs: '11px', sm: '12px' },
+            fontWeight: 600,
+            color: '#64748b',
+            display: 'flex',
+            alignItems: 'center',
+            backgroundColor: '#f8fafc',
+            borderRight: '1px solid #e2e8f0',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          DETAIL METRICS
+        </Box>
+
+        <Box
+          sx={{
+            position: 'relative',
+            width: `${focusedMetricsVisibleValuesWidth}px`,
+            flexShrink: 0,
+            height: `${HEADER_ROW_HEIGHT}px`,
+            overflow: 'hidden',
+            backgroundColor: '#f8fafc',
+          }}
+        >
+          <Box
+            data-testid="share-price-dashboard-focused-metrics-content"
+            data-horizontal-offset={String(focusedMetricsHorizontalOffset)}
+            data-full-content-width={String(baseSurfaceWidth)}
+            data-values-content-width={String(timelineLayout.contentWidth)}
+            sx={{
+              position: 'relative',
+              width: `${timelineLayout.contentWidth}px`,
+              height: `${HEADER_ROW_HEIGHT}px`,
+              transform: `translateX(-${focusedMetricsHorizontalOffset}px)`,
+              backgroundColor: '#f8fafc',
+            }}
+          />
+        </Box>
+      </Box>
+    );
+
+    const focusedDetailMetricsRows = (
+      <>
+        {metricsRowDefinitions.map((tableRow) => (
+          <Box
+            key={tableRow.key}
+            data-testid="share-price-dashboard-metric-row"
+            data-section-start={tableRow.startsVisibleSection ? 'true' : 'false'}
+            sx={{
+              display: 'flex',
+              alignItems: 'stretch',
+              width: `${focusedMetricsShellWidth}px`,
+              height: `${tableRow.height}px`,
+              backgroundColor: tableRow.backgroundColor,
+              borderTop: tableRow.borderTop,
+              borderBottom: tableRow.borderBottom,
+            }}
+          >
+            <Box
+              data-testid="share-price-dashboard-metric-row-left-rail"
+              data-row-key={tableRow.key}
+              title={shouldUseShortLabels ? tableRow.label : undefined}
+              aria-label={tableRow.label}
+              onContextMenu={(event) => handleMetricRowContextMenu(event, tableRow)}
+              onMouseDown={handleMetricRowMouseDown}
+              onTouchStart={(event) => handleMetricRowTouchStart(event, tableRow)}
+              onTouchMove={handleMetricRowTouchMove}
+              onTouchEnd={handleMetricRowTouchEnd}
+              onTouchCancel={handleMetricRowTouchEnd}
+              sx={{
+                width: fixedLeftRailWidth,
+                flexShrink: 0,
+                px: 1.25,
+                py: 0.5,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                alignItems: 'flex-start',
+                gap: tableRow.showSectionLabel ? 0.2 : 0,
+                backgroundColor: tableRow.backgroundColor,
+                borderRight: '1px solid #e2e8f0',
+                textAlign: 'left',
+              }}
+            >
+              {tableRow.showSectionLabel ? (
+                <Box
+                  sx={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    color: '#94a3b8',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    width: '100%',
+                    textAlign: 'left',
+                  }}
+                >
+                  {shouldUseShortLabels ? tableRow.shortSection : tableRow.section}
+                </Box>
+              ) : null}
+              <Box
+                sx={{
+                  fontSize: { xs: '11px', sm: '12px', md: '13px' },
+                  fontWeight: 400,
+                  color: '#475569',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  width: '100%',
+                  textAlign: 'left',
+                }}
+              >
+                {shouldUseShortLabels ? tableRow.shortLabel : tableRow.label}
+              </Box>
+            </Box>
+
+            <Box
+              data-testid="share-price-dashboard-metric-row-values"
+              sx={{
+                position: 'relative',
+                width: `${focusedMetricsVisibleValuesWidth}px`,
+                flexShrink: 0,
+                height: `${tableRow.height}px`,
+                overflow: 'hidden',
+                backgroundColor: tableRow.backgroundColor,
+              }}
+            >
+              <Box
+                sx={{
+                  position: 'relative',
+                  width: `${timelineLayout.contentWidth}px`,
+                  height: `${tableRow.height}px`,
+                  transform: `translateX(-${focusedMetricsHorizontalOffset}px)`,
+                  backgroundColor: tableRow.backgroundColor,
+                }}
+              >
+                {renderedMetricsColumns.map((column) => {
+                  const metricCell = renderedMetricCellByRowKey.get(tableRow.key)?.get(column.key);
+                  const centerX = metricsColumnCenterByKey.get(column.key);
+
+                  if (!metricCell || !Number.isFinite(centerX)) {
+                    return null;
+                  }
+
+                  return (
+                    <Box
+                      key={`${tableRow.key}-${column.key}`}
+                      role={metricCell.isOverrideable ? 'button' : undefined}
+                      tabIndex={metricCell.isOverrideable ? 0 : undefined}
+                      data-testid="share-price-dashboard-metric-cell"
+                      data-row-key={tableRow.key}
+                      data-column-key={column.key}
+                      data-is-overridden={metricCell.isOverridden ? 'true' : 'false'}
+                      onContextMenu={(event) => handleMetricCellContextMenu(event, tableRow, metricCell)}
+                      onMouseDown={(event) => handleMetricCellMouseDown(event, metricCell)}
+                      onTouchStart={(event) => handleMetricCellTouchStart(event, tableRow, metricCell)}
+                      onTouchMove={handleMetricCellTouchMove}
+                      onTouchEnd={handleMetricCellTouchEnd}
+                      onTouchCancel={handleMetricCellTouchEnd}
+                      sx={{
+                        position: 'absolute',
+                        left: `${centerX}px`,
+                        transform: 'translateX(-50%)',
+                        height: `${tableRow.height}px`,
+                        fontSize: timelineLayout.bodyFontSize,
+                        fontWeight: metricCell.isOverridden ? 600 : 400,
+                        color: metricCell.isOverridden ? '#6d28d9' : '#334155',
+                        textAlign: 'center',
+                        width: `${timelineLayout.yearCellWidth}px`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        lineHeight: 1.1,
+                        px: 0.35,
+                        cursor: metricCell.isOverrideable ? 'context-menu' : 'default',
+                        userSelect: 'none',
+                        ...(metricCell.isOverrideable ? {
+                          '&:hover .share-price-dashboard-metric-value, &:focus-visible .share-price-dashboard-metric-value': {
+                            borderBottomColor: metricCell.isOverridden
+                              ? OVERRIDDEN_METRIC_UNDERLINE_HOVER
+                              : EDITABLE_METRIC_UNDERLINE_HOVER,
+                          },
+                        } : {}),
+                      }}
+                    >
+                      <Box
+                        className="share-price-dashboard-metric-value"
+                        sx={{
+                          minWidth: 0,
+                          maxWidth: '100%',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          borderBottom: metricCell.isOverrideable
+                            ? `1px solid ${metricCell.isOverridden ? OVERRIDDEN_METRIC_UNDERLINE : EDITABLE_METRIC_UNDERLINE}`
+                            : '1px solid transparent',
+                        }}
+                      >
+                        {formatMetricCellValue(metricCell.value, tableRow.fieldPath, {
+                          compact: isCompactPresetTable,
+                        })}
+                      </Box>
+                    </Box>
+                  );
+                })}
+              </Box>
+            </Box>
+          </Box>
+        ))}
+      </>
+    );
+
     cardBody = (
       <Box
         sx={{
@@ -2934,12 +3174,19 @@ export default function SharePriceDashboard({
                     <Box
                       data-testid="share-price-dashboard-metrics-viewport"
                       data-vertical-scroll="true"
+                      data-visible-width={String(focusedMetricsShellWidth)}
+                      data-full-content-width={String(baseSurfaceWidth)}
+                      data-horizontal-offset={String(focusedMetricsHorizontalOffset)}
                       sx={{
-                        width: baseSurfaceWidth,
+                        position: 'sticky',
+                        left: 0,
+                        width: `${focusedMetricsShellWidth}px`,
                         maxHeight: FOCUSED_METRICS_VIEWPORT_MAX_HEIGHT,
                         overflowY: 'auto',
                         overflowX: 'hidden',
                         borderTop: '1px solid #e2e8f0',
+                        backgroundColor: '#ffffff',
+                        zIndex: 2,
                       }}
                     >
                       <Box
@@ -2953,180 +3200,17 @@ export default function SharePriceDashboard({
                           borderBottom: '2px solid #e2e8f0',
                         }}
                       >
-                        {detailMetricsHeaderContent}
+                        {focusedMetricsHeaderContent}
                       </Box>
                       {/* The chart and base rows stay above this viewport so the
                           learner can keep their main context visible while they
                           scroll only through the dense detail metrics. */}
                       <Box
                         sx={{
-                          width: `${baseSurfaceWidth}px`,
+                          width: `${focusedMetricsShellWidth}px`,
                         }}
                       >
-                        {metricsRowDefinitions.map((tableRow) => (
-                          <Box
-                            key={tableRow.key}
-                            data-testid="share-price-dashboard-metric-row"
-                            data-section-start={tableRow.startsVisibleSection ? 'true' : 'false'}
-                            sx={{
-                              position: 'relative',
-                              display: 'flex',
-                              alignItems: 'stretch',
-                              width: baseSurfaceWidth,
-                              height: `${tableRow.height}px`,
-                              backgroundColor: tableRow.backgroundColor,
-                              borderTop: tableRow.borderTop,
-                              borderBottom: tableRow.borderBottom,
-                            }}
-                          >
-                            <Box
-                              data-testid="share-price-dashboard-metric-row-left-rail"
-                              data-row-key={tableRow.key}
-                              title={shouldUseShortLabels ? tableRow.label : undefined}
-                              aria-label={tableRow.label}
-                              onContextMenu={(event) => handleMetricRowContextMenu(event, tableRow)}
-                              onMouseDown={handleMetricRowMouseDown}
-                              onTouchStart={(event) => handleMetricRowTouchStart(event, tableRow)}
-                              onTouchMove={handleMetricRowTouchMove}
-                              onTouchEnd={handleMetricRowTouchEnd}
-                              onTouchCancel={handleMetricRowTouchEnd}
-                              sx={{
-                                position: 'sticky',
-                                left: 0,
-                                zIndex: 2,
-                                width: fixedLeftRailWidth,
-                                flexShrink: 0,
-                                px: 1.25,
-                                py: 0.5,
-                                display: 'flex',
-                                flexDirection: 'column',
-                                justifyContent: 'center',
-                                alignItems: 'flex-start',
-                                gap: tableRow.showSectionLabel ? 0.2 : 0,
-                                backgroundColor: tableRow.backgroundColor,
-                                borderRight: '1px solid #e2e8f0',
-                                textAlign: 'left',
-                              }}
-                            >
-                              {tableRow.showSectionLabel ? (
-                                <Box
-                                  sx={{
-                                    fontSize: '10px',
-                                    fontWeight: 700,
-                                    color: '#94a3b8',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.04em',
-                                    whiteSpace: 'nowrap',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    width: '100%',
-                                    textAlign: 'left',
-                                  }}
-                                >
-                                  {shouldUseShortLabels ? tableRow.shortSection : tableRow.section}
-                                </Box>
-                              ) : null}
-                              <Box
-                                sx={{
-                                  fontSize: { xs: '11px', sm: '12px', md: '13px' },
-                                  fontWeight: 400,
-                                  color: '#475569',
-                                  whiteSpace: 'nowrap',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  width: '100%',
-                                  textAlign: 'left',
-                                }}
-                              >
-                                {shouldUseShortLabels ? tableRow.shortLabel : tableRow.label}
-                              </Box>
-                            </Box>
-
-                            <Box
-                              data-testid="share-price-dashboard-metric-row-values"
-                              sx={{
-                                position: 'relative',
-                                width: `${timelineLayout.contentWidth}px`,
-                                flexShrink: 0,
-                                height: `${tableRow.height}px`,
-                                backgroundColor: tableRow.backgroundColor,
-                              }}
-                            >
-                              {renderedMetricsColumns.map((column) => {
-                                const metricCell = renderedMetricCellByRowKey.get(tableRow.key)?.get(column.key);
-                                const centerX = metricsColumnCenterByKey.get(column.key);
-
-                                if (!metricCell || !Number.isFinite(centerX)) {
-                                  return null;
-                                }
-
-                                return (
-                                  <Box
-                                    key={`${tableRow.key}-${column.key}`}
-                                    role={metricCell.isOverrideable ? 'button' : undefined}
-                                    tabIndex={metricCell.isOverrideable ? 0 : undefined}
-                                    data-testid="share-price-dashboard-metric-cell"
-                                    data-row-key={tableRow.key}
-                                    data-column-key={column.key}
-                                    data-is-overridden={metricCell.isOverridden ? 'true' : 'false'}
-                                    onContextMenu={(event) => handleMetricCellContextMenu(event, tableRow, metricCell)}
-                                    onMouseDown={(event) => handleMetricCellMouseDown(event, metricCell)}
-                                    onTouchStart={(event) => handleMetricCellTouchStart(event, tableRow, metricCell)}
-                                    onTouchMove={handleMetricCellTouchMove}
-                                    onTouchEnd={handleMetricCellTouchEnd}
-                                    onTouchCancel={handleMetricCellTouchEnd}
-                                    sx={{
-                                      position: 'absolute',
-                                      left: `${centerX}px`,
-                                      transform: 'translateX(-50%)',
-                                      height: `${tableRow.height}px`,
-                                      fontSize: timelineLayout.bodyFontSize,
-                                      fontWeight: metricCell.isOverridden ? 600 : 400,
-                                      color: metricCell.isOverridden ? '#6d28d9' : '#334155',
-                                      textAlign: 'center',
-                                      width: `${timelineLayout.yearCellWidth}px`,
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      overflow: 'hidden',
-                                      textOverflow: 'ellipsis',
-                                      whiteSpace: 'nowrap',
-                                      lineHeight: 1.1,
-                                      px: 0.35,
-                                      cursor: metricCell.isOverrideable ? 'context-menu' : 'default',
-                                      userSelect: 'none',
-                                      ...(metricCell.isOverrideable ? {
-                                        '&:hover .share-price-dashboard-metric-value, &:focus-visible .share-price-dashboard-metric-value': {
-                                          borderBottomColor: metricCell.isOverridden
-                                            ? OVERRIDDEN_METRIC_UNDERLINE_HOVER
-                                            : EDITABLE_METRIC_UNDERLINE_HOVER,
-                                        },
-                                      } : {}),
-                                    }}
-                                    >
-                                      <Box
-                                        className="share-price-dashboard-metric-value"
-                                      sx={{
-                                        minWidth: 0,
-                                        maxWidth: '100%',
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                        whiteSpace: 'nowrap',
-                                        borderBottom: metricCell.isOverrideable
-                                          ? `1px solid ${metricCell.isOverridden ? OVERRIDDEN_METRIC_UNDERLINE : EDITABLE_METRIC_UNDERLINE}`
-                                          : '1px solid transparent',
-                                      }}
-                                    >
-                                      {formatMetricCellValue(metricCell.value, tableRow.fieldPath, {
-                                        compact: isCompactPresetTable,
-                                      })}
-                                    </Box>
-                                  </Box>
-                                );
-                              })}
-                            </Box>
-                          </Box>
-                        ))}
+                        {focusedDetailMetricsRows}
                       </Box>
                     </Box>
                   ) : detailMetricsRows
