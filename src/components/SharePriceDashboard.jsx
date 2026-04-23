@@ -1,4 +1,12 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
@@ -291,6 +299,19 @@ function areScaleValuesClose(leftScale, rightScale) {
     Math.abs((leftScale?.minPrice ?? 0) - (rightScale?.minPrice ?? 0)) <= allowedDifference &&
     Math.abs((leftScale?.maxPrice ?? 0) - (rightScale?.maxPrice ?? 0)) <= allowedDifference
   );
+}
+
+function getScaleSignature(scale) {
+  if (!scale) {
+    return '0|0|0|';
+  }
+
+  return [
+    scale.minPrice ?? 0,
+    scale.maxPrice ?? 0,
+    scale.step ?? 0,
+    Array.isArray(scale.ticks) ? scale.ticks.join(',') : '',
+  ].join('|');
 }
 
 function formatPlainNumber(value, maximumFractionDigits = 2) {
@@ -632,39 +653,40 @@ function createChartXGeometry({ filteredPriceRows, tablePoints, plotWidth, yearC
 }
 
 function useMediaQueryMatch(mediaQuery) {
-  const getMatches = () => {
+  const subscribe = useCallback((notify) => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return () => {};
+    }
+
+    const mediaQueryList = window.matchMedia(mediaQuery);
+    const handleChange = () => {
+      notify();
+    };
+
+    if (typeof mediaQueryList.addEventListener === 'function') {
+      mediaQueryList.addEventListener('change', handleChange);
+
+      return () => {
+        mediaQueryList.removeEventListener('change', handleChange);
+      };
+    }
+
+    mediaQueryList.addListener(handleChange);
+
+    return () => {
+      mediaQueryList.removeListener(handleChange);
+    };
+  }, [mediaQuery]);
+
+  const getSnapshot = useCallback(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
       return false;
     }
 
     return window.matchMedia(mediaQuery).matches;
-  };
-
-  const [matches, setMatches] = useState(getMatches);
-
-  useLayoutEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-      return undefined;
-    }
-
-    const mediaQueryList = window.matchMedia(mediaQuery);
-    const handleChange = (event) => {
-      setMatches((previousMatches) => {
-        return previousMatches === event.matches ? previousMatches : event.matches;
-      });
-    };
-
-    setMatches((previousMatches) => {
-      return previousMatches === mediaQueryList.matches ? previousMatches : mediaQueryList.matches;
-    });
-    mediaQueryList.addEventListener('change', handleChange);
-
-    return () => {
-      mediaQueryList.removeEventListener('change', handleChange);
-    };
   }, [mediaQuery]);
 
-  return matches;
+  return useSyncExternalStore(subscribe, getSnapshot, () => false);
 }
 
 /**
@@ -1057,22 +1079,37 @@ export default function SharePriceDashboard({
       return [];
     }
 
+    const firstRowKeyBySection = new Map();
+    metricsRows.forEach((metricRow) => {
+      if (!firstRowKeyBySection.has(metricRow.section)) {
+        firstRowKeyBySection.set(metricRow.section, metricRow.rowKey);
+      }
+    });
+
     return visibleMetricRows.map((metricRow, metricIndex) => ({
+      startsVisibleSection: metricIndex === 0 || metricRow.section !== visibleMetricRows[metricIndex - 1]?.section,
       key: metricRow.rowKey,
       label: metricRow.label,
       shortLabel: metricRow.shortLabel,
       section: metricRow.section,
       shortSection: metricRow.shortSection,
-      showSectionLabel: metricIndex === 0 || metricRow.section !== visibleMetricRows[metricIndex - 1]?.section,
+      showSectionLabel:
+        (metricIndex === 0 || metricRow.section !== visibleMetricRows[metricIndex - 1]?.section) &&
+        firstRowKeyBySection.get(metricRow.section) === metricRow.rowKey,
       fieldPath: metricRow.fieldPath,
       height: METRICS_DATA_ROW_HEIGHT,
       backgroundColor: metricIndex % 2 === 0 ? '#ffffff' : '#fafafa',
-      borderTop: 'none',
+      borderTop:
+        ((!(isMetricsOpen && isFocusedMetricsMode) && metricIndex === 0) ||
+          ((metricRow.section !== visibleMetricRows[metricIndex - 1]?.section) &&
+            firstRowKeyBySection.get(metricRow.section) === metricRow.rowKey))
+          ? '2px solid #e2e8f0'
+          : 'none',
       borderBottom: metricIndex < visibleMetricRows.length - 1 ? '1px solid #f1f5f9' : 'none',
       isHeader: false,
       cells: metricRow.cells,
     }));
-  }, [isMetricsOpen, visibleMetricRows]);
+  }, [isFocusedMetricsMode, isMetricsOpen, metricsRows, visibleMetricRows]);
 
   const columnDensity = useMemo(() => {
     return getColumnDensity(tablePoints.length);
@@ -1437,6 +1474,9 @@ export default function SharePriceDashboard({
       preferredTickCount: preferredYAxisTickCount,
     });
   }, [preferredYAxisTickCount, rawVisibleScale]);
+  const targetChartScaleSignature = useMemo(() => {
+    return getScaleSignature(targetChartScale);
+  }, [targetChartScale]);
 
   useEffect(() => {
     renderedScaleRef.current = renderedScale;
@@ -1476,8 +1516,10 @@ export default function SharePriceDashboard({
       currentScale.maxPrice === 0 &&
       currentScale.ticks.length === 0
     ) {
-      setRenderedScale(targetChartScale);
-      renderedScaleRef.current = targetChartScale;
+      if (!areScaleValuesClose(currentScale, targetChartScale)) {
+        setRenderedScale(targetChartScale);
+        renderedScaleRef.current = targetChartScale;
+      }
       return undefined;
     }
 
@@ -1501,8 +1543,10 @@ export default function SharePriceDashboard({
         contractionTimeoutRef.current = null;
       }
 
-      setRenderedScale(targetChartScale);
-      renderedScaleRef.current = targetChartScale;
+      if (!areScaleValuesClose(renderedScaleRef.current, targetChartScale)) {
+        setRenderedScale(targetChartScale);
+        renderedScaleRef.current = targetChartScale;
+      }
       return undefined;
     }
 
@@ -1538,12 +1582,15 @@ export default function SharePriceDashboard({
           },
         );
 
-        renderedScaleRef.current = nextScale;
-        setRenderedScale(nextScale);
+        if (!areScaleValuesClose(renderedScaleRef.current, nextScale)) {
+          renderedScaleRef.current = nextScale;
+          setRenderedScale(nextScale);
+        }
 
         if (progress < 1) {
           animationFrameRef.current = requestAnimationFrame(step);
         } else {
+          renderedScaleRef.current = targetChartScale;
           animationFrameRef.current = null;
         }
       };
@@ -1564,7 +1611,13 @@ export default function SharePriceDashboard({
         contractionTimeoutRef.current = null;
       }
     };
-  }, [filteredPriceRows.length, preferredYAxisTickCount, scaleAnimationDurationMs, targetChartScale]);
+  }, [
+    filteredPriceRows.length,
+    preferredYAxisTickCount,
+    scaleAnimationDurationMs,
+    targetChartScale,
+    targetChartScaleSignature,
+  ]);
 
   const chartGeometry = useMemo(() => {
     if (!filteredPriceRows.length) {
@@ -2267,59 +2320,63 @@ export default function SharePriceDashboard({
     // block lets us render it either:
     // 1. inline in the normal dashboard mode, or
     // 2. inside its own vertical viewport in focused metrics mode.
-    const detailMetricsRows = (
-      <>
+    const detailMetricsHeaderContent = (
+      <Box
+        key="detail-metrics-header"
+        data-testid="share-price-dashboard-detail-metrics-header"
+        sx={{
+          display: 'flex',
+          alignItems: 'stretch',
+          width: baseSurfaceWidth,
+          height: `${HEADER_ROW_HEIGHT}px`,
+          backgroundColor: '#f8fafc',
+          borderTop: '1px solid #e2e8f0',
+          borderBottom: usesFocusedMetricsViewport ? 'none' : '2px solid #e2e8f0',
+          position: 'relative',
+          zIndex: 'auto',
+        }}
+      >
         <Box
-          key="detail-metrics-header"
-          data-testid="share-price-dashboard-detail-metrics-header"
           sx={{
+            position: 'sticky',
+            left: 0,
+            zIndex: 5,
+            width: fixedLeftRailWidth,
+            flexShrink: 0,
+            px: 1.25,
+            fontSize: { xs: '11px', sm: '12px' },
+            fontWeight: 600,
+            color: '#64748b',
             display: 'flex',
-            alignItems: 'stretch',
-            width: baseSurfaceWidth,
-            height: `${HEADER_ROW_HEIGHT}px`,
+            alignItems: 'center',
             backgroundColor: '#f8fafc',
-            borderTop: '1px solid #e2e8f0',
-            borderBottom: '2px solid #e2e8f0',
-            position: usesFocusedMetricsViewport ? 'sticky' : 'relative',
-            top: usesFocusedMetricsViewport ? 0 : 'auto',
-            zIndex: usesFocusedMetricsViewport ? 4 : 'auto',
+            borderRight: '1px solid #e2e8f0',
+            whiteSpace: 'nowrap',
           }}
         >
-          <Box
-            sx={{
-              position: 'sticky',
-              left: 0,
-              zIndex: 5,
-              width: fixedLeftRailWidth,
-              flexShrink: 0,
-              px: 1.25,
-              fontSize: { xs: '11px', sm: '12px' },
-              fontWeight: 600,
-              color: '#64748b',
-              display: 'flex',
-              alignItems: 'center',
-              backgroundColor: '#f8fafc',
-              borderRight: '1px solid #e2e8f0',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            DETAIL METRICS
-          </Box>
-
-          <Box
-            sx={{
-              position: 'relative',
-              width: `${timelineLayout.contentWidth}px`,
-              flexShrink: 0,
-              height: `${HEADER_ROW_HEIGHT}px`,
-              backgroundColor: '#f8fafc',
-            }}
-          />
+          DETAIL METRICS
         </Box>
+
+        <Box
+          sx={{
+            position: 'relative',
+            width: `${timelineLayout.contentWidth}px`,
+            flexShrink: 0,
+            height: `${HEADER_ROW_HEIGHT}px`,
+            backgroundColor: '#f8fafc',
+          }}
+        />
+      </Box>
+    );
+
+    const detailMetricsRows = (
+      <>
+        {detailMetricsHeaderContent}
         {metricsRowDefinitions.map((tableRow) => (
           <Box
             key={tableRow.key}
             data-testid="share-price-dashboard-metric-row"
+            data-section-start={tableRow.startsVisibleSection ? 'true' : 'false'}
             sx={{
               position: 'relative',
               display: 'flex',
@@ -2773,6 +2830,19 @@ export default function SharePriceDashboard({
                         borderTop: '1px solid #e2e8f0',
                       }}
                     >
+                      <Box
+                        data-testid="share-price-dashboard-detail-metrics-header-wrapper"
+                        sx={{
+                          position: 'sticky',
+                          top: 0,
+                          zIndex: 4,
+                          width: '100%',
+                          backgroundColor: '#f8fafc',
+                          borderBottom: '2px solid #e2e8f0',
+                        }}
+                      >
+                        {detailMetricsHeaderContent}
+                      </Box>
                       {/* The chart and base rows stay above this viewport so the
                           learner can keep their main context visible while they
                           scroll only through the dense detail metrics. */}
@@ -2781,7 +2851,170 @@ export default function SharePriceDashboard({
                           width: `${baseSurfaceWidth}px`,
                         }}
                       >
-                        {detailMetricsRows}
+                        {metricsRowDefinitions.map((tableRow) => (
+                          <Box
+                            key={tableRow.key}
+                            data-testid="share-price-dashboard-metric-row"
+                            data-section-start={tableRow.startsVisibleSection ? 'true' : 'false'}
+                            sx={{
+                              position: 'relative',
+                              display: 'flex',
+                              alignItems: 'stretch',
+                              width: baseSurfaceWidth,
+                              height: `${tableRow.height}px`,
+                              backgroundColor: tableRow.backgroundColor,
+                              borderTop: tableRow.borderTop,
+                              borderBottom: tableRow.borderBottom,
+                            }}
+                          >
+                            <Box
+                              data-testid="share-price-dashboard-metric-row-left-rail"
+                              data-row-key={tableRow.key}
+                              title={shouldUseShortLabels ? tableRow.label : undefined}
+                              aria-label={tableRow.label}
+                              onContextMenu={(event) => handleMetricRowContextMenu(event, tableRow)}
+                              onMouseDown={handleMetricRowMouseDown}
+                              onTouchStart={(event) => handleMetricRowTouchStart(event, tableRow)}
+                              onTouchMove={handleMetricRowTouchMove}
+                              onTouchEnd={handleMetricRowTouchEnd}
+                              onTouchCancel={handleMetricRowTouchEnd}
+                              sx={{
+                                position: 'sticky',
+                                left: 0,
+                                zIndex: 2,
+                                width: fixedLeftRailWidth,
+                                flexShrink: 0,
+                                px: 1.25,
+                                py: 0.5,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'center',
+                                alignItems: 'flex-start',
+                                gap: tableRow.showSectionLabel ? 0.2 : 0,
+                                backgroundColor: tableRow.backgroundColor,
+                                borderRight: '1px solid #e2e8f0',
+                                textAlign: 'left',
+                              }}
+                            >
+                              {tableRow.showSectionLabel ? (
+                                <Box
+                                  sx={{
+                                    fontSize: '10px',
+                                    fontWeight: 700,
+                                    color: '#94a3b8',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.04em',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    width: '100%',
+                                    textAlign: 'left',
+                                  }}
+                                >
+                                  {shouldUseShortLabels ? tableRow.shortSection : tableRow.section}
+                                </Box>
+                              ) : null}
+                              <Box
+                                sx={{
+                                  fontSize: { xs: '11px', sm: '12px', md: '13px' },
+                                  fontWeight: 400,
+                                  color: '#475569',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  width: '100%',
+                                  textAlign: 'left',
+                                }}
+                              >
+                                {shouldUseShortLabels ? tableRow.shortLabel : tableRow.label}
+                              </Box>
+                            </Box>
+
+                            <Box
+                              data-testid="share-price-dashboard-metric-row-values"
+                              sx={{
+                                position: 'relative',
+                                width: `${timelineLayout.contentWidth}px`,
+                                flexShrink: 0,
+                                height: `${tableRow.height}px`,
+                                backgroundColor: tableRow.backgroundColor,
+                              }}
+                            >
+                              {renderedMetricsColumns.map((column) => {
+                                const metricCell = renderedMetricCellByRowKey.get(tableRow.key)?.get(column.key);
+                                const centerX = metricsColumnCenterByKey.get(column.key);
+
+                                if (!metricCell || !Number.isFinite(centerX)) {
+                                  return null;
+                                }
+
+                                return (
+                                  <Box
+                                    key={`${tableRow.key}-${column.key}`}
+                                    role={metricCell.isOverrideable ? 'button' : undefined}
+                                    tabIndex={metricCell.isOverrideable ? 0 : undefined}
+                                    data-testid="share-price-dashboard-metric-cell"
+                                    data-row-key={tableRow.key}
+                                    data-column-key={column.key}
+                                    data-is-overridden={metricCell.isOverridden ? 'true' : 'false'}
+                                    onContextMenu={(event) => handleMetricCellContextMenu(event, tableRow, metricCell)}
+                                    onMouseDown={(event) => handleMetricCellMouseDown(event, metricCell)}
+                                    onTouchStart={(event) => handleMetricCellTouchStart(event, tableRow, metricCell)}
+                                    onTouchMove={handleMetricCellTouchMove}
+                                    onTouchEnd={handleMetricCellTouchEnd}
+                                    onTouchCancel={handleMetricCellTouchEnd}
+                                    sx={{
+                                      position: 'absolute',
+                                      left: `${centerX}px`,
+                                      transform: 'translateX(-50%)',
+                                      height: `${tableRow.height}px`,
+                                      fontSize: timelineLayout.bodyFontSize,
+                                      fontWeight: metricCell.isOverridden ? 600 : 400,
+                                      color: metricCell.isOverridden ? '#6d28d9' : '#334155',
+                                      textAlign: 'center',
+                                      width: `${timelineLayout.yearCellWidth}px`,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                      lineHeight: 1.1,
+                                      px: 0.35,
+                                      cursor: metricCell.isOverrideable ? 'context-menu' : 'default',
+                                      userSelect: 'none',
+                                      ...(metricCell.isOverrideable ? {
+                                        '&:hover .share-price-dashboard-metric-value, &:focus-visible .share-price-dashboard-metric-value': {
+                                          borderBottomColor: metricCell.isOverridden
+                                            ? OVERRIDDEN_METRIC_UNDERLINE_HOVER
+                                            : EDITABLE_METRIC_UNDERLINE_HOVER,
+                                        },
+                                      } : {}),
+                                    }}
+                                    >
+                                      <Box
+                                        className="share-price-dashboard-metric-value"
+                                      sx={{
+                                        minWidth: 0,
+                                        maxWidth: '100%',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap',
+                                        borderBottom: metricCell.isOverrideable
+                                          ? `1px solid ${metricCell.isOverridden ? OVERRIDDEN_METRIC_UNDERLINE : EDITABLE_METRIC_UNDERLINE}`
+                                          : '1px solid transparent',
+                                      }}
+                                    >
+                                      {formatMetricCellValue(metricCell.value, tableRow.fieldPath, {
+                                        compact: isCompactPresetTable,
+                                      })}
+                                    </Box>
+                                  </Box>
+                                );
+                              })}
+                            </Box>
+                          </Box>
+                        ))}
                       </Box>
                     </Box>
                   ) : detailMetricsRows

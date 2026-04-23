@@ -1,11 +1,14 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SectorCardComponent from '../SectorCardComponent';
 
+const mockSectorChart = vi.fn();
+
 vi.mock('../SectorChart', () => ({
-  default: function MockSectorChart() {
+  default: function MockSectorChart(props) {
+    mockSectorChart(props);
     return React.createElement('div', { 'data-testid': 'mock-sector-chart' }, 'chart');
   },
 }));
@@ -61,6 +64,7 @@ const initialCardData = {
 describe('SectorCardComponent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSectorChart.mockClear();
   });
 
   it('opens an inline constituents list with a dedicated scroll container, status chips, and preserved order', async () => {
@@ -180,5 +184,91 @@ describe('SectorCardComponent', () => {
     expect(identityRegion.textContent).toContain('Beta Corp with a Longer Name');
     expect(within(controlsRegion).getByTestId('sector-card-constituent-status').textContent).toContain('Disabled');
     expect(within(controlsRegion).getByTestId('sector-card-constituent-action-region').textContent).toContain('Enable');
+  });
+
+  it('anchors the default 5Y homepage view to the latest available month instead of a stale incoming range', async () => {
+    const staleCardData = {
+      ...initialCardData,
+      minAvailableMonth: '2020-01',
+      maxAvailableMonth: '2026-04',
+      startMonth: '2019-04',
+      endMonth: '2024-04',
+      series: [
+        { date: '2024-04-01', close: 100 },
+        { date: '2025-04-01', close: 115 },
+        { date: '2026-04-01', close: 130 },
+      ],
+    };
+
+    render(<SectorCardComponent initialCardData={staleCardData} />);
+
+    const latestChartProps = mockSectorChart.mock.calls.at(-1)?.[0];
+
+    expect(latestChartProps.activePreset).toBe('5Y');
+    expect(latestChartProps.startDate).toBe('2021-04');
+    expect(latestChartProps.endDate).toBe('2026-04');
+  });
+
+  it('re-queries stale homepage payloads using the latest trailing 5Y range', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const staleCardData = {
+        ...initialCardData,
+        minAvailableMonth: '2020-01',
+        maxAvailableMonth: '2026-04',
+        startMonth: '2019-04',
+        endMonth: '2024-04',
+      };
+
+      queryInvestmentCategoryCard.mockResolvedValue({
+        ...staleCardData,
+        startMonth: '2021-04',
+        endMonth: '2026-04',
+      });
+
+      render(<SectorCardComponent initialCardData={staleCardData} />);
+
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(queryInvestmentCategoryCard).toHaveBeenCalledWith(
+        {
+          investmentCategory: 'Profitable Hi Growth',
+          startMonth: '2021-04',
+          endMonth: '2026-04',
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not re-query when the homepage payload already matches the latest trailing 5Y range', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const latestCardData = {
+        ...initialCardData,
+        minAvailableMonth: '2020-01',
+        maxAvailableMonth: '2026-04',
+        startMonth: '2021-04',
+        endMonth: '2026-04',
+      };
+
+      render(<SectorCardComponent initialCardData={latestCardData} />);
+
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+
+      expect(queryInvestmentCategoryCard).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

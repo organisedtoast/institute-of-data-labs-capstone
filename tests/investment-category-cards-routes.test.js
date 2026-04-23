@@ -201,6 +201,30 @@ test("POST /api/homepage/investment-category-cards/query returns category cards 
   ]);
 });
 
+test("POST /api/homepage/investment-category-cards/query defaults homepage cards to the latest trailing 5Y range", async () => {
+  const response = await requestJson("/api/homepage/investment-category-cards/query", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+
+  assert.equal(response.status, 200);
+  const profitableHiGrowthCard = response.body.cards.find(
+    (card) => card.investmentCategory === "Profitable Hi Growth"
+  );
+
+  assert.ok(profitableHiGrowthCard);
+  assert.equal(profitableHiGrowthCard.endMonth, profitableHiGrowthCard.maxAvailableMonth);
+
+  const [endYear, endMonth] = profitableHiGrowthCard.endMonth.split("-").map(Number);
+  const expectedStartDate = new Date(Date.UTC(endYear, endMonth - 1 - 60, 1));
+  const expectedClampedStartMonth = `${expectedStartDate.getUTCFullYear()}-${String(expectedStartDate.getUTCMonth() + 1).padStart(2, "0")}`;
+  const expectedStartMonth = expectedClampedStartMonth < profitableHiGrowthCard.minAvailableMonth
+    ? profitableHiGrowthCard.minAvailableMonth
+    : expectedClampedStartMonth;
+
+  assert.equal(profitableHiGrowthCard.startMonth, expectedStartMonth);
+});
+
 test("PATCH /api/homepage/investment-category-cards/:category/constituents/:ticker persists user-disabled status", async () => {
   // Simulate the user turning off ALPHA inside the category card.
   // The route should both persist that preference and recalculate the returned

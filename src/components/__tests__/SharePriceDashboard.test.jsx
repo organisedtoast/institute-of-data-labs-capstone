@@ -143,9 +143,42 @@ let mountedContainer;
 let mountedRoot;
 let pendingAnimationFrameHandles = new Set();
 let activeResizeObservers = [];
+let matchMediaListenerRegistry = new Map();
 
 function setViewportWidth(width) {
   currentMatchMediaWidth = width;
+}
+
+function getMediaQueryMatch(query) {
+  const maxWidthMatch = query.match(/\(max-width:\s*(\d+)px\)/);
+  return maxWidthMatch ? currentMatchMediaWidth <= Number(maxWidthMatch[1]) : false;
+}
+
+function dispatchMatchMediaChange(query) {
+  const listeners = matchMediaListenerRegistry.get(query);
+
+  if (!listeners || !listeners.size) {
+    return;
+  }
+
+  const event = {
+    matches: getMediaQueryMatch(query),
+    media: query,
+  };
+
+  Array.from(listeners).forEach((listener) => {
+    listener(event);
+  });
+}
+
+async function setViewportWidthAndDispatch(width) {
+  setViewportWidth(width);
+
+  await act(async () => {
+    Array.from(matchMediaListenerRegistry.keys()).forEach((query) => {
+      dispatchMatchMediaChange(query);
+    });
+  });
 }
 
 function shiftMonthString(monthString, monthsToShift) {
@@ -862,19 +895,41 @@ describe('SharePriceDashboard preset scrolling', () => {
     originalMatchMedia = window.matchMedia;
     originalResizeObserver = global.ResizeObserver;
     activeResizeObservers = [];
+    matchMediaListenerRegistry = new Map();
 
     window.matchMedia = (query) => {
-      const maxWidthMatch = query.match(/\(max-width:\s*(\d+)px\)/);
-      const matches = maxWidthMatch ? currentMatchMediaWidth <= Number(maxWidthMatch[1]) : false;
+      if (!matchMediaListenerRegistry.has(query)) {
+        matchMediaListenerRegistry.set(query, new Set());
+      }
+
+      const listeners = matchMediaListenerRegistry.get(query);
+
+      const addListener = (listener) => {
+        listeners.add(listener);
+      };
+
+      const removeListener = (listener) => {
+        listeners.delete(listener);
+      };
 
       return {
-        matches,
+        get matches() {
+          return getMediaQueryMatch(query);
+        },
         media: query,
         onchange: null,
-        addListener: () => {},
-        removeListener: () => {},
-        addEventListener: () => {},
-        removeEventListener: () => {},
+        addListener,
+        removeListener,
+        addEventListener: (eventName, listener) => {
+          if (eventName === 'change') {
+            addListener(listener);
+          }
+        },
+        removeEventListener: (eventName, listener) => {
+          if (eventName === 'change') {
+            removeListener(listener);
+          }
+        },
         dispatchEvent: () => false,
       };
     };
@@ -965,6 +1020,7 @@ describe('SharePriceDashboard preset scrolling', () => {
     vi.restoreAllMocks();
     currentMatchMediaWidth = 1024;
     activeResizeObservers = [];
+    matchMediaListenerRegistry = new Map();
   });
 
   it('renders the dashboard smoke test without hanging', async () => {
@@ -991,6 +1047,53 @@ describe('SharePriceDashboard preset scrolling', () => {
           scaleAnimationDurationMs={0}
         />,
       );
+      await flushDashboardWork();
+      await flushDashboardWork();
+
+      const maximumDepthErrors = consoleErrorSpy.mock.calls.filter((call) => {
+        return call.some((value) => String(value).includes('Maximum update depth exceeded'));
+      });
+
+      expect(maximumDepthErrors).toHaveLength(0);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('does not log a maximum update depth error while scrolling the mounted scroll region', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await renderDashboard();
+
+      const scrollRegion = screen.getByTestId(DASHBOARD_TEST_ID);
+      await configureScrollRegion(scrollRegion, 920);
+
+      await act(async () => {
+        scrollRegion.scrollLeft = 168;
+        fireEvent.scroll(scrollRegion);
+      });
+      await flushDashboardWork();
+      await flushDashboardWork();
+
+      const maximumDepthErrors = consoleErrorSpy.mock.calls.filter((call) => {
+        return call.some((value) => String(value).includes('Maximum update depth exceeded'));
+      });
+
+      expect(maximumDepthErrors).toHaveLength(0);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('does not log a maximum update depth error when a media-query change fires', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      setViewportWidth(1024);
+      await renderDashboard();
+
+      await setViewportWidthAndDispatch(480);
       await flushDashboardWork();
       await flushDashboardWork();
 
@@ -1072,6 +1175,22 @@ describe('SharePriceDashboard preset scrolling', () => {
     const sharePriceRailLabel = screen.getByText('SP');
     expect(sharePriceRailLabel.getAttribute('title')).toBe('Share price');
     expect(sharePriceRailLabel.getAttribute('aria-label')).toBe('Share price');
+  });
+
+  it('updates sticky rail labels when the media-query match changes after mount', async () => {
+    setViewportWidth(1024);
+
+    await renderDashboard();
+
+    expect(screen.getByText('Share price')).toBeTruthy();
+    expect(screen.queryByText('SP')).toBeNull();
+
+    await setViewportWidthAndDispatch(480);
+    await flushDashboardWork();
+
+    expect(screen.queryByText('Share price')).toBeNull();
+    expect(screen.getByText('SP')).toBeTruthy();
+    expect(screen.getByText('FY END')).toBeTruthy();
   });
 
   it('shows the current investment category next to Remove stock and updates it from the dropdown', async () => {
@@ -1866,9 +1985,11 @@ describe('SharePriceDashboard metrics mode', () => {
 
     expect(screen.getByText('DETAIL METRICS')).not.toBeNull();
     const detailMetricsHeader = screen.getByTestId('share-price-dashboard-detail-metrics-header');
+    const metricRows = screen.getAllByTestId('share-price-dashboard-metric-row');
     expect(within(detailMetricsHeader).queryByText('2023')).toBeNull();
     expect(within(detailMetricsHeader).queryByText('2024')).toBeNull();
     expect(within(detailMetricsHeader).queryByText('2025')).toBeNull();
+    expect(metricRows[0].getAttribute('data-section-start')).toBe('true');
     expect(screen.getAllByText('Income Statement')).toHaveLength(1);
     expect(screen.getAllByText('Balance Sheet')).toHaveLength(1);
     expect(screen.getByText('EBIT FY+1')).not.toBeNull();
@@ -2176,6 +2297,7 @@ describe('SharePriceDashboard metrics mode', () => {
     const scrollRegion = scrollRegions[scrollRegions.length - 1];
     const topRails = screen.getAllByTestId('share-price-dashboard-top-rails').at(-1);
     const metricsViewport = screen.getAllByTestId('share-price-dashboard-metrics-viewport').at(-1);
+    const metricsHeaderWrapper = within(metricsViewport).getByTestId('share-price-dashboard-detail-metrics-header-wrapper');
     const metricsHeader = within(metricsViewport).getByTestId('share-price-dashboard-detail-metrics-header');
     const metricRows = within(metricsViewport).getAllByTestId('share-price-dashboard-metric-row');
     const metricRowLeftRails = within(metricsViewport).getAllByTestId('share-price-dashboard-metric-row-left-rail');
@@ -2184,7 +2306,9 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(scrollRegion.getAttribute('data-surface-width')).toBe('920');
     expect(topRails).toBeTruthy();
     expect(within(topRails).getByText('FY end date')).toBeTruthy();
+    expect(metricsHeaderWrapper).toBeTruthy();
     expect(metricsHeader).toBeTruthy();
+    expect(metricRows[0].getAttribute('data-section-start')).toBe('true');
     expect(within(metricsViewport).getByText('EBIT FY+1')).toBeTruthy();
     expect(within(metricsViewport).queryByText('FY end date')).toBeNull();
     expect(metricRows).toHaveLength(3);

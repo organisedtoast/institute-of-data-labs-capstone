@@ -227,4 +227,22 @@ describe('SectorChart', () => {
     expect(renderedYears).toContain('2025');
     expect(renderedYears.length).toBeLessThan(16);
   });
+
+  it('filters the rendered series to the visible month range before building axis labels', async () => {
+    render(
+      <SectorChart
+        {...baseProps}
+        series={buildMonthlySeries(2022, 2025)}
+        startDate="2024-01"
+        endDate="2024-12"
+        minAvailableMonth="2022-01"
+        maxAvailableMonth="2025-12"
+      />,
+    );
+
+    const xAxisLabels = await screen.findAllByTestId('sector-chart-x-axis-label');
+    const renderedYears = xAxisLabels.map((labelNode) => labelNode.textContent);
+
+    expect(renderedYears).toEqual(['2024']);
+  });
 });

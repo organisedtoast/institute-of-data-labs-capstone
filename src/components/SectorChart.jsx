@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 
+import { filterDataByMonthRange } from '../dataset/SharePrice';
 import ChartDateRangeControls from './ChartDateRangeControls';
 import {
   buildRoundedIntegerChartScale,
@@ -171,7 +172,9 @@ export default function SectorChart({
     setIsPresetScrollReady(false);
   }, [activePreset, maxPresetPanOffset]);
 
-  const filteredSectorData = Array.isArray(series) ? series : [];
+  const filteredSectorData = useMemo(() => {
+    return filterDataByMonthRange(Array.isArray(series) ? series : [], startDate, endDate);
+  }, [endDate, series, startDate]);
   const effectiveChartWidth = chartWidth || SECTOR_CHART_FALLBACK_WIDTH;
   const plotWidth = Math.max(effectiveChartWidth - SECTOR_CHART_RIGHT_PADDING, 1);
   const contentWidth = plotWidth + SECTOR_CHART_RIGHT_PADDING;

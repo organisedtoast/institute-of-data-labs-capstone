@@ -15,7 +15,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   clampMonthString,
   compareMonthStrings,
-  getCurrentMonthString,
   getTrailingMonthRange,
   shiftMonthString,
 } from '../dataset/SharePrice';
@@ -36,41 +35,10 @@ const PRESET_BUTTONS = [
 ];
 const CONSTITUENT_ACTION_MIN_WIDTH_PX = 92;
 
-function getPresetKeyForRange(startMonth, endMonth, minAvailableMonth, maxAvailableMonth) {
-  if (!startMonth || !endMonth || !minAvailableMonth || !maxAvailableMonth) {
-    return '';
-  }
-
-  const matchingPreset = PRESET_BUTTONS.find((preset) => {
-    if (!preset.monthCount) {
-      return false;
-    }
-
-    const trailingRange = getTrailingMonthRange({
-      monthCount: preset.monthCount,
-      targetEndMonth: getCurrentMonthString(),
-      minAvailableMonth,
-      maxAvailableMonth,
-    });
-
-    return trailingRange.startDate === startMonth && trailingRange.endDate === endMonth;
-  });
-
-  if (matchingPreset?.key) {
-    return matchingPreset.key;
-  }
-
-  if (startMonth === minAvailableMonth && endMonth === maxAvailableMonth) {
-    return 'MAX';
-  }
-
-  return '';
-}
-
 function buildTrailingRange(monthCount, minAvailableMonth, maxAvailableMonth) {
   return getTrailingMonthRange({
     monthCount,
-    targetEndMonth: getCurrentMonthString(),
+    targetEndMonth: maxAvailableMonth,
     minAvailableMonth,
     maxAvailableMonth,
   });
@@ -144,19 +112,22 @@ export default function SectorCardComponent({ initialCardData }) {
   });
 
   useEffect(() => {
+    const nextMinAvailableMonth = initialCardData?.minAvailableMonth || '';
+    const nextMaxAvailableMonth = initialCardData?.maxAvailableMonth || '';
+    const latestDefaultRange = buildTrailingRange(
+      60,
+      nextMinAvailableMonth,
+      nextMaxAvailableMonth,
+    );
+    const nextStartMonth = latestDefaultRange.startDate || initialCardData?.startMonth || '';
+    const nextEndMonth = latestDefaultRange.endDate || initialCardData?.endMonth || '';
+
     setCardData(initialCardData);
     setError('');
-    setFreeRangeStartMonth(initialCardData?.startMonth || '');
-    setFreeRangeEndMonth(initialCardData?.endMonth || '');
+    setFreeRangeStartMonth(nextStartMonth);
+    setFreeRangeEndMonth(nextEndMonth);
     setRangeMode('preset');
-    setActivePreset(
-      getPresetKeyForRange(
-        initialCardData?.startMonth || '',
-        initialCardData?.endMonth || '',
-        initialCardData?.minAvailableMonth || '',
-        initialCardData?.maxAvailableMonth || '',
-      ) || '5Y',
-    );
+    setActivePreset(nextStartMonth && nextEndMonth ? '5Y' : '');
     setPresetPanOffsetMonths(0);
     lastCompletedRangeRef.current = {
       investmentCategory: initialCardData?.investmentCategory || '',
