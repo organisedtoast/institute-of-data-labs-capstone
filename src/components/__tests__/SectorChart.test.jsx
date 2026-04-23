@@ -32,14 +32,28 @@ vi.mock('@mui/material/Typography', () => ({
   default: createMockComponent('div', ['align', 'color', 'component', 'gutterBottom', 'sx', 'variant']),
 }));
 
+// This mock intentionally keeps only the input behavior the tests need.
+// MUI-specific layout props such as `fullWidth` are valid on the real
+// component, but they should not be forwarded to a plain DOM `<input>` because
+// React will warn about unknown attributes. We discard those props here.
 vi.mock('@mui/material/TextField', () => ({
   default: function MockTextField({
+    fullWidth,
     InputLabelProps,
     inputProps,
     label,
+    margin,
+    size,
+    sx,
+    variant,
     ...props
   }) {
+    void fullWidth;
     void InputLabelProps;
+    void margin;
+    void size;
+    void sx;
+    void variant;
 
     return React.createElement(
       'label',
