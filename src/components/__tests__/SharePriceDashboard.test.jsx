@@ -834,6 +834,14 @@ function getOverrideableMetricCell({
   });
 }
 
+// Row-hiding now belongs to the frozen left rail instead of the annual-value
+// cells or a separate button. This helper keeps the row-label lookup readable.
+function getMetricRowLeftRail(rowKey = '710::annualData[].forecastData.fy1.ebit') {
+  return screen.getAllByTestId('share-price-dashboard-metric-row-left-rail').find((rowNode) => {
+    return rowNode.getAttribute('data-row-key') === rowKey;
+  });
+}
+
 // Each `it(...)` block below describes one user-facing preset-scroll scenario.
 // Together they protect the first-load scrollbar position and the month-range
 // updates that should happen when a user drags through history.
@@ -1866,7 +1874,7 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(screen.getByText('EBIT FY+1')).not.toBeNull();
     expect(screen.getByText('Revenue FY+1')).not.toBeNull();
     expect(screen.getByText('Cash FY+1')).not.toBeNull();
-    expect(screen.getAllByTestId('share-price-dashboard-metric-row-hide-button').length).toBe(3);
+    expect(screen.queryAllByTestId('share-price-dashboard-metric-row-hide-button')).toHaveLength(0);
     expect(screen.getByText('$12.00')).not.toBeNull();
     expect(screen.getByText('$18.00')).not.toBeNull();
     expect(screen.getByText('$24.00')).not.toBeNull();
@@ -1935,6 +1943,103 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(screen.queryByText('$2,400,000.99')).toBeNull();
   });
 
+  it('opens the left-rail row action menu and hides a row from that menu', async () => {
+    const initialPayload = buildMetricsModePayload();
+    const hiddenPayload = buildMetricsModePayload();
+
+    // Hiding a row should move it out of the visible detail section and into
+    // the existing hidden-rows area instead of deleting it outright.
+    hiddenPayload.metricsRows = hiddenPayload.metricsRows.map((row) => {
+      return row.rowKey === '710::annualData[].forecastData.fy1.ebit'
+        ? { ...row, isEnabled: false }
+        : row;
+    });
+    updateDashboardRowPreference.mockResolvedValue({
+      metricsColumns: hiddenPayload.metricsColumns,
+      metricsRows: hiddenPayload.metricsRows,
+    });
+
+    const { user } = await renderDashboard({
+      payload: initialPayload,
+    });
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    const metricRowLeftRail = getMetricRowLeftRail();
+    expect(metricRowLeftRail).toBeTruthy();
+
+    const contextMenuEvent = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+    });
+
+    await act(async () => {
+      metricRowLeftRail.dispatchEvent(contextMenuEvent);
+    });
+
+    expect(contextMenuEvent.defaultPrevented).toBe(true);
+    const rowActionMenu = screen.getByTestId('share-price-dashboard-metric-row-action-menu');
+    expect(rowActionMenu).toBeTruthy();
+    expect(within(rowActionMenu).getByText('EBIT FY+1')).not.toBeNull();
+
+    await user.click(screen.getByTestId('share-price-dashboard-metric-row-hide-action'));
+    await flushDashboardWork();
+
+    expect(updateDashboardRowPreference).toHaveBeenCalledWith(
+      'AAPL',
+      '710::annualData[].forecastData.fy1.ebit',
+      false,
+    );
+    expect(screen.queryByTestId('share-price-dashboard-metric-row-action-menu')).toBeNull();
+
+    // Hiding moves the row into the existing hidden-rows management area, which
+    // is where the user can later bring it back with SHOW ROW.
+    if (!screen.queryByTestId('share-price-dashboard-hidden-rows')) {
+      const hiddenRowsToggle = screen.getAllByRole('button').find((buttonNode) => {
+        return /HIDDEN ROWS/.test(buttonNode.textContent || '');
+      });
+      expect(hiddenRowsToggle).toBeTruthy();
+      await user.click(hiddenRowsToggle);
+    }
+    const hiddenRowsPanel = screen.getByTestId('share-price-dashboard-hidden-rows');
+    expect(hiddenRowsPanel).toBeTruthy();
+    expect(within(hiddenRowsPanel).getAllByText('EBIT FY+1').length).toBeGreaterThan(0);
+    expect(within(hiddenRowsPanel).getAllByRole('button', { name: 'SHOW ROW' })).toHaveLength(2);
+  });
+
+  it('opens the left-rail row action menu from a touch long press', async () => {
+    await renderDashboard({
+      payload: buildMetricsModePayload(),
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    });
+    await flushDashboardWork();
+
+    const metricRowLeftRail = getMetricRowLeftRail();
+    expect(metricRowLeftRail).toBeTruthy();
+
+    // The long press should belong to the frozen row label so touch users can
+    // still reach row actions now that the right-side hide button is gone.
+    await act(async () => {
+      fireEvent.touchStart(metricRowLeftRail, {
+        touches: [{ clientX: 20, clientY: 20 }],
+      });
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 700);
+      });
+    });
+
+    expect(screen.getByTestId('share-price-dashboard-metric-row-action-menu')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.touchEnd(metricRowLeftRail, { touches: [] });
+    });
+  });
+
   it('drops the overridden flag after CLEAR OVERRIDE reloads a non-overridden payload', async () => {
     const initialPayload = buildMetricsModePayload();
     const clearedPayload = buildMetricsModePayload();
@@ -1957,9 +2062,13 @@ describe('SharePriceDashboard metrics mode', () => {
     await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
     await flushDashboardWork();
 
-    const overriddenCellBeforeClear = getOverrideableMetricCell();
+    const overriddenCellBeforeClear = screen.getAllByTestId('share-price-dashboard-metric-cell').find((cellNode) => {
+      return cellNode.getAttribute('data-is-overridden') === 'true';
+    });
     expect(overriddenCellBeforeClear).toBeTruthy();
     expect(overriddenCellBeforeClear.getAttribute('data-is-overridden')).toBe('true');
+    const overriddenRowKey = overriddenCellBeforeClear.getAttribute('data-row-key');
+    const overriddenColumnKey = overriddenCellBeforeClear.getAttribute('data-column-key');
 
     // We open the same editor a real user would open from the metrics table,
     // then trigger the clear path instead of the save path.
@@ -1984,7 +2093,10 @@ describe('SharePriceDashboard metrics mode', () => {
     );
     expect(screen.queryByTestId('share-price-dashboard-metric-editor')).toBeNull();
 
-    const overriddenCellAfterClear = getOverrideableMetricCell();
+    const overriddenCellAfterClear = getOverrideableMetricCell({
+      rowKey: overriddenRowKey,
+      columnKey: overriddenColumnKey,
+    });
     expect(overriddenCellAfterClear).toBeTruthy();
     expect(overriddenCellAfterClear.getAttribute('data-is-overridden')).toBe('false');
   });
@@ -2057,39 +2169,27 @@ describe('SharePriceDashboard metrics mode', () => {
     await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
     await flushDashboardWork();
 
-    // The focused metrics viewport should add a right-side safety inset for the
-    // HIDE buttons without changing the shared table width that keeps the left
-    // rail frozen and the annual columns aligned with the chart above.
+    // The focused metrics viewport should still isolate the detail rows in
+    // their own vertical scroller without changing the shared table width that
+    // keeps the left rail frozen and the annual columns aligned with the chart above.
     const scrollRegions = screen.getAllByTestId('share-price-dashboard-scroll-region');
     const scrollRegion = scrollRegions[scrollRegions.length - 1];
     const topRails = screen.getAllByTestId('share-price-dashboard-top-rails').at(-1);
     const metricsViewport = screen.getAllByTestId('share-price-dashboard-metrics-viewport').at(-1);
     const metricsHeader = within(metricsViewport).getByTestId('share-price-dashboard-detail-metrics-header');
     const metricRows = within(metricsViewport).getAllByTestId('share-price-dashboard-metric-row');
+    const metricRowLeftRails = within(metricsViewport).getAllByTestId('share-price-dashboard-metric-row-left-rail');
 
     expect(metricsViewport.getAttribute('data-vertical-scroll')).toBe('true');
-    expect(metricsViewport.getAttribute('data-action-gutter-width')).toBe('56');
-    expect(metricsViewport.getAttribute('data-scrollbar-safe-inset-width')).toBe('16');
     expect(scrollRegion.getAttribute('data-surface-width')).toBe('920');
     expect(topRails).toBeTruthy();
     expect(within(topRails).getByText('FY end date')).toBeTruthy();
     expect(metricsHeader).toBeTruthy();
-    expect(metricsHeader.getAttribute('data-action-gutter-width')).toBe('56');
-    expect(metricsHeader.getAttribute('data-metrics-row-width')).toBe('936');
     expect(within(metricsViewport).getByText('EBIT FY+1')).toBeTruthy();
     expect(within(metricsViewport).queryByText('FY end date')).toBeNull();
-
-    // The annual cell centers stay fixed to the shared chart geometry, so the
-    // detail rows must keep the normal 56px action gutter and put the extra
-    // scrollbar safety space in a separate right-side lane instead.
-    expect(
-      Number(metricsHeader.getAttribute('data-metrics-row-width')),
-    ).toBe(Number(scrollRegion.getAttribute('data-surface-width')) + 16);
-    metricRows.forEach((rowNode) => {
-      expect(rowNode.getAttribute('data-action-gutter-width')).toBe('56');
-      expect(rowNode.getAttribute('data-metrics-row-width')).toBe('936');
-    });
-    expect(within(metricsViewport).getAllByTestId('share-price-dashboard-metric-row-hide-button').length).toBe(3);
+    expect(metricRows).toHaveLength(3);
+    expect(metricRowLeftRails).toHaveLength(3);
+    expect(within(metricsViewport).queryAllByTestId('share-price-dashboard-metric-row-hide-button')).toHaveLength(0);
   });
 
   it('prevents the native context menu while still opening the metric editor', async () => {
@@ -2118,6 +2218,7 @@ describe('SharePriceDashboard metrics mode', () => {
 
     expect(contextMenuEvent.defaultPrevented).toBe(true);
     expect(screen.getByTestId('share-price-dashboard-metric-editor')).toBeTruthy();
+    expect(screen.queryByTestId('share-price-dashboard-metric-row-action-menu')).toBeNull();
   });
 
   it('stops the metric cell context menu from bubbling to ancestors', async () => {

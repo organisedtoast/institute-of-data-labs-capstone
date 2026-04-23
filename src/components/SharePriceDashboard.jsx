@@ -67,8 +67,6 @@ const EDITABLE_METRIC_UNDERLINE_HOVER = 'rgba(100, 116, 139, 0.34)';
 const OVERRIDDEN_METRIC_UNDERLINE = 'rgba(109, 40, 217, 0.44)';
 const OVERRIDDEN_METRIC_UNDERLINE_HOVER = 'rgba(109, 40, 217, 0.64)';
 const FOCUSED_METRICS_VIEWPORT_MAX_HEIGHT = 'min(48vh, 420px)';
-const METRICS_ACTION_GUTTER_PX = 56;
-const METRICS_SCROLLBAR_SAFE_INSET_PX = 16;
 
 const PRESET_BUTTONS = [
   { key: 'MAX', label: 'MAX', monthCount: null },
@@ -700,6 +698,7 @@ export default function SharePriceDashboard({
   const [isHiddenRowsOpen, setIsHiddenRowsOpen] = useState(false);
   const [metricEditorState, setMetricEditorState] = useState(null);
   const [metricEditorValue, setMetricEditorValue] = useState('');
+  const [metricRowActionMenuState, setMetricRowActionMenuState] = useState(null);
   const [freeRangeStartMonth, setFreeRangeStartMonth] = useState('');
   const [freeRangeEndMonth, setFreeRangeEndMonth] = useState('');
   const [rangeMode, setRangeMode] = useState('preset');
@@ -746,6 +745,13 @@ export default function SharePriceDashboard({
     startClientX: 0,
     startClientY: 0,
   });
+  const metricRowLongPressTimeoutRef = useRef(null);
+  const metricRowTouchStateRef = useRef({
+    isActive: false,
+    startClientX: 0,
+    startClientY: 0,
+  });
+  const metricRowActionMenuRef = useRef(null);
 
   const attachTimelineScrollRef = useCallback((node) => {
     timelineScrollRef.current = node;
@@ -1659,15 +1665,6 @@ export default function SharePriceDashboard({
   // The page decides *which* stock is in focus, while the card decides *how*
   // to render the focused layout once that mode is active.
   const usesFocusedMetricsViewport = isMetricsOpen && isFocusedMetricsMode;
-  // The focused viewport uses its own vertical scrollbar, so we reserve a
-  // little extra room on the right only in that mode. This keeps the HIDE
-  // button clear of overlay scrollbars without widening the table itself.
-  const focusedMetricsRowWidth = usesFocusedMetricsViewport
-    ? (baseSurfaceWidth + METRICS_SCROLLBAR_SAFE_INSET_PX)
-    : baseSurfaceWidth;
-  const focusedMetricsHideButtonRightOffset = usesFocusedMetricsViewport
-    ? (8 + METRICS_SCROLLBAR_SAFE_INSET_PX)
-    : 8;
   const visibleAnnualMetricColumnKeys = useMemo(() => {
     return new Set(tablePoints.map((annualRow) => `annual-${annualRow.fiscalYear}`));
   }, [tablePoints]);
@@ -1767,6 +1764,13 @@ export default function SharePriceDashboard({
     }
   };
 
+  const clearMetricRowLongPressTimeout = () => {
+    if (metricRowLongPressTimeoutRef.current) {
+      clearTimeout(metricRowLongPressTimeoutRef.current);
+      metricRowLongPressTimeoutRef.current = null;
+    }
+  };
+
   const openMetricEditor = (cell, fieldPath, anchorRect) => {
     if (!cell?.isOverrideable || !cell?.overrideTarget) {
       return;
@@ -1786,7 +1790,25 @@ export default function SharePriceDashboard({
     setMetricEditorValue('');
   };
 
-  const suppressMetricCellContextMenu = (event) => {
+  const openMetricRowActionMenu = (metricRow, anchorRect) => {
+    if (!metricRow?.key) {
+      return;
+    }
+
+    setMetricsActionError('');
+    closeMetricEditor();
+    setMetricRowActionMenuState({
+      rowKey: metricRow.key,
+      rowLabel: metricRow.label,
+      anchorRect,
+    });
+  };
+
+  const closeMetricRowActionMenu = () => {
+    setMetricRowActionMenuState(null);
+  };
+
+  const suppressContextMenuEvent = (event) => {
     event.preventDefault();
     event.stopPropagation();
     event.nativeEvent?.stopImmediatePropagation?.();
@@ -1797,7 +1819,8 @@ export default function SharePriceDashboard({
       return;
     }
 
-    suppressMetricCellContextMenu(event);
+    suppressContextMenuEvent(event);
+    closeMetricRowActionMenu();
     openMetricEditor(cell, metricRow.fieldPath, event.currentTarget.getBoundingClientRect());
   };
 
@@ -1806,7 +1829,7 @@ export default function SharePriceDashboard({
       return;
     }
 
-    suppressMetricCellContextMenu(event);
+    suppressContextMenuEvent(event);
   };
 
   const handleMetricCellTouchStart = (event, metricRow, cell) => {
@@ -1815,6 +1838,7 @@ export default function SharePriceDashboard({
     }
 
     const touch = event.touches[0];
+    const anchorRect = event.currentTarget?.getBoundingClientRect?.();
     metricCellTouchStateRef.current = {
       isActive: false,
       startClientX: touch.clientX,
@@ -1824,7 +1848,8 @@ export default function SharePriceDashboard({
     clearMetricCellLongPressTimeout();
     metricCellLongPressTimeoutRef.current = window.setTimeout(() => {
       metricCellTouchStateRef.current.isActive = true;
-      openMetricEditor(cell, metricRow.fieldPath, event.currentTarget.getBoundingClientRect());
+      closeMetricRowActionMenu();
+      openMetricEditor(cell, metricRow.fieldPath, anchorRect);
     }, LONG_PRESS_ACTIVATION_MS + 150);
   };
 
@@ -1845,6 +1870,58 @@ export default function SharePriceDashboard({
   const handleMetricCellTouchEnd = () => {
     clearMetricCellLongPressTimeout();
     metricCellTouchStateRef.current.isActive = false;
+  };
+
+  const handleMetricRowContextMenu = (event, metricRow) => {
+    suppressContextMenuEvent(event);
+    openMetricRowActionMenu(metricRow, event.currentTarget.getBoundingClientRect());
+  };
+
+  const handleMetricRowMouseDown = (event) => {
+    if (event.button !== 2) {
+      return;
+    }
+
+    suppressContextMenuEvent(event);
+  };
+
+  const handleMetricRowTouchStart = (event, metricRow) => {
+    if (!event.touches?.length) {
+      return;
+    }
+
+    const touch = event.touches[0];
+    const anchorRect = event.currentTarget?.getBoundingClientRect?.();
+    metricRowTouchStateRef.current = {
+      isActive: false,
+      startClientX: touch.clientX,
+      startClientY: touch.clientY,
+    };
+
+    clearMetricRowLongPressTimeout();
+    metricRowLongPressTimeoutRef.current = window.setTimeout(() => {
+      metricRowTouchStateRef.current.isActive = true;
+      openMetricRowActionMenu(metricRow, anchorRect);
+    }, LONG_PRESS_ACTIVATION_MS + 150);
+  };
+
+  const handleMetricRowTouchMove = (event) => {
+    if (!event.touches?.length) {
+      return;
+    }
+
+    const touch = event.touches[0];
+    const deltaX = Math.abs(touch.clientX - metricRowTouchStateRef.current.startClientX);
+    const deltaY = Math.abs(touch.clientY - metricRowTouchStateRef.current.startClientY);
+
+    if (deltaX > LONG_PRESS_MOVE_TOLERANCE_PX || deltaY > LONG_PRESS_MOVE_TOLERANCE_PX) {
+      clearMetricRowLongPressTimeout();
+    }
+  };
+
+  const handleMetricRowTouchEnd = () => {
+    clearMetricRowLongPressTimeout();
+    metricRowTouchStateRef.current.isActive = false;
   };
 
   const handleSaveMetricOverride = async () => {
@@ -1908,14 +1985,28 @@ export default function SharePriceDashboard({
     try {
       const response = await updateDashboardRowPreference(identifier, rowKey, isEnabled);
       applyMetricsViewUpdate(response);
+      return true;
     } catch (requestError) {
       setMetricsActionError(
         requestError.response?.data?.message
           || requestError.response?.data?.error
           || 'Unable to save row visibility right now.',
       );
+      return false;
     } finally {
       setIsUpdatingRowPreference(false);
+    }
+  };
+
+  const handleHideMetricRow = async () => {
+    if (!metricRowActionMenuState?.rowKey) {
+      return;
+    }
+
+    const didHideRow = await handleMetricRowEnabledState(metricRowActionMenuState.rowKey, false);
+
+    if (didHideRow) {
+      closeMetricRowActionMenu();
     }
   };
 
@@ -2032,8 +2123,40 @@ export default function SharePriceDashboard({
     return () => {
       clearLongPressTimeout();
       clearMetricCellLongPressTimeout();
+      clearMetricRowLongPressTimeout();
     };
   }, []);
+
+  useEffect(() => {
+    if (!metricRowActionMenuState) {
+      return undefined;
+    }
+
+    const handleOutsideInteraction = (event) => {
+      if (metricRowActionMenuRef.current?.contains?.(event.target)) {
+        return;
+      }
+
+      closeMetricRowActionMenu();
+    };
+
+    document.addEventListener('mousedown', handleOutsideInteraction);
+    document.addEventListener('touchstart', handleOutsideInteraction);
+
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideInteraction);
+      document.removeEventListener('touchstart', handleOutsideInteraction);
+    };
+  }, [metricRowActionMenuState]);
+
+  useEffect(() => {
+    if (isMetricsOpen) {
+      return;
+    }
+
+    closeMetricEditor();
+    closeMetricRowActionMenu();
+  }, [isMetricsOpen]);
 
   const handleInvestmentCategoryChange = async (event) => {
     const nextInvestmentCategory = event.target.value;
@@ -2149,12 +2272,10 @@ export default function SharePriceDashboard({
         <Box
           key="detail-metrics-header"
           data-testid="share-price-dashboard-detail-metrics-header"
-          data-action-gutter-width={String(METRICS_ACTION_GUTTER_PX)}
-          data-metrics-row-width={String(focusedMetricsRowWidth)}
           sx={{
             display: 'flex',
             alignItems: 'stretch',
-            width: focusedMetricsRowWidth,
+            width: baseSurfaceWidth,
             height: `${HEADER_ROW_HEIGHT}px`,
             backgroundColor: '#f8fafc',
             borderTop: '1px solid #e2e8f0',
@@ -2188,11 +2309,10 @@ export default function SharePriceDashboard({
           <Box
             sx={{
               position: 'relative',
-              width: `${timelineLayout.contentWidth - METRICS_ACTION_GUTTER_PX}px`,
+              width: `${timelineLayout.contentWidth}px`,
               flexShrink: 0,
               height: `${HEADER_ROW_HEIGHT}px`,
               backgroundColor: '#f8fafc',
-              mr: `${METRICS_ACTION_GUTTER_PX}px`,
             }}
           />
         </Box>
@@ -2200,13 +2320,11 @@ export default function SharePriceDashboard({
           <Box
             key={tableRow.key}
             data-testid="share-price-dashboard-metric-row"
-            data-action-gutter-width={String(METRICS_ACTION_GUTTER_PX)}
-            data-metrics-row-width={String(focusedMetricsRowWidth)}
             sx={{
               position: 'relative',
               display: 'flex',
               alignItems: 'stretch',
-              width: focusedMetricsRowWidth,
+              width: baseSurfaceWidth,
               height: `${tableRow.height}px`,
               backgroundColor: tableRow.backgroundColor,
               borderTop: tableRow.borderTop,
@@ -2214,8 +2332,16 @@ export default function SharePriceDashboard({
             }}
           >
             <Box
+              data-testid="share-price-dashboard-metric-row-left-rail"
+              data-row-key={tableRow.key}
               title={shouldUseShortLabels ? tableRow.label : undefined}
               aria-label={tableRow.label}
+              onContextMenu={(event) => handleMetricRowContextMenu(event, tableRow)}
+              onMouseDown={handleMetricRowMouseDown}
+              onTouchStart={(event) => handleMetricRowTouchStart(event, tableRow)}
+              onTouchMove={handleMetricRowTouchMove}
+              onTouchEnd={handleMetricRowTouchEnd}
+              onTouchCancel={handleMetricRowTouchEnd}
               sx={{
                 position: 'sticky',
                 left: 0,
@@ -2269,12 +2395,13 @@ export default function SharePriceDashboard({
             </Box>
 
             <Box
+              data-testid="share-price-dashboard-metric-row-values"
               sx={{
                 position: 'relative',
-                width: `${timelineLayout.contentWidth - METRICS_ACTION_GUTTER_PX}px`,
+                width: `${timelineLayout.contentWidth}px`,
                 flexShrink: 0,
                 height: `${tableRow.height}px`,
-                mr: `${METRICS_ACTION_GUTTER_PX}px`,
+                backgroundColor: tableRow.backgroundColor,
               }}
             >
               {renderedMetricsColumns.map((column) => {
@@ -2353,29 +2480,6 @@ export default function SharePriceDashboard({
                 );
               })}
             </Box>
-
-            <Button
-              size="small"
-              data-testid="share-price-dashboard-metric-row-hide-button"
-              disabled={isUpdatingRowPreference}
-              onClick={() => handleMetricRowEnabledState(tableRow.key, false)}
-              sx={{
-                position: 'absolute',
-                right: focusedMetricsHideButtonRightOffset,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                minWidth: 0,
-                px: 0.75,
-                py: 0,
-                fontSize: '10px',
-                lineHeight: 1.2,
-                zIndex: 3,
-                backgroundColor: 'rgba(255, 255, 255, 0.92)',
-                border: '1px solid #e2e8f0',
-              }}
-            >
-              HIDE
-            </Button>
           </Box>
         ))}
       </>
@@ -2661,17 +2765,12 @@ export default function SharePriceDashboard({
                     <Box
                       data-testid="share-price-dashboard-metrics-viewport"
                       data-vertical-scroll="true"
-                      data-action-gutter-width={String(METRICS_ACTION_GUTTER_PX)}
-                      data-scrollbar-safe-inset-width={String(
-                        usesFocusedMetricsViewport ? METRICS_SCROLLBAR_SAFE_INSET_PX : 0,
-                      )}
                       sx={{
                         width: baseSurfaceWidth,
                         maxHeight: FOCUSED_METRICS_VIEWPORT_MAX_HEIGHT,
                         overflowY: 'auto',
                         overflowX: 'hidden',
                         borderTop: '1px solid #e2e8f0',
-                        scrollbarGutter: 'stable',
                       }}
                     >
                       {/* The chart and base rows stay above this viewport so the
@@ -2679,7 +2778,7 @@ export default function SharePriceDashboard({
                           scroll only through the dense detail metrics. */}
                       <Box
                         sx={{
-                          width: `${focusedMetricsRowWidth}px`,
+                          width: `${baseSurfaceWidth}px`,
                         }}
                       >
                         {detailMetricsRows}
@@ -2968,6 +3067,57 @@ export default function SharePriceDashboard({
 
         {cardBody}
       </Box>
+
+      {metricRowActionMenuState ? (
+        <Box
+          ref={metricRowActionMenuRef}
+          data-testid="share-price-dashboard-metric-row-action-menu"
+          sx={{
+            position: 'fixed',
+            zIndex: 1400,
+            left: shouldUseBottomSheetMetricEditor
+              ? 12
+              : Math.max((metricRowActionMenuState.anchorRect?.left || 0) - 8, 12),
+            right: shouldUseBottomSheetMetricEditor ? 12 : 'auto',
+            top: shouldUseBottomSheetMetricEditor
+              ? 'auto'
+              : Math.min(
+                  (metricRowActionMenuState.anchorRect?.bottom || 0) + 8,
+                  ((typeof window !== 'undefined' ? window.innerHeight : 800) - 180),
+                ),
+            bottom: shouldUseBottomSheetMetricEditor ? 12 : 'auto',
+            width: shouldUseBottomSheetMetricEditor ? 'auto' : 260,
+            border: '1px solid #cbd5e1',
+            borderRadius: shouldUseBottomSheetMetricEditor ? 2 : 1.5,
+            backgroundColor: '#ffffff',
+            boxShadow: '0 18px 40px rgba(15, 23, 42, 0.18)',
+            p: 1.5,
+          }}
+        >
+          <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.75 }}>
+            Row actions
+          </Typography>
+          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mb: 1 }}>
+            Right click or long press the frozen metric label to hide this row.
+          </Typography>
+          <Typography variant="body2" sx={{ color: '#334155', mb: 1.5 }}>
+            {metricRowActionMenuState.rowLabel}
+          </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 1 }}>
+            <Button size="small" onClick={closeMetricRowActionMenu} disabled={isUpdatingRowPreference}>
+              CANCEL
+            </Button>
+            <Button
+              size="small"
+              data-testid="share-price-dashboard-metric-row-hide-action"
+              onClick={handleHideMetricRow}
+              disabled={isUpdatingRowPreference}
+            >
+              HIDE ROW
+            </Button>
+          </Box>
+        </Box>
+      ) : null}
 
       {metricEditorState ? (
         <Box
