@@ -1,15 +1,23 @@
 # institute-of-data-labs-capstone
 
-## Start the app
+This project has two main halves:
+
+- an Express + MongoDB backend in the repo root
+- a React + Vite frontend under `src/`
+
+If you are new to the app, read this file from top to bottom once. It starts with the basics, then explains the scripts, then explains the tests in the same order you are most likely to need them.
+
+## 1. Start the app
 
 ### Prerequisites
 
 - Node.js and npm installed
-- A MongoDB connection string
+- a MongoDB connection string
+- a ROIC API key for live stock search and live price lookup
 
 ### Environment variables
 
-Create a `.env` file in the project root with:
+Create a `.env` file in the project root:
 
 ```env
 MONGO_URI=your_mongodb_connection_string
@@ -17,8 +25,7 @@ ROIC_API_KEY=your_roic_api_key
 PORT=3000
 ```
 
-`PORT` is optional. If it is not set, the API starts on `3000`.
-`ROIC_API_KEY` is required for live stock search and live stock price lookups.
+`PORT` is optional. If you do not set it, the backend starts on `3000`.
 
 ### Install dependencies
 
@@ -26,249 +33,233 @@ PORT=3000
 npm install
 ```
 
-### Run the backend API
+### Start the backend API
 
 ```bash
 npm run server
 ```
 
-The Express server will start at `http://localhost:3000` unless you set a different `PORT`.
+The Express API will start at `http://localhost:3000` unless you set a different `PORT`.
 
-### Run the frontend dev server
+### Start the frontend dev server
 
-In a second terminal, start the Vite frontend:
+Open a second terminal and run:
 
 ```bash
 npm run dev
 ```
 
-### Helpful scripts
+Important beginner note: `npm run dev` only starts the Vite frontend. It does **not** start the backend API for you. The frontend expects the backend to already be running on `http://localhost:3000`, and Vite proxies `/api/*` requests there during local development.
 
-- `npm run build`  
-  Builds the frontend for production.
+## 2. Main scripts you will use most often
 
-- `npm run preview`  
-  Serves the built frontend locally so you can preview the production build.
+These are the scripts beginners usually reach for first.
 
-- `npm run check:frontend-branch-sync`
-  Fails unless local `frontend-branch` and `main` point to identical file trees. Use this before any manual merge that is meant to leave `main` unchanged.
+| Command | What it does | When to run it |
+| --- | --- | --- |
+| `npm run server` | Starts the backend API with `nodemon`. | Use this whenever you need the local backend, database-backed watchlist routes, or `/api/*` requests from the frontend. |
+| `npm run dev` | Starts the Vite frontend dev server. | Use this while building or debugging the React UI. |
+| `npm run build` | Creates a production frontend build. | Use this before deployment checks or when you want to confirm the frontend still builds cleanly. |
+| `npm run preview` | Serves the production frontend build locally. | Use this after `npm run build` when you want to preview the built app instead of the dev server. |
+| `npm run lint` | Runs ESLint across the repo. | Use this before commits or after frontend/backend edits that may affect linting. |
+| `npm run test:ui` | Runs the frontend/UI test suite with Vitest. | Use this for React components, frontend service helpers, context logic, and page regressions. |
+| `npm run test:ui:watch` | Runs Vitest in watch mode. | Use this while iterating on frontend code and you want tests to rerun automatically. |
+| `npm run test:backend` | Runs the fast backend bundle with Node's built-in test runner. | Use this when you want a broad backend confidence check without running the slower end-to-end harnesses. |
+| `npm run test:e2e-stubbed` | Runs the deterministic end-to-end backend import/CRUD harness with fake ROIC responses. | Use this when you changed import, refresh, overrides, normalization, or MongoDB persistence behavior. |
+| `npm run test:e2e-live` | Runs the live end-to-end backend harness against the real ROIC API and real MongoDB. | Use this as a manual confidence check when you need production-like confirmation. |
 
-- `npm run search:live`  
-  Starts the interactive live stock search CLI for querying the ROIC-backed search flow from the terminal.
+Two extra script notes:
 
-- `npm run docs:schema`
-  Regenerates the compact developer-facing schema reference from `catalog/fieldCatalog.js`.
+- `npm run start` is effectively the same backend behavior as `npm run server` in this repo. Both run `nodemon server.js`.
+- `npm test` is only a placeholder script right now. It is **not** the real test entry point for this project.
 
-- `npm run test:stock-search`  
-  Runs the fast service-level backend test suite for `stockSearchService`.
+## 3. How testing is organized
 
-- `npm run test:stock-lookup-routes`  
-  Runs the HTTP route/controller tests for the read-only stock lookup endpoints.
+This app uses **two** test systems.
 
-- `npm run test:server-startup`
-  Confirms the API can still start and serve read-only stock search even if MongoDB is unavailable during boot.
+### Frontend/UI tests
 
-- `npm run test:backend`  
-  Runs both of the fast backend suites together: stock search service tests and stock lookup route tests.
+- Runner: Vitest
+- DOM environment: JSDOM
+- Main command: `npm run test:ui`
+- Test file location: `src/**/__tests__/`
 
-- `npm run test:e2e-stubbed`  
-  Runs the deterministic end-to-end backend test with stubbed ROIC data, real normalization, and real MongoDB persistence.
+JSDOM means "a fake browser running inside Node." It lets React components render, click handlers fire, and DOM assertions run without opening a real browser window.
 
-- `npm run test:e2e-live`  
-  Runs the live end-to-end backend test against the real ROIC API and real MongoDB. Use this as a manual confidence check.
+The shared frontend test setup lives in `src/test/setupTests.js`. That file provides browser-like helpers such as `matchMedia`, `requestAnimationFrame`, and Testing Library cleanup so the UI tests can run consistently in Node.
 
-- `npm run test:docs`
-  Runs the lightweight sanity test for the generated schema reference tool.
+### Backend tests
 
-## Schema Reference
+- Runner: Node's built-in test runner
+- Main style: `node --test ...`
+- Test file location: `tests/`
 
-Use [docs/schema-reference.md](docs/schema-reference.md) when you want a compact map of the current stock document shape without reading the catalog source code.
+These backend tests range from tiny smoke checks to real HTTP + MongoDB harnesses.
 
-The file is generated from `catalog/fieldCatalog.js`, so the source of truth stays in code:
+### A few beginner definitions
 
-```bash
-npm run docs:schema
-```
+- **Stubbed** means the test replaces an external dependency with a fake version so the inputs stay controlled and repeatable.
+- **Integration** means several real parts are wired together, such as Express routes plus controllers plus MongoDB.
+- **End-to-end** means a large, realistic workflow is exercised from the outside, often through real HTTP requests.
 
-## Backend Tests
+### Most useful example commands
 
-This project has four main backend test files. Together, they answer four questions:
-
-1. Does the stock search logic work?
-2. Do the stock lookup API routes behave correctly over HTTP?
-3. Does import + normalization + MongoDB work end to end with safe stubbed data?
-4. Does the same flow still work against the real live ROIC API?
-
-The test suite is layered. The smaller tests are faster and more deterministic. The larger end-to-end tests give extra confidence that the real system still works when all the pieces are connected.
-
-### Which test should I run?
-
-- If you changed stock search logic, run:
+Run all frontend/UI tests:
 
 ```bash
-npm run test:stock-search
+npm run test:ui
 ```
 
-- If you changed the read-only stock lookup routes or controller, run:
+Run one frontend/UI file:
 
 ```bash
-npm run test:stock-lookup-routes
+npm run test:ui -- src/components/__tests__/SharePriceDashboard.test.jsx
 ```
 
-- If you want both of the fast backend suites together, run:
+Run the fast backend bundle:
 
 ```bash
 npm run test:backend
 ```
 
-- If you changed startup behavior or read-only availability during Mongo outages, run:
+Run one backend file directly:
 
 ```bash
-npm run test:server-startup
+node --test tests/stock-search-service.test.js
 ```
 
-- If you changed import, normalization, refresh, or MongoDB persistence, run:
+Important beginner note: many frontend test files are run by passing the file path to Vitest, because only some backend suites have dedicated npm aliases.
+
+## 4. Frontend/UI test catalog
+
+Run the whole frontend suite with:
 
 ```bash
-npm run test:e2e-stubbed
+npm run test:ui
 ```
 
-- If you want a manual confidence check against the real ROIC API, run:
+Run one frontend file with:
 
 ```bash
-npm run test:e2e-live
+npm run test:ui -- path/to/test-file
 ```
 
-### 1. `tests/stock-search-service.test.js`
+### Pure helper and chart-math tests
 
-Purpose:
-Tests `stockSearchService` by itself, without HTTP routes or MongoDB.
+| File | What it proves | When to run it | How to run it |
+| --- | --- | --- | --- |
+| `src/components/__tests__/sharePriceChartScale.test.jsx` | Proves the chart-scale helper can build readable Y-axis ticks and labels for large, medium, small, and flat price ranges. | Run this when you change share-price chart scale math, tick spacing, or Y-axis label formatting. | `npm run test:ui -- src/components/__tests__/sharePriceChartScale.test.jsx` |
 
-What it proves:
-- the service can tell the difference between ticker-first searches and name-first searches
-- exact ticker matching works
-- exchange suffix probing works, such as checking variants like `.AX` or `.HK`
-- duplicate results from different ROIC search branches are merged correctly
-- result ranking stays sensible when there are strong matches and weaker fallback matches
-- sparse company-name searches can broaden into fallback word variants
-- partial upstream failures do not always break the whole search
-- latest-price enrichment and diagnostic result ordering behave correctly
+### Frontend API adapter tests
 
-What is real:
-- the real `stockSearchService` code
+| File | What it proves | When to run it | How to run it |
+| --- | --- | --- | --- |
+| `src/services/__tests__/watchlistDashboardApi.test.js` | Proves the frontend watchlist dashboard API layer can normalize backend payloads, build dashboard-ready shapes, preserve fiscal-year metadata, and decide when legacy watchlist stocks need refreshes. | Run this when you change frontend dashboard data loading, payload normalization, or legacy refresh behavior. | `npm run test:ui -- src/services/__tests__/watchlistDashboardApi.test.js` |
+| `src/services/__tests__/investmentCategoryCardsApi.test.js` | Proves the homepage category-cards API wrapper can load and normalize cards, request one card through the bulk contract, and send constituent-toggle updates with the right range payload. | Run this when you change homepage category card fetching or the frontend API wrapper around those routes. | `npm run test:ui -- src/services/__tests__/investmentCategoryCardsApi.test.js` |
 
-What is stubbed:
-- the `roicService` functions
+### Shared state and context tests
 
-Why this matters:
-This is the safest place to test search rules because the inputs are controlled and repeatable.
+| File | What it proves | When to run it | How to run it |
+| --- | --- | --- | --- |
+| `src/contexts/__tests__/StockSearchContext.test.jsx` | Proves the shared stock-search context can load the watchlist, reuse existing stocks, import missing stocks, remove stocks, and show useful search error messages. | Run this when you change navbar search state, watchlist loading, stock add/open/remove flows, or frontend error messaging. | `npm run test:ui -- src/contexts/__tests__/StockSearchContext.test.jsx` |
 
-### 2. `tests/frontend-api-routes.test.js`
+### Focused UI component tests
 
-Purpose:
-Tests the stock lookup API routes over real HTTP requests to the Express server.
+| File | What it proves | When to run it | How to run it |
+| --- | --- | --- | --- |
+| `src/components/__tests__/StockSearchResults.test.jsx` | Proves the search-results list shows the correct action for each result, such as `SEE STOCK` for existing watchlist items and `ADD STOCK` for new ones. | Run this when you change search-result buttons, navigation behavior, or existing-stock detection in the visible UI. | `npm run test:ui -- src/components/__tests__/StockSearchResults.test.jsx` |
+| `src/components/__tests__/SectorChart.test.jsx` | Proves the homepage category chart renders correctly, validates month ranges, handles empty states, maps preset scroll movement, keeps the Y-axis left rail sticky, and filters long x-axis labels for readability. | Run this when you change the category-chart layout, preset scrolling, axis labeling, or date-range behavior. | `npm run test:ui -- src/components/__tests__/SectorChart.test.jsx` |
+| `src/components/__tests__/SectorCardComponent.test.jsx` | Proves a homepage category card can open its constituents list, preserve constituent order and status, stay compact with long company names, and re-query stale homepage payloads into the latest trailing 5Y range. | Run this when you change homepage category cards, constituent toggles, list layout, or default 5Y refresh behavior. | `npm run test:ui -- src/components/__tests__/SectorCardComponent.test.jsx` |
 
-What it proves:
-- `GET /api/stocks/search` validates input and returns the expected JSON shape
-- `GET /api/stock-prices/:ticker` validates ticker and month filters
-- the routes normalize tickers correctly before calling the service layer
-- upstream failures are turned into clean API error responses
-- the lookup routes stay thin and service-driven
+### Page, dashboard, and integration-style regressions
 
-What is real:
-- the Express app
-- the mounted routes
-- the controller behavior
-- the HTTP request/response path
+| File | What it proves | When to run it | How to run it |
+| --- | --- | --- | --- |
+| `src/pages/__tests__/Stocks.test.jsx` | Proves the `Stocks` page keeps search visible while hiding sibling stock cards during focused metrics mode, then restores the full watchlist when metrics are closed. | Run this when you change page-level watchlist rendering or focused metrics behavior on the `Stocks` route. | `npm run test:ui -- src/pages/__tests__/Stocks.test.jsx` |
+| `src/pages/__tests__/StocksRemount.integration.test.jsx` | Proves the `Stocks` route can survive remount-oriented flows where the page, provider, and dashboard wiring are exercised together in a larger integration-style test. | Run this when you change remount behavior, route/provider wiring, or flows where the focused stock hides and restores the rest of the page. | `npm run test:ui -- src/pages/__tests__/StocksRemount.integration.test.jsx` |
+| `src/components/__tests__/SharePriceDashboard.test.jsx` | Proves the stock dashboard survives the hardest UI scenarios: preset scrolling, sticky rails, chart alignment, metrics mode, React loop regressions, and focused metrics layout edge cases such as `MAX`. | Run this when you change the stock card dashboard, detail metrics table, scroll measurement, preset logic, or any animation/layout code inside `SharePriceDashboard`. | `npm run test:ui -- src/components/__tests__/SharePriceDashboard.test.jsx` |
 
-What is stubbed:
-- `roicService` and `stockSearchService`
-- MongoDB connect/disconnect helpers
+### Frontend investigation notes
 
-Why this matters:
-This file protects the read-only stock lookup boundary. These routes are meant for live lookup and preview, not for creating MongoDB watchlist records.
+`src/components/__tests__/ACT_WARNING_INVESTIGATION.md` is a developer investigation note. It is **not** a runnable test file.
 
-### 3. `tests/e2e-stubbed-import-crud.test.js`
+## 5. Backend test catalog
 
-Purpose:
-This is the strongest deterministic end-to-end backend test. It exercises the real import and CRUD flow using stubbed ROIC data, but real Express routes, real normalization, and real MongoDB writes.
+Backend tests use Node's built-in runner. Some have dedicated npm scripts, and some are run directly with `node --test`.
 
-What it proves:
-- `POST /api/watchlist/import` can normalize upstream data into the `WatchlistStock` schema
-- imported annual rows preserve the expected overridable-field object shape
-- earnings release date fallback logic uses fiscal year end plus 60 days when earnings-call data is missing for a year
-- imported records can be read, listed, updated, refreshed, and deleted
-- user overrides still survive a refresh
-- lookup routes stay read-only and do not silently create MongoDB records before import
+### Fast backend test scripts
 
-What is real:
-- Express routes and controllers
-- normalization logic
-- MongoDB persistence
-- HTTP round-trips
+| Command | What it does | When to run it |
+| --- | --- | --- |
+| `npm run test:backend` | Runs the fast backend bundle: `stock-search-service`, `frontend-api-routes`, `server-startup`, `lens-visibility`, `inspect-lens-fields`, `schema-reference-generator`, `import-range-behavior`, and `investment-category-migration`. | Use this when you want a broad backend check after service, route, docs, or migration changes. |
+| `npm run test:stock-search` | Runs only `tests/stock-search-service.test.js`. | Use this when you are changing search classification, result ranking, suffix probing, or search diagnostics. |
+| `npm run test:stock-lookup-routes` | Runs only `tests/frontend-api-routes.test.js`. | Use this when you changed the read-only stock lookup routes or their request/response behavior. |
+| `npm run test:server-startup` | Runs only `tests/server-startup.test.js`. | Use this when you changed startup behavior or degraded-mode availability during MongoDB failures. |
+| `npm run test:lenses` | Runs `tests/lens-visibility.test.js` and `tests/inspect-lens-fields.test.js`. | Use this when you change lens seeding, field visibility rules, or the lens inspection flow. |
+| `npm run test:docs` | Runs only `tests/schema-reference-generator.test.js`. | Use this when you change the schema-reference generator or field-catalog-driven docs. |
+| `npm run test:e2e-stubbed` | Runs the deterministic end-to-end import/CRUD backend harness. | Use this for import, refresh, override, and MongoDB workflow changes. |
+| `npm run test:e2e-live` | Runs the live end-to-end import/CRUD backend harness. | Use this as a manual high-confidence check against the real ROIC API. |
 
-What is stubbed:
-- upstream ROIC responses
+### Small regressions and smoke checks
 
-Why this matters:
-This test gives strong confidence in the backend workflow while staying stable enough to run regularly.
+| File | What it proves | When to run it | How to run it |
+| --- | --- | --- | --- |
+| `tests/watchlist-stock-model-load.test.js` | Proves the `WatchlistStock` model can load without initialization-order errors before the server even starts. | Run this when you change model imports, schema setup, or startup wiring. | `node --test tests/watchlist-stock-model-load.test.js` |
+| `tests/server-startup.test.js` | Proves the backend can still boot and serve read-only stock search even when MongoDB is unavailable at startup. | Run this when you change server startup, dependency loading, or degraded-mode availability. | `npm run test:server-startup` |
+| `tests/schema-reference-generator.test.js` | Proves the schema reference generator still emits the key markdown sections developers rely on and fails loudly if required sections would be empty. | Run this when you change the schema doc generator or the field catalog that feeds it. | `npm run test:docs` |
+| `tests/inspect-lens-fields.test.js` | Proves the lens inspection CLI can print seeded visible fields without needing the frontend. | Run this when you change the lens inspection script or field-visibility output format. | `node --test tests/inspect-lens-fields.test.js` |
 
-### 4. `tests/e2e-live-import-crud.test.js`
+### Backend service and business-rule tests
 
-Purpose:
-This is the live confidence harness. It runs the same general flow as the stubbed import test, but against the real ROIC API and real MongoDB.
+| File | What it proves | When to run it | How to run it |
+| --- | --- | --- | --- |
+| `tests/stock-search-service.test.js` | Proves the backend search service handles ticker-first vs name-first searches, suffix probing, ranking, broadening, diagnostics, and partial upstream failures. | Run this when you change the stock search service or ROIC search result ranking rules. | `npm run test:stock-search` |
+| `tests/investment-category-cards-service.test.js` | Proves the backend homepage category-card helpers can condense daily prices into monthly points, re-index stocks fairly, average constituent series, and choose the default trailing month range. | Run this when you change the category-card service or the math behind homepage card series. | `node --test tests/investment-category-cards-service.test.js` |
+| `tests/import-range-behavior.test.js` | Proves import-range year caps are parsed correctly, annual history is capped or left uncapped correctly, and earnings release dates fall back to `fiscalYearEndDate + 60 days` when needed. | Run this when you change import range parsing, stock document building, or earnings-date fallback rules. | `node --test tests/import-range-behavior.test.js` |
+| `tests/stock-metrics-view-service.test.js` | Proves the backend metrics-view service hides fully empty rows by default while preserving user visibility preferences and override markers. | Run this when you change metrics-mode row visibility, override markers, or annual metrics shaping. | `node --test tests/stock-metrics-view-service.test.js` |
+| `tests/roic-annual-fetch-options.test.js` | Proves the ROIC annual-history service sends the correct request options, especially the difference between uncapped defaults and explicit year caps. | Run this when you change ROIC annual fetch options or the `years` contract used during import/refresh. | `node --test tests/roic-annual-fetch-options.test.js` |
 
-What it proves:
-- the live import route still works end to end
-- the imported document has the expected top-level structure
-- CRUD still works after a live import
-- refresh still works after a live import
-- user overrides still survive refresh
+### HTTP route and backend integration tests
 
-What is real:
-- Express app
-- MongoDB
-- ROIC API
-- HTTP requests
+| File | What it proves | When to run it | How to run it |
+| --- | --- | --- | --- |
+| `tests/frontend-api-routes.test.js` | Proves the read-only stock lookup HTTP routes validate input, normalize requests, surface service errors cleanly, and return the expected response shape over real HTTP. | Run this when you change `GET /api/stocks/search`, `GET /api/stock-prices/:ticker`, or the route/controller boundary around them. | `npm run test:stock-lookup-routes` |
+| `tests/investment-category-cards-routes.test.js` | Proves the homepage investment-category card routes can build category payloads, classify constituents, persist user-disabled toggles, and reject invalid requests. | Run this when you change the backend routes for homepage investment-category cards. | `node --test tests/investment-category-cards-routes.test.js` |
+| `tests/lens-visibility.test.js` | Proves the backend alone can resolve the correct card/detail visible fields for each investment category and for real stocks. | Run this when you change seeded lenses, visibility rules, or how categories resolve to lenses. | `npm run test:lenses` |
+| `tests/missing-earnings-calls-import.test.js` | Proves import and refresh tolerate ROIC's special "no earnings calls found" 404 while still failing loudly for genuine upstream failures. | Run this when you change import, refresh, or earnings-call fallback behavior. | `node --test tests/missing-earnings-calls-import.test.js` |
+| `tests/investment-category-migration.test.js` | Protects investment-category migration behavior. This is documented conservatively here because it is part of the fast backend bundle and its filename shows it guards category migration rules. | Run this when you change investment-category renaming or migration behavior. | `node --test tests/investment-category-migration.test.js` |
 
-What is stubbed:
-- nothing meaningful in the backend flow
+### End-to-end backend harnesses
 
-Why this matters:
-This test is closest to production reality, but because it depends on live external data, it is better used as a manual confidence check than as an everyday fast feedback test.
+| File | What it proves | When to run it | How to run it |
+| --- | --- | --- | --- |
+| `tests/e2e-stubbed-import-crud.test.js` | Proves the real Express app, real normalization logic, real MongoDB persistence, and real override/refresh routes all work together when ROIC responses are faked in a stable way. | Run this when you need strong confidence in the full backend workflow without depending on live third-party data. | `npm run test:e2e-stubbed` |
+| `tests/e2e-live-import-crud.test.js` | Proves the same general import, refresh, override, and delete workflow still works against the real ROIC API and real MongoDB. | Run this when you want a production-like manual confidence check. | `npm run test:e2e-live` |
 
-### Real vs Stubbed at a Glance
+## 6. Developer utility scripts
 
-- `stock-search-service.test.js`
-  - real service logic
-  - stubbed ROIC
-- `frontend-api-routes.test.js`
-  - real Express route/controller path
-  - stubbed services and DB lifecycle
-- `e2e-stubbed-import-crud.test.js`
-  - real Express + normalization + MongoDB
-  - stubbed ROIC
-- `e2e-live-import-crud.test.js`
-  - real Express + normalization + MongoDB + ROIC
-  - no meaningful stubbing
+These are useful developer tools, but they are **not** automated tests.
 
-### Important Backend Testing Idea
+| Command | What it does | When to run it |
+| --- | --- | --- |
+| `npm run search:live` | Starts an interactive terminal-based stock search against the real ROIC-backed search flow. | Use this when you want to manually explore search results without booting the frontend. |
+| `npm run docs:schema` | Regenerates `docs/schema-reference.md` from the field catalog and related schema metadata. | Use this when you change schema docs, field-catalog entries, or the generator script. |
+| `npm run inspect:lens` | Runs the lens inspection CLI for the example category `Profitable Hi Growth`. | Use this when you want to inspect visible card/detail fields without starting the frontend. |
+| `npm run check:frontend-branch-sync` | Fails unless local `frontend-branch` and `main` point to identical file trees. | Use this before a manual merge that is supposed to leave `main` unchanged. |
 
-The backend has a clear boundary between:
+## 7. Schema reference
 
-- live stock lookup routes:
-  - `GET /api/stocks/search`
-  - `GET /api/stock-prices/:ticker`
-- MongoDB persistence routes:
-  - `POST /api/watchlist/import`
-  - `POST /api/watchlist/:ticker/refresh`
-  - watchlist CRUD routes
+Use `docs/schema-reference.md` when you want a compact developer map of the current stock document shape without reading all of the catalog source files.
 
-That boundary matters. Search and price preview should stay read-only. A stock should only become a MongoDB watchlist document when the app explicitly calls the import route.
+Regenerate it with:
 
-## Live Search CLI
+```bash
+npm run docs:schema
+```
 
-Use the interactive CLI to run live stock searches against the external API and view ticker, company name, source branch, and latest price (`date + close`).
+## 8. Live search CLI
+
+The live search CLI is a manual debugging tool for stock search.
 
 Make sure your `.env` includes:
 
@@ -291,9 +282,9 @@ Example queries once the prompt is open:
 > quit
 ```
 
-## Search Troubleshooting
+## 9. Search troubleshooting
 
-If typing `AAPL` into the navbar search shows a generic unavailable message, check the request path in this order:
+If typing a ticker such as `AAPL` into the navbar search shows a generic unavailable message, check the request path in this order:
 
 1. Start the backend API:
 
@@ -314,25 +305,25 @@ http://localhost:3000/api/stocks/search?q=AAPL
 ```
 
 Expected result:
+
 - a JSON payload with `query`, `queryType`, and `results`
 - or a specific JSON error message such as `ROIC API key is not configured.`
 
 4. If the browser cannot reach `/api/stocks/search`, confirm Vite is proxying `/api` to `http://localhost:3000` and that the backend is actually running on port `3000`.
 
 5. If the backend route responds with an authentication or upstream error, verify:
+
 - `ROIC_API_KEY` exists in `.env`
 - the API key is valid
 - outbound network access to `api.roic.ai` is allowed
 
-6. MongoDB is still needed for watchlist persistence, but the read-only stock search route should now start even if MongoDB is temporarily unavailable during boot.
+6. MongoDB is still needed for watchlist persistence, but the read-only stock search route should still start even if MongoDB is temporarily unavailable during boot.
 
-## Frontend Branch Workflow
+## 10. Frontend branch workflow
 
-The canonical repository is this repo. The old standalone frontend repo under
-`C:\Users\Daniel\Downloads\frontend\institute-of-data-labs-capstone` is archival reference only.
+The canonical repository is this repo. The old standalone frontend repo under `C:\Users\Daniel\Downloads\frontend\institute-of-data-labs-capstone` is archival reference only.
 
-`frontend-branch` is not a stripped-down frontend-only tree. It must carry the same tip tree as `main`
-whenever you want a later manual merge into `main` to be a true no-op.
+`frontend-branch` is not a stripped-down frontend-only tree. It must carry the same tip tree as `main` whenever you want a later manual merge into `main` to be a true no-op.
 
 ### Frontend-owned paths
 

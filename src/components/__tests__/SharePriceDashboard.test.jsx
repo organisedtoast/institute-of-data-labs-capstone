@@ -1,7 +1,6 @@
 import React from 'react';
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -159,6 +158,7 @@ let mountedRoot;
 let pendingAnimationFrameHandles = new Set();
 let activeResizeObservers = [];
 let matchMediaListenerRegistry = new Map();
+let nextAnimationFrameHandle = 1;
 
 function setViewportWidth(width) {
   currentMatchMediaWidth = width;
@@ -744,18 +744,15 @@ function getCloseRangeForMonths(priceRows, startMonth, endMonth) {
 }
 
 // The dashboard does not finish all of its work in one synchronous render.
-// Instead, one user action can fan out into several layers of follow-up work:
-// - a resolved promise from the mocked API
-// - a zero-delay timeout used by the component or the test browser shim
-// - a requestAnimationFrame callback used by the chart animation path
-// - a second round of effects that respond to the updated measurements/state
+// One user action can fan out into:
+// - promise work from the mocked API
+// - microtask-backed requestAnimationFrame callbacks from our browser shim
+// - one real timer yield so "wait until the next task" code can finish
 //
-// A single "turn" below intentionally flushes promise work, then timer work,
-// then one more promise checkpoint. That makes the helper flexible for both:
-// - simple static tests, which usually settle after `flushDashboardWork(1)`
-// - animated/focus/remount regressions, which often need `3` or `4` turns so
-//   parent state updates, remounts, measurements, and animation follow-up all
-//   get a chance to settle before we assert on the final UI
+// This helper is not a substitute for `act(...)`. Its job starts *after* the
+// test has already entered React correctly through `act(...)`. A beginner
+// should think of it as: "give React and the fake browser a few chances to
+// settle before checking the final UI."
 async function flushDashboardWork(turnCount = 1) {
   for (let turn = 0; turn < turnCount; turn += 1) {
     await act(async () => {
@@ -774,17 +771,172 @@ async function flushDashboardWork(turnCount = 1) {
   }
 }
 
+// These browser shims make JSDOM look enough like a real browser for this
+// component's layout logic. We keep them in one place because the same rules
+// must apply to both the preset tests and the metrics tests.
+function installDashboardBrowserShims() {
+  pendingAnimationFrameHandles = new Set();
+  nextAnimationFrameHandle = 1;
+
+  originalRequestAnimationFrame = window.requestAnimationFrame;
+  originalCancelAnimationFrame = window.cancelAnimationFrame;
+  originalMatchMedia = window.matchMedia;
+  originalResizeObserver = global.ResizeObserver;
+  activeResizeObservers = [];
+  matchMediaListenerRegistry = new Map();
+
+  window.matchMedia = (query) => {
+    if (!matchMediaListenerRegistry.has(query)) {
+      matchMediaListenerRegistry.set(query, new Set());
+    }
+
+    const listeners = matchMediaListenerRegistry.get(query);
+
+    const addListener = (listener) => {
+      listeners.add(listener);
+    };
+
+    const removeListener = (listener) => {
+      listeners.delete(listener);
+    };
+
+    return {
+      get matches() {
+        return getMediaQueryMatch(query);
+      },
+      media: query,
+      onchange: null,
+      addListener,
+      removeListener,
+      addEventListener: (eventName, listener) => {
+        if (eventName === 'change') {
+          addListener(listener);
+        }
+      },
+      removeEventListener: (eventName, listener) => {
+        if (eventName === 'change') {
+          removeListener(listener);
+        }
+      },
+      dispatchEvent: () => false,
+    };
+  };
+
+  // `queueMicrotask` is safer than `setTimeout(..., 0)` here because React's
+  // `act(...)` drains microtasks as part of the current test step. A timeout-
+  // backed rAF would escape into a later task and trigger the very warnings this
+  // file is trying to eliminate.
+  window.requestAnimationFrame = (callback) => {
+    const handle = nextAnimationFrameHandle;
+    nextAnimationFrameHandle += 1;
+    pendingAnimationFrameHandles.add(handle);
+
+    queueMicrotask(() => {
+      if (!pendingAnimationFrameHandles.has(handle)) {
+        return;
+      }
+
+      pendingAnimationFrameHandles.delete(handle);
+      callback(window.performance.now());
+    });
+
+    return handle;
+  };
+
+  window.cancelAnimationFrame = (handle) => {
+    pendingAnimationFrameHandles.delete(handle);
+  };
+
+  class MockResizeObserver {
+    constructor(callback) {
+      this.callback = callback;
+      this.observedElements = new Set();
+      activeResizeObservers.push(this);
+    }
+
+    observe = (element) => {
+      this.observedElements.add(element);
+    };
+
+    unobserve = (element) => {
+      this.observedElements.delete(element);
+    };
+
+    disconnect = () => {
+      this.observedElements.clear();
+      activeResizeObservers = activeResizeObservers.filter((observer) => observer !== this);
+    };
+
+    notify = (element) => {
+      if (!this.observedElements.has(element)) {
+        return;
+      }
+
+      this.callback([
+        {
+          target: element,
+          contentRect: {
+            width: element.clientWidth,
+            height: 0,
+          },
+        },
+      ]);
+    };
+  }
+
+  global.ResizeObserver = MockResizeObserver;
+  window.ResizeObserver = MockResizeObserver;
+  globalThis.requestAnimationFrame = window.requestAnimationFrame;
+  globalThis.cancelAnimationFrame = window.cancelAnimationFrame;
+}
+
+// Cleanup is just as important as setup. If a beginner removes this and leaves
+// one test's custom browser shims active for the next test, the resulting
+// failures look random even though the real problem is shared test state.
+function restoreDashboardBrowserShims() {
+  if (mountedRoot) {
+    act(() => {
+      mountedRoot.unmount();
+    });
+    mountedRoot = null;
+  }
+
+  if (mountedContainer) {
+    mountedContainer.remove();
+    mountedContainer = null;
+  }
+
+  pendingAnimationFrameHandles.clear();
+
+  window.requestAnimationFrame = originalRequestAnimationFrame;
+  window.cancelAnimationFrame = originalCancelAnimationFrame;
+  window.matchMedia = originalMatchMedia;
+  global.ResizeObserver = originalResizeObserver;
+  window.ResizeObserver = originalResizeObserver;
+  globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+  globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
+  vi.restoreAllMocks();
+  currentMatchMediaWidth = 1024;
+  activeResizeObservers = [];
+  matchMediaListenerRegistry = new Map();
+}
+
+// We keep using `createRoot` instead of RTL's `render()` because earlier
+// experiments showed that RTL's React 19 path hangs for this component stack.
+// The important beginner rule is: even with `createRoot`, mounting and rerendering
+// still have to happen inside `act(...)` so React can flush the work safely.
 function mountDashboard(ui) {
   mountedContainer = document.createElement('div');
   document.body.appendChild(mountedContainer);
   mountedRoot = createRoot(mountedContainer);
-  flushSync(() => {
+
+  act(() => {
     mountedRoot.render(ui);
   });
 
   return {
     rerender(nextUi) {
-      flushSync(() => {
+      act(() => {
         mountedRoot.render(nextUi);
       });
     },
@@ -904,6 +1056,22 @@ function getMetricRowLeftRail(rowKey = '710::annualData[].forecastData.fy1.ebit'
   });
 }
 
+function getActWarningCalls(consoleErrorSpy) {
+  return consoleErrorSpy.mock.calls.filter((call) => {
+    return call.some((value) => {
+      const text = String(value);
+      return (
+        text.includes('An update to Root inside a test was not wrapped in act(...)')
+        || text.includes('An update to SharePriceDashboard inside a test was not wrapped in act(...)')
+      );
+    });
+  });
+}
+
+function expectNoActWarnings(consoleErrorSpy) {
+  expect(getActWarningCalls(consoleErrorSpy)).toHaveLength(0);
+}
+
 // Each `it(...)` block below describes one user-facing preset-scroll scenario.
 // Together they protect the first-load scrollbar position and the month-range
 // updates that should happen when a user drags through history.
@@ -917,139 +1085,45 @@ describe('SharePriceDashboard preset scrolling', () => {
       identifier: 'AAPL',
       investmentCategory: 'Mature Compounder',
     });
-    pendingAnimationFrameHandles = new Set();
-
-    originalRequestAnimationFrame = window.requestAnimationFrame;
-    originalCancelAnimationFrame = window.cancelAnimationFrame;
-    originalMatchMedia = window.matchMedia;
-    originalResizeObserver = global.ResizeObserver;
-    activeResizeObservers = [];
-    matchMediaListenerRegistry = new Map();
-
-    window.matchMedia = (query) => {
-      if (!matchMediaListenerRegistry.has(query)) {
-        matchMediaListenerRegistry.set(query, new Set());
-      }
-
-      const listeners = matchMediaListenerRegistry.get(query);
-
-      const addListener = (listener) => {
-        listeners.add(listener);
-      };
-
-      const removeListener = (listener) => {
-        listeners.delete(listener);
-      };
-
-      return {
-        get matches() {
-          return getMediaQueryMatch(query);
-        },
-        media: query,
-        onchange: null,
-        addListener,
-        removeListener,
-        addEventListener: (eventName, listener) => {
-          if (eventName === 'change') {
-            addListener(listener);
-          }
-        },
-        removeEventListener: (eventName, listener) => {
-          if (eventName === 'change') {
-            removeListener(listener);
-          }
-        },
-        dispatchEvent: () => false,
-      };
-    };
-
-    window.requestAnimationFrame = (callback) => {
-      const handle = window.setTimeout(() => {
-        pendingAnimationFrameHandles.delete(handle);
-        callback(window.performance.now());
-      }, 0);
-      pendingAnimationFrameHandles.add(handle);
-      return handle;
-    };
-
-    window.cancelAnimationFrame = (handle) => {
-      pendingAnimationFrameHandles.delete(handle);
-      window.clearTimeout(handle);
-    };
-
-    class MockResizeObserver {
-      constructor(callback) {
-        this.callback = callback;
-        this.observedElements = new Set();
-        activeResizeObservers.push(this);
-      }
-
-      observe = (element) => {
-        this.observedElements.add(element);
-      };
-
-      unobserve = (element) => {
-        this.observedElements.delete(element);
-      };
-
-      disconnect = () => {
-        this.observedElements.clear();
-        activeResizeObservers = activeResizeObservers.filter((observer) => observer !== this);
-      };
-
-      notify = (element) => {
-        if (!this.observedElements.has(element)) {
-          return;
-        }
-
-        this.callback([
-          {
-            target: element,
-            contentRect: {
-              width: element.clientWidth,
-              height: 0,
-            },
-          },
-        ]);
-      };
-    }
-
-    global.ResizeObserver = MockResizeObserver;
-    window.ResizeObserver = MockResizeObserver;
-
-    globalThis.requestAnimationFrame = window.requestAnimationFrame;
-    globalThis.cancelAnimationFrame = window.cancelAnimationFrame;
+    installDashboardBrowserShims();
   });
 
   afterEach(() => {
-    if (mountedRoot) {
-      act(() => {
-        mountedRoot.unmount();
-      });
-      mountedRoot = null;
-    }
+    restoreDashboardBrowserShims();
+  });
 
-    if (mountedContainer) {
-      mountedContainer.remove();
-      mountedContainer = null;
-    }
+  // A test can "pass" and still print `act(...)` warnings to stderr. That is
+  // still a real problem because React is telling us some updates escaped the
+  // normal test lifecycle. Those escaped updates are often the first clue that a
+  // future refactor will become flaky, hang, or start failing only sometimes.
+  //
+  // We spy on `console.error` narrowly instead of muting it entirely so the test
+  // only fails on the specific warning text we care about.
+  describe('SharePriceDashboard act warning regressions', () => {
+    it('does not emit act warnings during the default dashboard mount and first load', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    pendingAnimationFrameHandles.forEach((handle) => {
-      window.clearTimeout(handle);
+      try {
+        // Phase 1: mount the default dashboard and release the first mocked API
+        // response through the same helper most of this file already uses.
+        const {
+          endInput,
+          startInput,
+        } = await renderDashboard();
+
+        // Phase 2: confirm the user-visible dashboard state really finished
+        // loading instead of only asserting on the absence of warnings.
+        expect(startInput.value).toBe('2020-12');
+        expect(endInput.value).toBe('2025-12');
+        expect(screen.getByText('AAPL name')).toBeTruthy();
+
+        // Phase 3: once the UI is settled, the test should have captured no
+        // "update was not wrapped in act(...)" warnings.
+        expectNoActWarnings(consoleErrorSpy);
+      } finally {
+        consoleErrorSpy.mockRestore();
+      }
     });
-    pendingAnimationFrameHandles.clear();
-
-    window.requestAnimationFrame = originalRequestAnimationFrame;
-    window.cancelAnimationFrame = originalCancelAnimationFrame;
-    window.matchMedia = originalMatchMedia;
-    global.ResizeObserver = originalResizeObserver;
-    window.ResizeObserver = originalResizeObserver;
-    globalThis.requestAnimationFrame = originalRequestAnimationFrame;
-    globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
-    vi.restoreAllMocks();
-    currentMatchMediaWidth = 1024;
-    activeResizeObservers = [];
-    matchMediaListenerRegistry = new Map();
   });
 
   it('renders the dashboard smoke test without hanging', async () => {
@@ -2102,139 +2176,41 @@ describe('SharePriceDashboard metrics mode', () => {
       identifier: 'AAPL',
       investmentCategory: 'Mature Compounder',
     });
-    pendingAnimationFrameHandles = new Set();
-
-    originalRequestAnimationFrame = window.requestAnimationFrame;
-    originalCancelAnimationFrame = window.cancelAnimationFrame;
-    originalMatchMedia = window.matchMedia;
-    originalResizeObserver = global.ResizeObserver;
-    activeResizeObservers = [];
-    matchMediaListenerRegistry = new Map();
-
-    window.matchMedia = (query) => {
-      if (!matchMediaListenerRegistry.has(query)) {
-        matchMediaListenerRegistry.set(query, new Set());
-      }
-
-      const listeners = matchMediaListenerRegistry.get(query);
-
-      const addListener = (listener) => {
-        listeners.add(listener);
-      };
-
-      const removeListener = (listener) => {
-        listeners.delete(listener);
-      };
-
-      return {
-        get matches() {
-          return getMediaQueryMatch(query);
-        },
-        media: query,
-        onchange: null,
-        addListener,
-        removeListener,
-        addEventListener: (eventName, listener) => {
-          if (eventName === 'change') {
-            addListener(listener);
-          }
-        },
-        removeEventListener: (eventName, listener) => {
-          if (eventName === 'change') {
-            removeListener(listener);
-          }
-        },
-        dispatchEvent: () => false,
-      };
-    };
-
-    window.requestAnimationFrame = (callback) => {
-      const handle = window.setTimeout(() => {
-        pendingAnimationFrameHandles.delete(handle);
-        callback(window.performance.now());
-      }, 0);
-      pendingAnimationFrameHandles.add(handle);
-      return handle;
-    };
-
-    window.cancelAnimationFrame = (handle) => {
-      pendingAnimationFrameHandles.delete(handle);
-      window.clearTimeout(handle);
-    };
-
-    class MockResizeObserver {
-      constructor(callback) {
-        this.callback = callback;
-        this.observedElements = new Set();
-        activeResizeObservers.push(this);
-      }
-
-      observe = (element) => {
-        this.observedElements.add(element);
-      };
-
-      unobserve = (element) => {
-        this.observedElements.delete(element);
-      };
-
-      disconnect = () => {
-        this.observedElements.clear();
-        activeResizeObservers = activeResizeObservers.filter((observer) => observer !== this);
-      };
-
-      notify = (element) => {
-        if (!this.observedElements.has(element)) {
-          return;
-        }
-
-        this.callback([
-          {
-            target: element,
-            contentRect: {
-              width: element.clientWidth,
-              height: 0,
-            },
-          },
-        ]);
-      };
-    }
-
-    global.ResizeObserver = MockResizeObserver;
-    window.ResizeObserver = MockResizeObserver;
-
-    globalThis.requestAnimationFrame = window.requestAnimationFrame;
-    globalThis.cancelAnimationFrame = window.cancelAnimationFrame;
+    installDashboardBrowserShims();
   });
 
   afterEach(() => {
-    if (mountedRoot) {
-      act(() => {
-        mountedRoot.unmount();
-      });
-      mountedRoot = null;
-    }
+    restoreDashboardBrowserShims();
+  });
 
-    if (mountedContainer) {
-      mountedContainer.remove();
-      mountedContainer = null;
-    }
+  describe('SharePriceDashboard act warning regressions', () => {
+    it('does not emit act warnings when metrics mode opens after the dashboard has loaded', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    pendingAnimationFrameHandles.forEach((handle) => {
-      window.clearTimeout(handle);
+      try {
+        // Phase 1: mount the metrics-capable payload and wait for the base card
+        // to finish loading in its normal non-metrics state.
+        const { user } = await renderDashboard({
+          payload: buildMetricsModePayload(),
+        });
+
+        expect(screen.queryByText('DETAIL METRICS')).toBeNull();
+        expect(screen.getByRole('button', { name: 'SHOW METRICS' })).toBeTruthy();
+
+        // Phase 2: open metrics and give React/browser follow-up work time to
+        // settle through the shared helper.
+        await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+        await flushDashboardWork();
+
+        // Phase 3: verify the user-visible metrics surface really opened, then
+        // assert that React never complained about work escaping `act(...)`.
+        expect(screen.getByText('DETAIL METRICS')).toBeTruthy();
+        expect(screen.getByText('EBIT FY+1')).toBeTruthy();
+        expectNoActWarnings(consoleErrorSpy);
+      } finally {
+        consoleErrorSpy.mockRestore();
+      }
     });
-    pendingAnimationFrameHandles.clear();
-
-    window.requestAnimationFrame = originalRequestAnimationFrame;
-    window.cancelAnimationFrame = originalCancelAnimationFrame;
-    window.matchMedia = originalMatchMedia;
-    global.ResizeObserver = originalResizeObserver;
-    window.ResizeObserver = originalResizeObserver;
-    globalThis.requestAnimationFrame = originalRequestAnimationFrame;
-    globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
-    vi.restoreAllMocks();
-    currentMatchMediaWidth = 1024;
-    activeResizeObservers = [];
-    matchMediaListenerRegistry = new Map();
   });
 
   it('opens one annual metrics table, keeps non-empty rows visible, and places empty rows under hidden rows', async () => {
