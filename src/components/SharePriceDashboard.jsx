@@ -202,6 +202,36 @@ function getTrailingRange({ monthCount, minAvailableMonth, maxAvailableMonth }) 
   };
 }
 
+function getDefaultDashboardRange(priceRows) {
+  if (!Array.isArray(priceRows) || priceRows.length === 0) {
+    return {
+      startMonth: '',
+      endMonth: '',
+    };
+  }
+
+  const minAvailableMonth = getMonthStringFromDate(priceRows[0].date);
+  const maxAvailableMonth = getMonthStringFromDate(priceRows[priceRows.length - 1].date);
+
+  return getTrailingRange({
+    monthCount: 60,
+    minAvailableMonth,
+    maxAvailableMonth,
+  });
+}
+
+function areScrollMeasurementsEqual(leftMeasurement, rightMeasurement) {
+  if (!leftMeasurement || !rightMeasurement) {
+    return false;
+  }
+
+  return (
+    leftMeasurement.containerWidth === rightMeasurement.containerWidth
+    && Math.abs((leftMeasurement.scrollLeft || 0) - (rightMeasurement.scrollLeft || 0)) <= 1
+    && leftMeasurement.viewportWidth === rightMeasurement.viewportWidth
+  );
+}
+
 function getMonthEndDate(monthString) {
   if (!isValidMonthString(monthString)) {
     return '';
@@ -721,8 +751,10 @@ export default function SharePriceDashboard({
   const [metricEditorState, setMetricEditorState] = useState(null);
   const [metricEditorValue, setMetricEditorValue] = useState('');
   const [metricRowActionMenuState, setMetricRowActionMenuState] = useState(null);
-  const [freeRangeStartMonth, setFreeRangeStartMonth] = useState('');
-  const [freeRangeEndMonth, setFreeRangeEndMonth] = useState('');
+  const [freeRange, setFreeRange] = useState({
+    startMonth: '',
+    endMonth: '',
+  });
   const [rangeMode, setRangeMode] = useState('preset');
   const [activePreset, setActivePreset] = useState('5Y');
   const [presetPanOffsetMonths, setPresetPanOffsetMonths] = useState(0);
@@ -753,6 +785,10 @@ export default function SharePriceDashboard({
   const presetBootstrapFrameRef = useRef(null);
   const measurementFrameRef = useRef(null);
   const postPaintMeasurementFrameRef = useRef(null);
+  const publishScrollMeasurementRef = useRef(() => {});
+  const lastPublishedScrollMeasurementRef = useRef(null);
+  const hasBootstrappedPresetRef = useRef(false);
+  const presetBootstrapKeyRef = useRef('');
   const animationFrameRef = useRef(null);
   const contractionTimeoutRef = useRef(null);
   const longPressTimeoutRef = useRef(null);
@@ -776,6 +812,20 @@ export default function SharePriceDashboard({
   const metricRowActionMenuRef = useRef(null);
 
   const attachTimelineScrollRef = useCallback((node) => {
+    if (timelineScrollRef.current && timelineScrollRef.current !== node) {
+      delete timelineScrollRef.current.__sharePriceDashboardPublishMeasurement;
+    }
+
+    if (timelineScrollRef.current !== node) {
+      lastPublishedScrollMeasurementRef.current = null;
+    }
+
+    if (node) {
+      node.__sharePriceDashboardPublishMeasurement = () => {
+        publishScrollMeasurementRef.current(node);
+      };
+    }
+
     timelineScrollRef.current = node;
   }, []);
 
@@ -812,6 +862,24 @@ export default function SharePriceDashboard({
     });
   }, [identifier]);
 
+  const setFreeRangeMonths = useCallback((nextRange) => {
+    setFreeRange((previousFreeRange) => {
+      const normalizedRange = {
+        startMonth: nextRange?.startMonth || '',
+        endMonth: nextRange?.endMonth || '',
+      };
+
+      if (
+        previousFreeRange.startMonth === normalizedRange.startMonth
+        && previousFreeRange.endMonth === normalizedRange.endMonth
+      ) {
+        return previousFreeRange;
+      }
+
+      return normalizedRange;
+    });
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
     const controller = new AbortController();
@@ -842,13 +910,7 @@ export default function SharePriceDashboard({
           return;
         }
 
-        const minAvailableMonth = getMonthStringFromDate(nextPriceRows[0].date);
-        const maxAvailableMonth = getMonthStringFromDate(nextPriceRows[nextPriceRows.length - 1].date);
-        const defaultRange = getTrailingRange({
-          monthCount: 60,
-          minAvailableMonth,
-          maxAvailableMonth,
-        });
+        const defaultRange = getDefaultDashboardRange(nextPriceRows);
 
         setDashboardData(nextDashboardData);
         setInvestmentCategoryError('');
@@ -857,8 +919,7 @@ export default function SharePriceDashboard({
         setMetricEditorValue('');
         setIsHiddenRowsOpen(false);
         setIsMetricsOpen(false);
-        setFreeRangeStartMonth(defaultRange.startMonth);
-        setFreeRangeEndMonth(defaultRange.endMonth);
+        setFreeRangeMonths(defaultRange);
         setRangeMode('preset');
         setActivePreset('5Y');
         // A fixed-length preset only becomes scrollable after the browser has
@@ -889,7 +950,7 @@ export default function SharePriceDashboard({
       isMounted = false;
       controller.abort();
     };
-  }, [identifier]);
+  }, [identifier, setFreeRangeMonths]);
 
   const priceRows = dashboardData?.prices || [];
   const annualMetrics = dashboardData?.annualMetrics || [];
@@ -923,6 +984,28 @@ export default function SharePriceDashboard({
 
     return Math.max(getMonthOffset(minAvailableMonth, latestPresetRange.startMonth), 0);
   }, [isPresetWindowMode, latestPresetRange.startMonth, minAvailableMonth]);
+  const presetBootstrapKey = useMemo(() => {
+    if (!isPresetWindowMode || !identifier || !minAvailableMonth || !maxAvailableMonth) {
+      return `${identifier || ''}|idle|${rangeMode}|${activePreset || ''}`;
+    }
+
+    return [
+      identifier,
+      rangeMode,
+      activePreset || '',
+      minAvailableMonth,
+      maxAvailableMonth,
+      maxPresetPanOffset,
+    ].join('|');
+  }, [
+    activePreset,
+    identifier,
+    isPresetWindowMode,
+    maxAvailableMonth,
+    maxPresetPanOffset,
+    minAvailableMonth,
+    rangeMode,
+  ]);
   const clampedPresetPanOffsetMonths = Math.min(
     Math.max(presetPanOffsetMonths, 0),
     maxPresetPanOffset,
@@ -935,14 +1018,21 @@ export default function SharePriceDashboard({
         minAvailableMonth,
         maxAvailableMonth,
       )
-    : freeRangeStartMonth;
+    : freeRange.startMonth;
   const currentEndMonth = isPresetWindowMode
     ? clampMonthString(
         shiftMonthString(latestPresetRange.endMonth, -clampedPresetPanOffsetMonths),
         minAvailableMonth,
         maxAvailableMonth,
       )
-    : freeRangeEndMonth;
+    : freeRange.endMonth;
+  const hasLoadedMonthRange = Boolean(
+    priceRows.length
+    && minAvailableMonth
+    && maxAvailableMonth
+    && currentStartMonth
+    && currentEndMonth
+  );
   const fullHistoryMatchesFixedPreset = useMemo(() => {
     if (!minAvailableMonth || !maxAvailableMonth) {
       return false;
@@ -1165,6 +1255,33 @@ export default function SharePriceDashboard({
   const fixedLeftRailWidth = isCompactPresetTable
     ? (shouldUseShortLabels ? compactShortLabelLeftRailWidth : 136)
     : (shouldUseShortLabels ? shortLabelLeftRailWidth : fullLabelLeftRailWidth);
+  const publishScrollMeasurement = useCallback((scrollElement) => {
+    if (!scrollElement) {
+      return;
+    }
+
+    const measuredContainerWidth = scrollElement.clientWidth;
+    const nextMeasurement = {
+      containerWidth: measuredContainerWidth,
+      scrollLeft: scrollElement.scrollLeft,
+      viewportWidth: Math.max(measuredContainerWidth - fixedLeftRailWidth, 0),
+    };
+
+    if (
+      areScrollMeasurementsEqual(lastPublishedScrollMeasurementRef.current, nextMeasurement)
+    ) {
+      return;
+    }
+
+    lastPublishedScrollMeasurementRef.current = nextMeasurement;
+
+    setScrollState((previousScrollState) => {
+      return areScrollMeasurementsEqual(previousScrollState, nextMeasurement)
+        ? previousScrollState
+        : nextMeasurement;
+    });
+  }, [fixedLeftRailWidth]);
+  publishScrollMeasurementRef.current = publishScrollMeasurement;
 
   const timelineLayout = useMemo(() => {
     if (usesPresetTimelineLayout) {
@@ -1217,6 +1334,13 @@ export default function SharePriceDashboard({
   ]);
 
   useLayoutEffect(() => {
+    if (presetBootstrapKeyRef.current !== presetBootstrapKey) {
+      presetBootstrapKeyRef.current = presetBootstrapKey;
+      hasBootstrappedPresetRef.current = false;
+    }
+  }, [presetBootstrapKey]);
+
+  useLayoutEffect(() => {
     const scrollElement = timelineScrollRef.current;
 
     if (!scrollElement) {
@@ -1224,65 +1348,7 @@ export default function SharePriceDashboard({
     }
 
     const updateScrollWindow = () => {
-      const measuredContainerWidth = scrollElement.clientWidth;
-      const measuredViewportWidth = Math.max(measuredContainerWidth - fixedLeftRailWidth, 0);
-      let nextScrollLeft = scrollElement.scrollLeft;
-      const shouldBootstrapPreset = isPresetWindowMode && !isPresetScrollReady && measuredContainerWidth > 0;
-
-      if (shouldBootstrapPreset) {
-        nextScrollLeft = maxPresetPanOffset * PRESET_PAN_STEP_PX;
-        scrollElement.scrollLeft = nextScrollLeft;
-
-        if (presetBootstrapFrameRef.current) {
-          cancelAnimationFrame(presetBootstrapFrameRef.current);
-        }
-
-        // The hidden preset pan track is wider than the visible chart area so
-        // users can drag backward through older history. On first load we
-        // always park the scrollbar at the far-right edge, which represents
-        // the newest trailing preset window such as the latest available 5Y.
-        presetBootstrapFrameRef.current = requestAnimationFrame(() => {
-          presetBootstrapFrameRef.current = null;
-          scrollElement.scrollLeft = nextScrollLeft;
-          setScrollState((previousScrollState) => {
-            if (
-              previousScrollState.containerWidth === measuredContainerWidth
-              && Math.abs(previousScrollState.scrollLeft - nextScrollLeft) <= 1
-              && previousScrollState.viewportWidth === measuredViewportWidth
-            ) {
-              return previousScrollState;
-            }
-
-            return {
-              containerWidth: measuredContainerWidth,
-              scrollLeft: nextScrollLeft,
-              viewportWidth: measuredViewportWidth,
-            };
-          });
-        });
-
-        if (presetPanOffsetMonths !== 0) {
-          setPresetPanOffsetMonths(0);
-        }
-
-        setIsPresetScrollReady(true);
-      }
-
-      setScrollState((previousScrollState) => {
-        if (
-          previousScrollState.containerWidth === measuredContainerWidth
-          && Math.abs(previousScrollState.scrollLeft - nextScrollLeft) <= 1
-          && previousScrollState.viewportWidth === measuredViewportWidth
-        ) {
-          return previousScrollState;
-        }
-
-        return {
-          containerWidth: measuredContainerWidth,
-          scrollLeft: nextScrollLeft,
-          viewportWidth: measuredViewportWidth,
-        };
-      });
+      publishScrollMeasurementRef.current(scrollElement);
     };
 
     // Preset windows and free-range windows share the same DOM scroller, but not the same meaning.
@@ -1336,17 +1402,64 @@ export default function SharePriceDashboard({
         window.removeEventListener('resize', updateScrollWindow);
       }
     };
+  // Re-run when data loads (priceRows.length 0→N) so the scroll element — which only
+  // renders after loading finishes — gets its ResizeObserver and initial measurement.
+  // publishScrollMeasurementRef.current is always kept current so we never need to
+  // re-run this effect just because fixedLeftRailWidth changed; the ResizeObserver
+  // naturally picks up the new viewportWidth on the next layout pass.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priceRows.length]);
+
+  useLayoutEffect(() => {
+    if (!isPresetWindowMode || isPresetScrollReady || hasBootstrappedPresetRef.current) {
+      return undefined;
+    }
+
+    const scrollElement = timelineScrollRef.current;
+
+    if (!scrollElement || scrollState.containerWidth <= 0) {
+      return undefined;
+    }
+
+    const nextScrollLeft = maxPresetPanOffset * PRESET_PAN_STEP_PX;
+
+    hasBootstrappedPresetRef.current = true;
+    scrollElement.scrollLeft = nextScrollLeft;
+    publishScrollMeasurementRef.current(scrollElement);
+
+    if (presetBootstrapFrameRef.current) {
+      cancelAnimationFrame(presetBootstrapFrameRef.current);
+    }
+
+    // The hidden preset pan track is wider than the visible chart area so
+    // users can drag backward through older history. On first load we
+    // always park the scrollbar at the far-right edge, which represents
+    // the newest trailing preset window such as the latest available 5Y.
+    presetBootstrapFrameRef.current = requestAnimationFrame(() => {
+      presetBootstrapFrameRef.current = null;
+      scrollElement.scrollLeft = nextScrollLeft;
+      publishScrollMeasurementRef.current(scrollElement);
+    });
+
+    if (presetPanOffsetMonths !== 0) {
+      setPresetPanOffsetMonths(0);
+    }
+
+    setIsPresetScrollReady(true);
+
+    return () => {
+      if (presetBootstrapFrameRef.current) {
+        cancelAnimationFrame(presetBootstrapFrameRef.current);
+        presetBootstrapFrameRef.current = null;
+      }
+    };
   }, [
-    activePreset,
-    fixedLeftRailWidth,
-    identifier,
     isPresetScrollReady,
     isPresetWindowMode,
     maxPresetPanOffset,
     presetPanOffsetMonths,
-    filteredPriceRows.length,
-    tablePoints.length,
-    timelineLayout.contentWidth,
+    presetBootstrapKey,
+    scrollState.containerWidth,
   ]);
 
   useLayoutEffect(() => {
@@ -1767,8 +1880,7 @@ export default function SharePriceDashboard({
       maxAvailableMonth,
     });
 
-    setFreeRangeStartMonth(nextRange.startMonth);
-    setFreeRangeEndMonth(nextRange.endMonth);
+    setFreeRangeMonths(nextRange);
     setRangeMode(preset.monthCount ? 'preset' : 'free');
     setActivePreset(preset.key);
     setIsPresetScrollReady(false);
@@ -3235,47 +3347,63 @@ export default function SharePriceDashboard({
         }}
       >
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: { xs: 1, sm: 2 }, justifyContent: 'center' }}>
-          <TextField
-            label="Start month"
-            type="month"
-            size="small"
-            value={currentStartMonth}
-            onChange={(event) => {
-              setFreeRangeStartMonth(event.target.value);
-              setFreeRangeEndMonth(currentEndMonth);
-              setRangeMode('free');
-              setActivePreset('');
-              setIsPresetScrollReady(false);
-              setPresetPanOffsetMonths(0);
-            }}
-            inputProps={{
-              min: minAvailableMonth || undefined,
-              max: currentEndMonth || maxAvailableMonth || undefined,
-            }}
-            disabled={!priceRows.length}
-            InputLabelProps={{ shrink: true }}
-          />
+          {hasLoadedMonthRange ? (
+            <>
+              <TextField
+                label="Start month"
+                type="month"
+                size="small"
+                value={currentStartMonth}
+                onChange={(event) => {
+                  setFreeRangeMonths({
+                    startMonth: event.target.value,
+                    endMonth: currentEndMonth,
+                  });
+                  setRangeMode('free');
+                  setActivePreset('');
+                  setIsPresetScrollReady(false);
+                  setPresetPanOffsetMonths(0);
+                }}
+                inputProps={{
+                  min: minAvailableMonth || undefined,
+                  max: currentEndMonth || maxAvailableMonth || undefined,
+                }}
+                disabled={!priceRows.length}
+                InputLabelProps={{ shrink: true }}
+              />
 
-          <TextField
-            label="End month"
-            type="month"
-            size="small"
-            value={currentEndMonth}
-            onChange={(event) => {
-              setFreeRangeStartMonth(currentStartMonth);
-              setFreeRangeEndMonth(event.target.value);
-              setRangeMode('free');
-              setActivePreset('');
-              setIsPresetScrollReady(false);
-              setPresetPanOffsetMonths(0);
-            }}
-            inputProps={{
-              min: currentStartMonth || minAvailableMonth || undefined,
-              max: maxAvailableMonth || undefined,
-            }}
-            disabled={!priceRows.length}
-            InputLabelProps={{ shrink: true }}
-          />
+              <TextField
+                label="End month"
+                type="month"
+                size="small"
+                value={currentEndMonth}
+                onChange={(event) => {
+                  setFreeRangeMonths({
+                    startMonth: currentStartMonth,
+                    endMonth: event.target.value,
+                  });
+                  setRangeMode('free');
+                  setActivePreset('');
+                  setIsPresetScrollReady(false);
+                  setPresetPanOffsetMonths(0);
+                }}
+                inputProps={{
+                  min: currentStartMonth || minAvailableMonth || undefined,
+                  max: maxAvailableMonth || undefined,
+                }}
+                disabled={!priceRows.length}
+                InputLabelProps={{ shrink: true }}
+              />
+            </>
+          ) : (
+            <Box
+              data-testid="share-price-dashboard-month-controls-placeholder"
+              sx={{
+                width: '100%',
+                minHeight: 40,
+              }}
+            />
+          )}
         </Box>
 
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: { xs: 0.5, sm: 1 }, justifyContent: 'center' }}>

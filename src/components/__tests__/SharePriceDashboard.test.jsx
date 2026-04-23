@@ -59,8 +59,8 @@ import {
 // `npm run test:ui -- src/components/__tests__/SharePriceDashboard.test.jsx`
 
 function createMockComponent(tagName, omittedPropNames = []) {
-  return function MockComponent({ children, ...props }) {
-    const forwardedProps = { ...props };
+  return React.forwardRef(function MockComponent({ children, ...props }, ref) {
+    const forwardedProps = { ...props, ref };
 
     omittedPropNames.forEach((propName) => {
       delete forwardedProps[propName];
@@ -71,7 +71,7 @@ function createMockComponent(tagName, omittedPropNames = []) {
     }
 
     return React.createElement(tagName, forwardedProps, children);
-  };
+  });
 }
 
 vi.mock('../../services/watchlistDashboardApi', () => ({
@@ -674,9 +674,11 @@ async function configureScrollRegion(scrollRegion, clientWidth = 920) {
   });
 
   await act(async () => {
+    scrollRegion.__sharePriceDashboardPublishMeasurement?.();
     activeResizeObservers.slice().forEach((observer) => {
       observer.notify(scrollRegion);
     });
+    fireEvent.scroll(scrollRegion);
     await Promise.resolve();
   });
 
@@ -684,9 +686,11 @@ async function configureScrollRegion(scrollRegion, clientWidth = 920) {
     await new Promise((resolve) => {
       window.setTimeout(resolve, 0);
     });
+    scrollRegion.__sharePriceDashboardPublishMeasurement?.();
     activeResizeObservers.slice().forEach((observer) => {
       observer.notify(scrollRegion);
     });
+    fireEvent.scroll(scrollRegion);
   });
 
   return {
@@ -802,13 +806,7 @@ async function renderDashboard(options = {}) {
       {...dashboardProps}
     />,
   );
-
-  // Some test scenarios can briefly render an extra disabled month input during
-  // setup. We always want the main dashboard controls, which are the first
-  // labelled month inputs rendered inside the stock card surface.
   const mountedQueries = within(mountedContainer);
-  const startInput = mountedQueries.getAllByLabelText('Start month')[0];
-  const endInput = mountedQueries.getAllByLabelText('End month')[0];
 
   await act(async () => {
     deferredResponse.resolveResponse(queuedPayloads[0]);
@@ -817,6 +815,9 @@ async function renderDashboard(options = {}) {
   });
 
   await flushDashboardWork();
+
+  const startInput = mountedQueries.getAllByLabelText('Start month')[0];
+  const endInput = mountedQueries.getAllByLabelText('End month')[0];
 
   const scrollRegion = mountedQueries.getByTestId(DASHBOARD_TEST_ID);
   const scrollController = await configureScrollRegion(scrollRegion);
@@ -845,6 +846,7 @@ async function dragPresetWindowOlderByMonths({
 
   await act(async () => {
     scrollController.setScrollLeft(nextScrollLeft);
+    scrollRegion.__sharePriceDashboardPublishMeasurement?.();
     fireEvent.scroll(scrollRegion);
   });
 
@@ -1086,6 +1088,35 @@ describe('SharePriceDashboard preset scrolling', () => {
     }
   });
 
+  it('does not log a maximum update depth error when resize observers publish the same measurement repeatedly', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await renderDashboard();
+
+      const scrollRegion = screen.getByTestId(DASHBOARD_TEST_ID);
+      await configureScrollRegion(scrollRegion, 920);
+
+      await act(async () => {
+        activeResizeObservers.slice().forEach((observer) => {
+          observer.notify(scrollRegion);
+          observer.notify(scrollRegion);
+          observer.notify(scrollRegion);
+        });
+      });
+      await flushDashboardWork();
+      await flushDashboardWork();
+
+      const maximumDepthErrors = consoleErrorSpy.mock.calls.filter((call) => {
+        return call.some((value) => String(value).includes('Maximum update depth exceeded'));
+      });
+
+      expect(maximumDepthErrors).toHaveLength(0);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
   it('does not log a maximum update depth error when a media-query change fires', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -1096,6 +1127,67 @@ describe('SharePriceDashboard preset scrolling', () => {
       await setViewportWidthAndDispatch(480);
       await flushDashboardWork();
       await flushDashboardWork();
+
+      const maximumDepthErrors = consoleErrorSpy.mock.calls.filter((call) => {
+        return call.some((value) => String(value).includes('Maximum update depth exceeded'));
+      });
+
+      expect(maximumDepthErrors).toHaveLength(0);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('does not mount the month inputs until a loaded month range exists', async () => {
+    const deferredResponse = createDeferredResponse();
+
+    fetchDashboardData.mockImplementation(() => deferredResponse.responsePromise);
+
+    mountDashboard(
+      <SharePriceDashboard
+        identifier="AAPL"
+        name="AAPL name"
+        scaleAnimationDurationMs={0}
+      />,
+    );
+
+    const mountedQueries = within(mountedContainer);
+
+    expect(mountedQueries.queryByLabelText('Start month')).toBeNull();
+    expect(mountedQueries.queryByLabelText('End month')).toBeNull();
+    expect(mountedQueries.getByTestId('share-price-dashboard-month-controls-placeholder')).toBeTruthy();
+
+    await act(async () => {
+      deferredResponse.resolveResponse(buildDashboardPayload());
+      await deferredResponse.responsePromise;
+      await Promise.resolve();
+    });
+
+    await flushDashboardWork();
+
+    expect(mountedQueries.getByLabelText('Start month')).toBeTruthy();
+    expect(mountedQueries.getByLabelText('End month')).toBeTruthy();
+  });
+
+  it('does not log a maximum update depth error when the dashboard remounts after unmounting', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await renderDashboard();
+
+      if (mountedRoot) {
+        act(() => {
+          mountedRoot.unmount();
+        });
+        mountedRoot = null;
+      }
+
+      if (mountedContainer) {
+        mountedContainer.remove();
+        mountedContainer = null;
+      }
+
+      await renderDashboard();
 
       const maximumDepthErrors = consoleErrorSpy.mock.calls.filter((call) => {
         return call.some((value) => String(value).includes('Maximum update depth exceeded'));
@@ -1748,6 +1840,10 @@ describe('SharePriceDashboard preset scrolling', () => {
       await flushDashboardWork();
 
       const scrollRegion = screen.getByTestId(DASHBOARD_TEST_ID);
+      await act(async () => {
+        scrollRegion.__sharePriceDashboardPublishMeasurement?.();
+      });
+      await flushDashboardWork();
       const leftRailWidth = Number(scrollRegion.getAttribute('data-left-rail-width'));
       const expectedContentWidth = 920 - leftRailWidth;
 
@@ -1813,6 +1909,10 @@ describe('SharePriceDashboard preset scrolling', () => {
       await flushDashboardWork();
 
       const scrollRegion = screen.getByTestId(DASHBOARD_TEST_ID);
+      await act(async () => {
+        scrollRegion.__sharePriceDashboardPublishMeasurement?.();
+      });
+      await flushDashboardWork();
       const leftRailWidth = Number(scrollRegion.getAttribute('data-left-rail-width'));
 
       expect(Number(scrollRegion.getAttribute('data-content-width'))).toBe(920 - leftRailWidth);
