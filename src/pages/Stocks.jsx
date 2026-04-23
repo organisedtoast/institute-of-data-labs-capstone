@@ -1,8 +1,9 @@
+import React from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
-import { useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import SharePriceDashboard from '../components/SharePriceDashboard';
 import StockSearchResults from '../components/StockSearchResults';
@@ -19,6 +20,7 @@ function Stocks() {
     pendingStockAction,
     clearPendingStockAction,
   } = useStockSearch();
+  const [focusedMetricsIdentifier, setFocusedMetricsIdentifier] = useState('');
 
   useEffect(() => {
     if (!pendingStockAction) {
@@ -47,6 +49,37 @@ function Stocks() {
 
     return undefined;
   }, [addStockFromResult, clearPendingStockAction, openExistingStock, pendingStockAction]);
+
+  useEffect(() => {
+    if (
+      stocksStatus === 'success'
+      && focusedMetricsIdentifier
+      && !stocks.some((stock) => stock.identifier === focusedMetricsIdentifier)
+    ) {
+      // Focus mode is a page concern because the page is the only place that
+      // knows about the sibling cards sitting beside the selected stock. If the
+      // focused stock disappears from the watchlist, we clear that page-level
+      // focus so the screen cannot get stuck pointing at a missing card.
+      setFocusedMetricsIdentifier('');
+    }
+  }, [focusedMetricsIdentifier, stocks, stocksStatus]);
+
+  const handleMetricsVisibilityChange = useCallback((identifier, nextIsOpen) => {
+    // `SHOW METRICS` and `HIDE METRICS` still live on the stock card itself,
+    // but the page owns the "which card is the one in focus?" decision.
+    // That lets the card stay reusable while the page hides sibling cards.
+    setFocusedMetricsIdentifier(nextIsOpen ? identifier : '');
+  }, []);
+
+  const visibleStocks = useMemo(() => {
+    if (!focusedMetricsIdentifier) {
+      return stocks;
+    }
+
+    // When one stock enters focused metrics mode, we intentionally hide the
+    // sibling cards so the learner can study one chart/table combination at a time.
+    return stocks.filter((stock) => stock.identifier === focusedMetricsIdentifier);
+  }, [focusedMetricsIdentifier, stocks]);
 
   return (
     <Box sx={{ px: 2, py: 3 }}>
@@ -95,13 +128,15 @@ function Stocks() {
           </Box>
         ) : null}
 
-        {stocks.map((stock) => {
+        {visibleStocks.map((stock) => {
           return (
             <SharePriceDashboard
               key={stock.identifier}
               identifier={stock.identifier}
               name={stock.name}
               isRemovable={stock.isUserAdded}
+              isFocusedMetricsMode={focusedMetricsIdentifier === stock.identifier}
+              onMetricsVisibilityChange={(nextIsOpen) => handleMetricsVisibilityChange(stock.identifier, nextIsOpen)}
               onRemove={() => removeStockByIdentifier(stock.identifier)}
             />
           );

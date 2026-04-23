@@ -731,6 +731,7 @@ function mountDashboard(ui) {
 // each test can focus on one user-facing behavior.
 async function renderDashboard(options = {}) {
   const {
+    dashboardProps = {},
     identifier = 'AAPL',
     isRemovable = false,
     name = `${identifier} name`,
@@ -765,6 +766,7 @@ async function renderDashboard(options = {}) {
       isRemovable={isRemovable}
       name={name}
       scaleAnimationDurationMs={0}
+      {...dashboardProps}
     />,
   );
 
@@ -815,6 +817,21 @@ async function dragPresetWindowOlderByMonths({
 
   await flushDashboardWork();
   await flushDashboardWork();
+}
+
+// Many metrics tests need to point at one specific overrideable detail cell.
+// This helper keeps that lookup in one place so each test can talk about the
+// user-visible behavior it is protecting instead of repeating DOM plumbing.
+function getOverrideableMetricCell({
+  rowKey = '710::annualData[].forecastData.fy1.ebit',
+  columnKey = 'annual-2025',
+} = {}) {
+  return screen.getAllByTestId('share-price-dashboard-metric-cell').find((cellNode) => {
+    return (
+      cellNode.getAttribute('data-row-key') === rowKey
+      && cellNode.getAttribute('data-column-key') === columnKey
+    );
+  });
 }
 
 // Each `it(...)` block below describes one user-facing preset-scroll scenario.
@@ -1826,6 +1843,7 @@ describe('SharePriceDashboard metrics mode', () => {
     fetchDashboardData.mockReset();
     updateDashboardMetricOverride.mockReset();
     updateDashboardInvestmentCategory.mockReset();
+    updateDashboardRowPreference.mockReset();
   });
 
   it('opens one annual metrics table, keeps non-empty rows visible, and places empty rows under hidden rows', async () => {
@@ -1939,16 +1957,7 @@ describe('SharePriceDashboard metrics mode', () => {
     await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
     await flushDashboardWork();
 
-    const getMetricCell = () => {
-      return screen.getAllByTestId('share-price-dashboard-metric-cell').find((cellNode) => {
-        return (
-          cellNode.getAttribute('data-row-key') === '710::annualData[].forecastData.fy1.ebit'
-          && cellNode.getAttribute('data-column-key') === 'annual-2025'
-        );
-      });
-    };
-
-    const overriddenCellBeforeClear = getMetricCell();
+    const overriddenCellBeforeClear = getOverrideableMetricCell();
     expect(overriddenCellBeforeClear).toBeTruthy();
     expect(overriddenCellBeforeClear.getAttribute('data-is-overridden')).toBe('true');
 
@@ -1975,9 +1984,206 @@ describe('SharePriceDashboard metrics mode', () => {
     );
     expect(screen.queryByTestId('share-price-dashboard-metric-editor')).toBeNull();
 
-    const overriddenCellAfterClear = getMetricCell();
+    const overriddenCellAfterClear = getOverrideableMetricCell();
     expect(overriddenCellAfterClear).toBeTruthy();
     expect(overriddenCellAfterClear.getAttribute('data-is-overridden')).toBe('false');
+  });
+
+  it('does not warn when SHOW METRICS updates parent focus state', async () => {
+    const payload = buildMetricsModePayload();
+    const deferredResponse = createDeferredResponse();
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    fetchDashboardData.mockImplementation(() => deferredResponse.responsePromise);
+
+    // The Stocks page reproduces this warning because its callback updates page
+    // state when the child dashboard opens metrics. This wrapper gives the
+    // dashboard the same kind of parent-owned focus state inside a focused
+    // regression test without needing to render the whole page.
+    function ParentFocusHarness() {
+      const [isFocused, setIsFocused] = React.useState(false);
+
+      return (
+        <div>
+          <div data-testid="share-price-dashboard-parent-focus-state">
+            {isFocused ? 'focused' : 'idle'}
+          </div>
+          <SharePriceDashboard
+            identifier="AAPL"
+            name="AAPL name"
+            isFocusedMetricsMode={isFocused}
+            onMetricsVisibilityChange={setIsFocused}
+            scaleAnimationDurationMs={0}
+          />
+        </div>
+      );
+    }
+
+    mountDashboard(<ParentFocusHarness />);
+
+    await act(async () => {
+      deferredResponse.resolveResponse(payload);
+      await deferredResponse.responsePromise;
+      await Promise.resolve();
+    });
+
+    await flushDashboardWork();
+
+    const mountedQueries = within(mountedContainer);
+    const user = userEvent.setup();
+
+    await user.click(mountedQueries.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    expect(mountedQueries.getByTestId('share-price-dashboard-parent-focus-state').textContent).toBe('focused');
+    expect(
+      consoleErrorSpy.mock.calls.some((call) => {
+        return String(call[0] || '').includes('Cannot update a component');
+      }),
+    ).toBe(false);
+  });
+
+  // Focused metrics mode is a second reading mode for the same card.
+  // These tests make sure the chart and base rows stay outside the new inner
+  // metrics viewport so the user can keep that context visible while scrolling.
+  it('keeps the chart and base rows outside the focused metrics viewport', async () => {
+    const { user } = await renderDashboard({
+      payload: buildMetricsModePayload(),
+      dashboardProps: {
+        isFocusedMetricsMode: true,
+      },
+    });
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    // The focused metrics viewport should add a right-side safety inset for the
+    // HIDE buttons without changing the shared table width that keeps the left
+    // rail frozen and the annual columns aligned with the chart above.
+    const scrollRegions = screen.getAllByTestId('share-price-dashboard-scroll-region');
+    const scrollRegion = scrollRegions[scrollRegions.length - 1];
+    const topRails = screen.getAllByTestId('share-price-dashboard-top-rails').at(-1);
+    const metricsViewport = screen.getAllByTestId('share-price-dashboard-metrics-viewport').at(-1);
+    const metricsHeader = within(metricsViewport).getByTestId('share-price-dashboard-detail-metrics-header');
+    const metricRows = within(metricsViewport).getAllByTestId('share-price-dashboard-metric-row');
+
+    expect(metricsViewport.getAttribute('data-vertical-scroll')).toBe('true');
+    expect(metricsViewport.getAttribute('data-action-gutter-width')).toBe('56');
+    expect(metricsViewport.getAttribute('data-scrollbar-safe-inset-width')).toBe('16');
+    expect(scrollRegion.getAttribute('data-surface-width')).toBe('920');
+    expect(topRails).toBeTruthy();
+    expect(within(topRails).getByText('FY end date')).toBeTruthy();
+    expect(metricsHeader).toBeTruthy();
+    expect(metricsHeader.getAttribute('data-action-gutter-width')).toBe('56');
+    expect(metricsHeader.getAttribute('data-metrics-row-width')).toBe('936');
+    expect(within(metricsViewport).getByText('EBIT FY+1')).toBeTruthy();
+    expect(within(metricsViewport).queryByText('FY end date')).toBeNull();
+
+    // The annual cell centers stay fixed to the shared chart geometry, so the
+    // detail rows must keep the normal 56px action gutter and put the extra
+    // scrollbar safety space in a separate right-side lane instead.
+    expect(
+      Number(metricsHeader.getAttribute('data-metrics-row-width')),
+    ).toBe(Number(scrollRegion.getAttribute('data-surface-width')) + 16);
+    metricRows.forEach((rowNode) => {
+      expect(rowNode.getAttribute('data-action-gutter-width')).toBe('56');
+      expect(rowNode.getAttribute('data-metrics-row-width')).toBe('936');
+    });
+    expect(within(metricsViewport).getAllByTestId('share-price-dashboard-metric-row-hide-button').length).toBe(3);
+  });
+
+  it('prevents the native context menu while still opening the metric editor', async () => {
+    const { user } = await renderDashboard({
+      payload: buildMetricsModePayload(),
+      dashboardProps: {
+        isFocusedMetricsMode: true,
+      },
+    });
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    const metricCell = getOverrideableMetricCell();
+    expect(metricCell).toBeTruthy();
+
+    const contextMenuEvent = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+    });
+
+    await act(async () => {
+      metricCell.dispatchEvent(contextMenuEvent);
+    });
+
+    expect(contextMenuEvent.defaultPrevented).toBe(true);
+    expect(screen.getByTestId('share-price-dashboard-metric-editor')).toBeTruthy();
+  });
+
+  it('stops the metric cell context menu from bubbling to ancestors', async () => {
+    const payload = buildMetricsModePayload();
+    const deferredResponse = createDeferredResponse();
+    const ancestorContextMenuSpy = vi.fn();
+
+    fetchDashboardData.mockImplementation(() => deferredResponse.responsePromise);
+
+    mountDashboard(
+      <div onContextMenu={ancestorContextMenuSpy}>
+        <SharePriceDashboard
+          identifier="AAPL"
+          name="AAPL name"
+          scaleAnimationDurationMs={0}
+        />
+      </div>,
+    );
+
+    await act(async () => {
+      deferredResponse.resolveResponse(payload);
+      await deferredResponse.responsePromise;
+      await Promise.resolve();
+    });
+
+    await flushDashboardWork();
+
+    const mountedQueries = within(mountedContainer);
+    await act(async () => {
+      fireEvent.click(mountedQueries.getByRole('button', { name: 'SHOW METRICS' }));
+    });
+    await flushDashboardWork();
+
+    const metricCell = getOverrideableMetricCell();
+    expect(metricCell).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.contextMenu(metricCell);
+    });
+
+    expect(ancestorContextMenuSpy).not.toHaveBeenCalled();
+    expect(screen.getByTestId('share-price-dashboard-metric-editor')).toBeTruthy();
+  });
+
+  it('prevents the secondary-button mousedown on overrideable metric cells', async () => {
+    const { user } = await renderDashboard({
+      payload: buildMetricsModePayload(),
+    });
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    const metricCell = getOverrideableMetricCell();
+    expect(metricCell).toBeTruthy();
+
+    const mouseDownEvent = new MouseEvent('mousedown', {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+    });
+
+    await act(async () => {
+      metricCell.dispatchEvent(mouseDownEvent);
+    });
+
+    expect(mouseDownEvent.defaultPrevented).toBe(true);
   });
 
 });

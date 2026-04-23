@@ -62,6 +62,13 @@ const ACTIVE_FISCAL_BAND_FILL = 'rgba(148, 163, 184, 0.12)';
 const FY_WATERMARK_OPACITY = 0.9;
 const LONG_PRESS_ACTIVATION_MS = 400;
 const LONG_PRESS_MOVE_TOLERANCE_PX = 10;
+const EDITABLE_METRIC_UNDERLINE = 'rgba(100, 116, 139, 0.22)';
+const EDITABLE_METRIC_UNDERLINE_HOVER = 'rgba(100, 116, 139, 0.34)';
+const OVERRIDDEN_METRIC_UNDERLINE = 'rgba(109, 40, 217, 0.44)';
+const OVERRIDDEN_METRIC_UNDERLINE_HOVER = 'rgba(109, 40, 217, 0.64)';
+const FOCUSED_METRICS_VIEWPORT_MAX_HEIGHT = 'min(48vh, 420px)';
+const METRICS_ACTION_GUTTER_PX = 56;
+const METRICS_SCROLLBAR_SAFE_INSET_PX = 16;
 
 const PRESET_BUTTONS = [
   { key: 'MAX', label: 'MAX', monthCount: null },
@@ -676,6 +683,8 @@ export default function SharePriceDashboard({
   isRemovable = false,
   onRemove = null,
   scaleAnimationDurationMs = null,
+  isFocusedMetricsMode = false,
+  onMetricsVisibilityChange = null,
 }) {
   const svgRef = useRef(null);
   const timelineScrollRef = useRef(null);
@@ -1646,6 +1655,19 @@ export default function SharePriceDashboard({
   const baseSurfaceWidth = fixedLeftRailWidth + timelineLayout.contentWidth;
   const presetPanTrackWidth = Math.max(scrollState.containerWidth || baseSurfaceWidth, baseSurfaceWidth) + (maxPresetPanOffset * PRESET_PAN_STEP_PX);
   const scrollSurfaceWidth = isPresetWindowMode ? presetPanTrackWidth : baseSurfaceWidth;
+  // Focused metrics mode is intentionally a second visual mode of the same card.
+  // The page decides *which* stock is in focus, while the card decides *how*
+  // to render the focused layout once that mode is active.
+  const usesFocusedMetricsViewport = isMetricsOpen && isFocusedMetricsMode;
+  // The focused viewport uses its own vertical scrollbar, so we reserve a
+  // little extra room on the right only in that mode. This keeps the HIDE
+  // button clear of overlay scrollbars without widening the table itself.
+  const focusedMetricsRowWidth = usesFocusedMetricsViewport
+    ? (baseSurfaceWidth + METRICS_SCROLLBAR_SAFE_INSET_PX)
+    : baseSurfaceWidth;
+  const focusedMetricsHideButtonRightOffset = usesFocusedMetricsViewport
+    ? (8 + METRICS_SCROLLBAR_SAFE_INSET_PX)
+    : 8;
   const visibleAnnualMetricColumnKeys = useMemo(() => {
     return new Set(tablePoints.map((annualRow) => `annual-${annualRow.fiscalYear}`));
   }, [tablePoints]);
@@ -1703,6 +1725,22 @@ export default function SharePriceDashboard({
     setPresetPanOffsetMonths(0);
   };
 
+  const handleMetricsVisibilityToggle = () => {
+    // We keep the page-level "which stock is focused?" decision outside this
+    // component, but this card still owns the local open/closed state for the
+    // metrics surface itself. The callback bridges those two layers.
+    const nextIsMetricsOpen = !isMetricsOpen;
+
+    setMetricsActionError('');
+    setMetricEditorState(null);
+    setMetricEditorValue('');
+    setIsMetricsOpen(nextIsMetricsOpen);
+
+    if (typeof onMetricsVisibilityChange === 'function') {
+      onMetricsVisibilityChange(nextIsMetricsOpen);
+    }
+  };
+
   const clearHoverState = () => {
     setHoverState({
       date: '',
@@ -1748,13 +1786,27 @@ export default function SharePriceDashboard({
     setMetricEditorValue('');
   };
 
+  const suppressMetricCellContextMenu = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.nativeEvent?.stopImmediatePropagation?.();
+  };
+
   const handleMetricCellContextMenu = (event, metricRow, cell) => {
     if (!cell?.isOverrideable) {
       return;
     }
 
-    event.preventDefault();
+    suppressMetricCellContextMenu(event);
     openMetricEditor(cell, metricRow.fieldPath, event.currentTarget.getBoundingClientRect());
+  };
+
+  const handleMetricCellMouseDown = (event, cell) => {
+    if (!cell?.isOverrideable || event.button !== 2) {
+      return;
+    }
+
+    suppressMetricCellContextMenu(event);
   };
 
   const handleMetricCellTouchStart = (event, metricRow, cell) => {
@@ -2087,6 +2139,248 @@ export default function SharePriceDashboard({
       </Box>
     );
   } else {
+    // The detail metrics rows already share the same annual-column geometry as
+    // the chart and base rows above them. Pulling that markup into one reusable
+    // block lets us render it either:
+    // 1. inline in the normal dashboard mode, or
+    // 2. inside its own vertical viewport in focused metrics mode.
+    const detailMetricsRows = (
+      <>
+        <Box
+          key="detail-metrics-header"
+          data-testid="share-price-dashboard-detail-metrics-header"
+          data-action-gutter-width={String(METRICS_ACTION_GUTTER_PX)}
+          data-metrics-row-width={String(focusedMetricsRowWidth)}
+          sx={{
+            display: 'flex',
+            alignItems: 'stretch',
+            width: focusedMetricsRowWidth,
+            height: `${HEADER_ROW_HEIGHT}px`,
+            backgroundColor: '#f8fafc',
+            borderTop: '1px solid #e2e8f0',
+            borderBottom: '2px solid #e2e8f0',
+            position: usesFocusedMetricsViewport ? 'sticky' : 'relative',
+            top: usesFocusedMetricsViewport ? 0 : 'auto',
+            zIndex: usesFocusedMetricsViewport ? 4 : 'auto',
+          }}
+        >
+          <Box
+            sx={{
+              position: 'sticky',
+              left: 0,
+              zIndex: 5,
+              width: fixedLeftRailWidth,
+              flexShrink: 0,
+              px: 1.25,
+              fontSize: { xs: '11px', sm: '12px' },
+              fontWeight: 600,
+              color: '#64748b',
+              display: 'flex',
+              alignItems: 'center',
+              backgroundColor: '#f8fafc',
+              borderRight: '1px solid #e2e8f0',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            DETAIL METRICS
+          </Box>
+
+          <Box
+            sx={{
+              position: 'relative',
+              width: `${timelineLayout.contentWidth - METRICS_ACTION_GUTTER_PX}px`,
+              flexShrink: 0,
+              height: `${HEADER_ROW_HEIGHT}px`,
+              backgroundColor: '#f8fafc',
+              mr: `${METRICS_ACTION_GUTTER_PX}px`,
+            }}
+          />
+        </Box>
+        {metricsRowDefinitions.map((tableRow) => (
+          <Box
+            key={tableRow.key}
+            data-testid="share-price-dashboard-metric-row"
+            data-action-gutter-width={String(METRICS_ACTION_GUTTER_PX)}
+            data-metrics-row-width={String(focusedMetricsRowWidth)}
+            sx={{
+              position: 'relative',
+              display: 'flex',
+              alignItems: 'stretch',
+              width: focusedMetricsRowWidth,
+              height: `${tableRow.height}px`,
+              backgroundColor: tableRow.backgroundColor,
+              borderTop: tableRow.borderTop,
+              borderBottom: tableRow.borderBottom,
+            }}
+          >
+            <Box
+              title={shouldUseShortLabels ? tableRow.label : undefined}
+              aria-label={tableRow.label}
+              sx={{
+                position: 'sticky',
+                left: 0,
+                zIndex: 2,
+                width: fixedLeftRailWidth,
+                flexShrink: 0,
+                px: 1.25,
+                py: 0.5,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                alignItems: 'flex-start',
+                gap: tableRow.showSectionLabel ? 0.2 : 0,
+                backgroundColor: tableRow.backgroundColor,
+                borderRight: '1px solid #e2e8f0',
+                textAlign: 'left',
+              }}
+            >
+              {tableRow.showSectionLabel ? (
+                <Box
+                  sx={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    color: '#94a3b8',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    width: '100%',
+                    textAlign: 'left',
+                  }}
+                >
+                  {shouldUseShortLabels ? tableRow.shortSection : tableRow.section}
+                </Box>
+              ) : null}
+              <Box
+                sx={{
+                  fontSize: { xs: '11px', sm: '12px', md: '13px' },
+                  fontWeight: 400,
+                  color: '#475569',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  width: '100%',
+                  textAlign: 'left',
+                }}
+              >
+                {shouldUseShortLabels ? tableRow.shortLabel : tableRow.label}
+              </Box>
+            </Box>
+
+            <Box
+              sx={{
+                position: 'relative',
+                width: `${timelineLayout.contentWidth - METRICS_ACTION_GUTTER_PX}px`,
+                flexShrink: 0,
+                height: `${tableRow.height}px`,
+                mr: `${METRICS_ACTION_GUTTER_PX}px`,
+              }}
+            >
+              {renderedMetricsColumns.map((column) => {
+                const metricCell = renderedMetricCellByRowKey.get(tableRow.key)?.get(column.key);
+                const centerX = metricsColumnCenterByKey.get(column.key);
+
+                if (!metricCell || !Number.isFinite(centerX)) {
+                  return null;
+                }
+
+                return (
+                  <Box
+                    key={`${tableRow.key}-${column.key}`}
+                    role={metricCell.isOverrideable ? 'button' : undefined}
+                    tabIndex={metricCell.isOverrideable ? 0 : undefined}
+                    data-testid="share-price-dashboard-metric-cell"
+                    data-row-key={tableRow.key}
+                    data-column-key={column.key}
+                    data-is-overridden={metricCell.isOverridden ? 'true' : 'false'}
+                    onContextMenu={(event) => handleMetricCellContextMenu(event, tableRow, metricCell)}
+                    onMouseDown={(event) => handleMetricCellMouseDown(event, metricCell)}
+                    onTouchStart={(event) => handleMetricCellTouchStart(event, tableRow, metricCell)}
+                    onTouchMove={handleMetricCellTouchMove}
+                    onTouchEnd={handleMetricCellTouchEnd}
+                    onTouchCancel={handleMetricCellTouchEnd}
+                    sx={{
+                      position: 'absolute',
+                      left: `${centerX}px`,
+                      transform: 'translateX(-50%)',
+                      height: `${tableRow.height}px`,
+                      fontSize: timelineLayout.bodyFontSize,
+                      fontWeight: metricCell.isOverridden ? 600 : 400,
+                      color: metricCell.isOverridden ? '#6d28d9' : '#334155',
+                      textAlign: 'center',
+                      width: `${timelineLayout.yearCellWidth}px`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      lineHeight: 1.1,
+                      px: 0.35,
+                      cursor: metricCell.isOverrideable ? 'context-menu' : 'default',
+                      userSelect: 'none',
+                      ...(metricCell.isOverrideable ? {
+                        '&:hover .share-price-dashboard-metric-value, &:focus-visible .share-price-dashboard-metric-value': {
+                          borderBottomColor: metricCell.isOverridden
+                            ? OVERRIDDEN_METRIC_UNDERLINE_HOVER
+                            : EDITABLE_METRIC_UNDERLINE_HOVER,
+                        },
+                      } : null),
+                    }}
+                  >
+                    <Box
+                      component="span"
+                      className="share-price-dashboard-metric-value"
+                      sx={{
+                        display: 'inline-block',
+                        maxWidth: '100%',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        lineHeight: 1.1,
+                        paddingBottom: metricCell.isOverrideable ? '1px' : 0,
+                        borderBottom: metricCell.isOverrideable
+                          ? `${metricCell.isOverridden ? 1.5 : 1}px solid ${metricCell.isOverridden
+                            ? OVERRIDDEN_METRIC_UNDERLINE
+                            : EDITABLE_METRIC_UNDERLINE}`
+                          : '1px solid transparent',
+                      }}
+                    >
+                      {formatMetricCellValue(metricCell.value, tableRow.fieldPath, { compact: isCompactPresetTable })}
+                    </Box>
+                  </Box>
+                );
+              })}
+            </Box>
+
+            <Button
+              size="small"
+              data-testid="share-price-dashboard-metric-row-hide-button"
+              disabled={isUpdatingRowPreference}
+              onClick={() => handleMetricRowEnabledState(tableRow.key, false)}
+              sx={{
+                position: 'absolute',
+                right: focusedMetricsHideButtonRightOffset,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                minWidth: 0,
+                px: 0.75,
+                py: 0,
+                fontSize: '10px',
+                lineHeight: 1.2,
+                zIndex: 3,
+                backgroundColor: 'rgba(255, 255, 255, 0.92)',
+                border: '1px solid #e2e8f0',
+              }}
+            >
+              HIDE
+            </Button>
+          </Box>
+        ))}
+      </>
+    );
+
     cardBody = (
       <Box
         sx={{
@@ -2121,6 +2415,7 @@ export default function SharePriceDashboard({
           */}
           <Box sx={{ width: scrollSurfaceWidth, position: 'relative' }}>
             <Box
+              data-testid={usesFocusedMetricsViewport ? 'share-price-dashboard-top-rails' : undefined}
               sx={{
                 width: baseSurfaceWidth,
                 position: isPresetWindowMode ? 'sticky' : 'relative',
@@ -2362,215 +2657,35 @@ export default function SharePriceDashboard({
                 ))}
 
                 {isMetricsOpen ? (
-                  <>
+                  usesFocusedMetricsViewport ? (
                     <Box
-                      key="detail-metrics-header"
-                      data-testid="share-price-dashboard-detail-metrics-header"
+                      data-testid="share-price-dashboard-metrics-viewport"
+                      data-vertical-scroll="true"
+                      data-action-gutter-width={String(METRICS_ACTION_GUTTER_PX)}
+                      data-scrollbar-safe-inset-width={String(
+                        usesFocusedMetricsViewport ? METRICS_SCROLLBAR_SAFE_INSET_PX : 0,
+                      )}
                       sx={{
-                        display: 'flex',
-                        alignItems: 'stretch',
                         width: baseSurfaceWidth,
-                        height: `${HEADER_ROW_HEIGHT}px`,
-                        backgroundColor: '#f8fafc',
+                        maxHeight: FOCUSED_METRICS_VIEWPORT_MAX_HEIGHT,
+                        overflowY: 'auto',
+                        overflowX: 'hidden',
                         borderTop: '1px solid #e2e8f0',
-                        borderBottom: '2px solid #e2e8f0',
+                        scrollbarGutter: 'stable',
                       }}
                     >
+                      {/* The chart and base rows stay above this viewport so the
+                          learner can keep their main context visible while they
+                          scroll only through the dense detail metrics. */}
                       <Box
                         sx={{
-                          position: 'sticky',
-                          left: 0,
-                          zIndex: 2,
-                          width: fixedLeftRailWidth,
-                          flexShrink: 0,
-                          px: 1.25,
-                          fontSize: { xs: '11px', sm: '12px' },
-                          fontWeight: 600,
-                          color: '#64748b',
-                          display: 'flex',
-                          alignItems: 'center',
-                          backgroundColor: '#f8fafc',
-                          borderRight: '1px solid #e2e8f0',
-                          whiteSpace: 'nowrap',
-                          }}
-                      >
-                        DETAIL METRICS
-                      </Box>
-
-                      <Box
-                        sx={{
-                          position: 'relative',
-                          width: timelineLayout.contentWidth,
-                          flexShrink: 0,
-                          height: `${HEADER_ROW_HEIGHT}px`,
+                          width: `${focusedMetricsRowWidth}px`,
                         }}
-                      />
+                      >
+                        {detailMetricsRows}
+                      </Box>
                     </Box>
-                    {metricsRowDefinitions.map((tableRow) => (
-                      <Box
-                        key={tableRow.key}
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'stretch',
-                          width: baseSurfaceWidth,
-                          height: `${tableRow.height}px`,
-                          backgroundColor: tableRow.backgroundColor,
-                          borderTop: tableRow.borderTop,
-                          borderBottom: tableRow.borderBottom,
-                        }}
-                      >
-                        <Box
-                          title={shouldUseShortLabels ? tableRow.label : undefined}
-                          aria-label={tableRow.label}
-                          sx={{
-                            position: 'sticky',
-                            left: 0,
-                            zIndex: 2,
-                            width: fixedLeftRailWidth,
-                            flexShrink: 0,
-                            px: 1.25,
-                            py: 0.5,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            justifyContent: 'center',
-                            alignItems: 'flex-start',
-                            gap: tableRow.showSectionLabel ? 0.2 : 0,
-                            backgroundColor: tableRow.backgroundColor,
-                            borderRight: '1px solid #e2e8f0',
-                            textAlign: 'left',
-                          }}
-                        >
-                          {tableRow.showSectionLabel ? (
-                            <Box
-                              sx={{
-                                fontSize: '10px',
-                                fontWeight: 700,
-                                color: '#94a3b8',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.04em',
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                width: '100%',
-                                textAlign: 'left',
-                              }}
-                            >
-                              {shouldUseShortLabels ? tableRow.shortSection : tableRow.section}
-                            </Box>
-                          ) : null}
-                          <Box
-                            sx={{
-                              fontSize: { xs: '11px', sm: '12px', md: '13px' },
-                              fontWeight: 400,
-                              color: '#475569',
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              width: '100%',
-                              textAlign: 'left',
-                            }}
-                          >
-                            {shouldUseShortLabels ? tableRow.shortLabel : tableRow.label}
-                          </Box>
-                        </Box>
-
-                        <Box
-                          sx={{
-                            position: 'relative',
-                            width: timelineLayout.contentWidth,
-                            flexShrink: 0,
-                            height: `${tableRow.height}px`,
-                          }}
-                        >
-                          {renderedMetricsColumns.map((column) => {
-                            const metricCell = renderedMetricCellByRowKey.get(tableRow.key)?.get(column.key);
-                            const centerX = metricsColumnCenterByKey.get(column.key);
-
-                            if (!metricCell || !Number.isFinite(centerX)) {
-                              return null;
-                            }
-
-                            return (
-                              <Box
-                                key={`${tableRow.key}-${column.key}`}
-                                role={metricCell.isOverrideable ? 'button' : undefined}
-                                tabIndex={metricCell.isOverrideable ? 0 : undefined}
-                                data-testid="share-price-dashboard-metric-cell"
-                                data-row-key={tableRow.key}
-                                data-column-key={column.key}
-                                data-is-overridden={metricCell.isOverridden ? 'true' : 'false'}
-                                onContextMenu={(event) => handleMetricCellContextMenu(event, tableRow, metricCell)}
-                                onTouchStart={(event) => handleMetricCellTouchStart(event, tableRow, metricCell)}
-                                onTouchMove={handleMetricCellTouchMove}
-                                onTouchEnd={handleMetricCellTouchEnd}
-                                onTouchCancel={handleMetricCellTouchEnd}
-                                sx={{
-                                  position: 'absolute',
-                                  left: `${centerX}px`,
-                                  transform: 'translateX(-50%)',
-                                  height: `${tableRow.height}px`,
-                                  fontSize: timelineLayout.bodyFontSize,
-                                  fontWeight: metricCell.isOverridden ? 600 : 400,
-                                  color: metricCell.isOverridden ? '#6d28d9' : '#334155',
-                                  textAlign: 'center',
-                                  width: `${timelineLayout.yearCellWidth}px`,
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                  lineHeight: 1.1,
-                                  px: 0.35,
-                                  cursor: metricCell.isOverrideable ? 'context-menu' : 'default',
-                                  userSelect: 'none',
-                                }}
-                              >
-                                {metricCell.isOverrideable ? (
-                                  <Box
-                                    component="span"
-                                    aria-hidden="true"
-                                    sx={{
-                                      color: '#64748b',
-                                      fontSize: '12px',
-                                      lineHeight: 1,
-                                      mr: 0.45,
-                                    }}
-                                  >
-                                    •
-                                  </Box>
-                                ) : null}
-                                {formatMetricCellValue(metricCell.value, tableRow.fieldPath, { compact: isCompactPresetTable })}
-                              </Box>
-                            );
-                          })}
-
-                          <Button
-                            size="small"
-                            data-testid="share-price-dashboard-metric-row-hide-button"
-                            disabled={isUpdatingRowPreference}
-                            onClick={() => handleMetricRowEnabledState(tableRow.key, false)}
-                            sx={{
-                              position: 'absolute',
-                              right: 6,
-                              top: '50%',
-                              transform: 'translateY(-50%)',
-                              minWidth: 0,
-                              px: 0.75,
-                              py: 0,
-                              fontSize: '10px',
-                              lineHeight: 1.2,
-                              zIndex: 2,
-                              backgroundColor: 'rgba(255, 255, 255, 0.92)',
-                              border: '1px solid #e2e8f0',
-                            }}
-                          >
-                            HIDE
-                          </Button>
-                        </Box>
-                      </Box>
-                    ))}
-                  </>
+                  ) : detailMetricsRows
                 ) : null}
               </Box>
             </Box>
@@ -2596,6 +2711,9 @@ export default function SharePriceDashboard({
               </Button>
             </Box>
 
+            {/* Hidden rows stay outside the scrollable metrics viewport on purpose.
+                They are a separate management area, not part of the dense
+                "read down the table" flow of the focused metrics pane. */}
             {isHiddenRowsOpen ? (
               <Box
                 data-testid="share-price-dashboard-hidden-rows"
@@ -2649,7 +2767,7 @@ export default function SharePriceDashboard({
     <Card
       sx={{
         width: '100%',
-        maxWidth: 1200,
+        maxWidth: isFocusedMetricsMode ? 1360 : 1200,
         display: 'flex',
         flexDirection: 'column',
         margin: 0,
@@ -2754,12 +2872,7 @@ export default function SharePriceDashboard({
           <Box sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
             <Button
               size="small"
-              onClick={() => {
-                setMetricsActionError('');
-                setMetricEditorState(null);
-                setMetricEditorValue('');
-                setIsMetricsOpen((previousState) => !previousState);
-              }}
+              onClick={handleMetricsVisibilityToggle}
             >
               {isMetricsOpen ? 'HIDE METRICS' : 'SHOW METRICS'}
             </Button>

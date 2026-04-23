@@ -34,6 +34,7 @@ const PRESET_BUTTONS = [
   { key: '5Y', label: '5Y', monthCount: 60 },
   { key: '10Y', label: '10Y', monthCount: 120 },
 ];
+const CONSTITUENT_ACTION_MIN_WIDTH_PX = 92;
 
 function getPresetKeyForRange(startMonth, endMonth, minAvailableMonth, maxAvailableMonth) {
   if (!startMonth || !endMonth || !minAvailableMonth || !maxAvailableMonth) {
@@ -486,7 +487,7 @@ export default function SectorCardComponent({ initialCardData }) {
               pr: { xs: 0.5, sm: 0.75 },
             }}
           >
-            <Stack spacing={{ xs: 1, sm: 1.1, lg: 1.2 }}>
+            <Stack spacing={{ xs: 0.75, sm: 0.85, lg: 0.95 }}>
               {(cardData?.constituents || []).map((constituent) => {
                 const isDisabledRow = constituent.status === 'userDisabled';
 
@@ -494,40 +495,35 @@ export default function SectorCardComponent({ initialCardData }) {
                   <Box
                     key={constituent.tickerSymbol}
                     data-testid="sector-card-constituent-row"
+                    data-compact-layout="true"
                     sx={{
                       border: '1px solid',
                       borderColor: 'divider',
-                      borderRadius: 2,
-                      px: { xs: 1.4, sm: 1.65, lg: 1.9 },
-                      py: { xs: 1.3, sm: 1.45, lg: 1.55 },
+                      borderRadius: 1.5,
+                      px: { xs: 1.1, sm: 1.25, lg: 1.4 },
+                      py: { xs: 0.95, sm: 1.05, lg: 1.15 },
                       backgroundColor: 'background.paper',
                       opacity: isDisabledRow ? 0.9 : 1,
                     }}
                   >
-                    {/* A single responsive grid keeps the text, status, and action
-                        locked into predictable regions at every breakpoint. */}
+                    {/* The old constituents layout reserved a lot of vertical and
+                        horizontal space for the status and action areas. This
+                        tighter flex layout keeps the same three logical regions
+                        while allowing the row to stay compact on all screen sizes. */}
                     <Box
                       sx={{
-                        display: 'grid',
-                        gridTemplateAreas: {
-                          xs: '"identity" "status" "action"',
-                          sm: '"identity action" "status action"',
-                        },
-                        gridTemplateColumns: {
-                          xs: 'minmax(0, 1fr)',
-                          sm: 'minmax(0, 1fr) 118px',
-                          md: 'minmax(0, 1fr) 124px',
-                          lg: 'minmax(0, 1fr) 140px',
-                        },
-                        columnGap: { xs: 0, sm: 1.5, lg: 2 },
-                        rowGap: { xs: 0.95, sm: 0.85, lg: 0.95 },
-                        alignItems: 'start',
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        columnGap: { xs: 0.75, sm: 1, lg: 1.15 },
+                        rowGap: { xs: 0.65, sm: 0.75, lg: 0.8 },
                       }}
                     >
                       <Box
                         data-testid="sector-card-constituent-identity"
                         sx={{
-                          gridArea: 'identity',
+                          flex: '1 1 220px',
                           minWidth: 0,
                           textAlign: 'left',
                         }}
@@ -535,9 +531,9 @@ export default function SectorCardComponent({ initialCardData }) {
                         <Typography
                           variant="subtitle2"
                           sx={{
-                            lineHeight: 1.25,
+                            lineHeight: 1.15,
                             letterSpacing: '0.01em',
-                            fontWeight: 500,
+                            fontWeight: 600,
                           }}
                         >
                           {constituent.tickerSymbol}
@@ -546,10 +542,15 @@ export default function SectorCardComponent({ initialCardData }) {
                           variant="body2"
                           color="text.secondary"
                           sx={{
-                            mt: 0.35,
+                            mt: 0.15,
+                            lineHeight: 1.28,
+                            fontSize: { xs: '0.81rem', sm: '0.84rem' },
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
                             wordBreak: 'break-word',
-                            lineHeight: 1.45,
-                            fontSize: '0.875rem',
                           }}
                         >
                           {constituent.companyName}
@@ -557,62 +558,76 @@ export default function SectorCardComponent({ initialCardData }) {
                       </Box>
 
                       <Box
-                        data-testid="sector-card-constituent-status"
+                        data-testid="sector-card-constituent-controls"
                         sx={{
-                          gridArea: 'status',
-                          minWidth: 0,
-                          justifySelf: 'start',
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          alignItems: 'center',
+                          justifyContent: { xs: 'space-between', sm: 'flex-end' },
+                          gap: { xs: 0.65, sm: 0.75, lg: 0.9 },
+                          width: { xs: '100%', sm: 'auto' },
+                          flex: { xs: '1 1 100%', sm: '0 1 auto' },
                         }}
                       >
-                        <Chip
-                          data-testid="sector-card-constituent-status-chip"
-                          label={formatConstituentStatus(constituent.status)}
-                          size="small"
-                          variant="outlined"
+                        <Box
+                          data-testid="sector-card-constituent-status"
                           sx={{
-                            ...getStatusChipSx(constituent.status),
-                            maxWidth: '100%',
-                            height: 'auto',
-                            borderWidth: '1px',
-                            fontSize: '0.69rem',
-                            fontWeight: 500,
-                            borderRadius: 999,
-                            '.MuiChip-label': {
-                              display: 'block',
-                              whiteSpace: 'normal',
-                              lineHeight: 1.2,
-                              px: 0.95,
-                              py: 0.32,
-                            },
-                          }}
-                        />
-                      </Box>
-
-                      <Box
-                        data-testid="sector-card-constituent-action-region"
-                        sx={{
-                          gridArea: 'action',
-                          alignSelf: { xs: 'stretch', sm: 'start' },
-                        }}
-                      >
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          data-testid="sector-card-constituent-action"
-                          fullWidth
-                          disabled={isLoading || constituent.isToggleable === false}
-                          onClick={() => handleToggleConstituent(
-                            constituent.tickerSymbol,
-                            !constituent.isEnabled,
-                          )}
-                          sx={{
-                            minHeight: 34,
-                            fontWeight: 500,
-                            letterSpacing: '0.02em',
+                            minWidth: 0,
+                            flex: '0 1 auto',
                           }}
                         >
-                          {constituent.isEnabled ? 'Disable' : 'Enable'}
-                        </Button>
+                          <Chip
+                            data-testid="sector-card-constituent-status-chip"
+                            label={formatConstituentStatus(constituent.status)}
+                            size="small"
+                            variant="outlined"
+                            sx={{
+                              ...getStatusChipSx(constituent.status),
+                              maxWidth: '100%',
+                              height: 'auto',
+                              borderWidth: '1px',
+                              fontSize: '0.67rem',
+                              fontWeight: 500,
+                              borderRadius: 999,
+                              '.MuiChip-label': {
+                                display: 'block',
+                                whiteSpace: 'normal',
+                                lineHeight: 1.15,
+                                px: 0.85,
+                                py: 0.24,
+                              },
+                            }}
+                          />
+                        </Box>
+
+                        <Box
+                          data-testid="sector-card-constituent-action-region"
+                          sx={{
+                            flex: '0 0 auto',
+                          }}
+                        >
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            data-testid="sector-card-constituent-action"
+                            disabled={isLoading || constituent.isToggleable === false}
+                            onClick={() => handleToggleConstituent(
+                              constituent.tickerSymbol,
+                              !constituent.isEnabled,
+                            )}
+                            sx={{
+                              minHeight: 28,
+                              minWidth: `${CONSTITUENT_ACTION_MIN_WIDTH_PX}px`,
+                              px: 1.1,
+                              py: 0.15,
+                              fontWeight: 500,
+                              letterSpacing: '0.01em',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {constituent.isEnabled ? 'Disable' : 'Enable'}
+                          </Button>
+                        </Box>
                       </Box>
                     </Box>
                   </Box>

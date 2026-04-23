@@ -136,7 +136,11 @@ describe('SectorCardComponent', () => {
     });
   });
 
-  it('keeps the row regions in stacked DOM order for the mobile 3-tier layout', async () => {
+  // The constituents redesign intentionally replaces the old tall 3-tier row
+  // with a denser "identity + compact controls" structure. These tests protect
+  // that new compact contract without changing the user-facing meanings of the
+  // identity, status, and action regions.
+  it('groups the status chip and action into one compact controls region', async () => {
     queryInvestmentCategoryCard.mockResolvedValue(initialCardData);
 
     render(<SectorCardComponent initialCardData={initialCardData} />);
@@ -146,11 +150,35 @@ describe('SectorCardComponent', () => {
     const alphaRow = (await screen.findByText('ALPHA')).closest('[data-testid="sector-card-constituent-row"]');
 
     expect(alphaRow).toBeTruthy();
-    const identityRegion = within(alphaRow).getByTestId('sector-card-constituent-identity');
-    const statusRegion = within(alphaRow).getByTestId('sector-card-constituent-status');
-    const actionRegion = within(alphaRow).getByTestId('sector-card-constituent-action-region');
+    const controlsRegion = within(alphaRow).getByTestId('sector-card-constituent-controls');
 
-    expect(identityRegion.compareDocumentPosition(statusRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(statusRegion.compareDocumentPosition(actionRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // A compact controls wrapper proves the status chip and action button are
+    // now treated as one tight group instead of two separate tall rows.
+    expect(within(controlsRegion).getByTestId('sector-card-constituent-status-chip')).toBeTruthy();
+    expect(within(controlsRegion).getByTestId('sector-card-constituent-action').textContent).toBe('Disable');
+    expect(alphaRow.getAttribute('data-compact-layout')).toBe('true');
+  });
+
+  it('keeps long company names inside the identity region while preserving the compact controls', async () => {
+    queryInvestmentCategoryCard.mockResolvedValue(initialCardData);
+
+    render(<SectorCardComponent initialCardData={initialCardData} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'CONSTITUENTS' }));
+
+    const betaRow = (await screen.findByText('BETA')).closest('[data-testid="sector-card-constituent-row"]');
+
+    expect(betaRow).toBeTruthy();
+
+    const identityRegion = within(betaRow).getByTestId('sector-card-constituent-identity');
+    const controlsRegion = within(betaRow).getByTestId('sector-card-constituent-controls');
+
+    // Beta has the longest sample name in this fixture. If the compact layout
+    // keeps that long label inside the identity region while the controls still
+    // render beside/below it as one grouped block, we know the row is no longer
+    // wasting space on a permanently oversized action column.
+    expect(identityRegion.textContent).toContain('Beta Corp with a Longer Name');
+    expect(within(controlsRegion).getByTestId('sector-card-constituent-status').textContent).toContain('Disabled');
+    expect(within(controlsRegion).getByTestId('sector-card-constituent-action-region').textContent).toContain('Enable');
   });
 });
