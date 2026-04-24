@@ -6,6 +6,7 @@ import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import React from 'react';
 import { useEffect, useState } from 'react';
 
 // Import the SectorCardComponent to display on the home page
@@ -59,9 +60,11 @@ function Home() {
 
   return (
     <Box sx={{ px: 2, py: 3 }}>
-      <Stack spacing={3} alignItems="center">
+      <Stack spacing={3} alignItems="stretch">
         {/* The search results are shared across pages, so Home can display them too.
-            That lets the user search from the landing page without immediately leaving it. */}
+            That lets the user search from the landing page without immediately leaving it.
+            The shared component now owns its width, so this centered page stack
+            can no longer make Home narrower than Stocks or future pages. */}
         <StockSearchResults />
 
         {cardsStatus === 'loading' ? (

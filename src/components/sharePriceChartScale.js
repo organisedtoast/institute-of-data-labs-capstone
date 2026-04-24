@@ -208,11 +208,11 @@ export function formatYAxisPrice(value, tickValues) {
   // The stock card uses the same plain-value rule in both the table and chart:
   // once a non-compact value reaches 100, we drop decimals to keep the labels
   // easy to scan while leaving smaller values at the chart's normal precision.
+  // We intentionally return plain numbers here instead of "$" values because
+  // the stock cards can show companies that are not denominated in USD.
   const decimalPlaces = getPlainLabelFractionDigits(value, getYAxisDecimalPlaces(tickValues));
 
   return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
     minimumFractionDigits: decimalPlaces,
     maximumFractionDigits: decimalPlaces,
   }).format(value);

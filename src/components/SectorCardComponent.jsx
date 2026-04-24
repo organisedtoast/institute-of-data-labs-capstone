@@ -23,6 +23,7 @@ import {
   updateInvestmentCategoryConstituent,
 } from '../services/investmentCategoryCardsApi';
 import SectorChart from './SectorChart';
+import { enhancedInternalScrollbarSx } from './sharedScrollbarStyles.js';
 
 const PRESET_BUTTONS = [
   { key: 'MAX', label: 'Max', monthCount: null },
@@ -480,10 +481,12 @@ export default function SectorCardComponent({ initialCardData }) {
               category has many constituents on screen at once. */}
           <Box
             data-testid="sector-card-constituents-list"
+            data-scrollbar-style="enhanced"
             sx={{
               maxHeight: { xs: 340, sm: 380, lg: 430 },
               overflowY: 'auto',
               pr: { xs: 0.5, sm: 0.75 },
+              ...enhancedInternalScrollbarSx,
             }}
           >
             <Stack spacing={{ xs: 0.75, sm: 0.85, lg: 0.95 }}>

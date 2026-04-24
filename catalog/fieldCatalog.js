@@ -129,6 +129,8 @@ const FORECAST_BUCKET_FIELDS = [
   "dps",
 ];
 
+const FORECAST_BUCKET_KEYS = ["fy1", "fy2", "fy3"];
+
 const TOP_LEVEL_OVERRIDE_GROUP_FIELDS = {
   growthForecasts: [
     "revenueCagr3y",
@@ -256,6 +258,88 @@ const TOP_LEVEL_FIELD_SOURCE_META = {
   "analystRevisions.epsFy3Last1m": { sourceType: "manualOnly", roicEndpoint: null },
   "analystRevisions.epsFy3Last3m": { sourceType: "manualOnly", roicEndpoint: null },
 };
+
+function getAnnualFieldSourceMeta(fieldPath) {
+  return ANNUAL_FIELD_SOURCE_META[String(fieldPath || "")] || null;
+}
+
+function getForecastFieldSourceMeta(fieldPath) {
+  return FORECAST_FIELD_SOURCE_META[String(fieldPath || "")] || null;
+}
+
+function getTopLevelFieldSourceMeta(fieldPath) {
+  return TOP_LEVEL_FIELD_SOURCE_META[String(fieldPath || "")] || null;
+}
+
+function isDirectUserOverrideSourceType(sourceType) {
+  // `sourceType` now answers two beginner-friendly questions at once:
+  // 1. where the non-user value normally comes from
+  // 2. whether the field is allowed to be edited directly by the user
+  // Derived fields stay recalculated, but they are no longer directly editable.
+  return ["roic", "system", "manualOnly"].includes(String(sourceType || ""));
+}
+
+function isDerivedInternalCalculationSourceType(sourceType) {
+  return String(sourceType || "") === "derived";
+}
+
+function isAnnualFieldDirectlyOverrideable(fieldPath) {
+  return isDirectUserOverrideSourceType(getAnnualFieldSourceMeta(fieldPath)?.sourceType);
+}
+
+function isForecastFieldDirectlyOverrideable(fieldPath) {
+  return isDirectUserOverrideSourceType(getForecastFieldSourceMeta(fieldPath)?.sourceType);
+}
+
+function isTopLevelFieldDirectlyOverrideable(fieldPath) {
+  return isDirectUserOverrideSourceType(getTopLevelFieldSourceMeta(fieldPath)?.sourceType);
+}
+
+function isAnnualFieldDerivedInternalCalculation(fieldPath) {
+  return isDerivedInternalCalculationSourceType(getAnnualFieldSourceMeta(fieldPath)?.sourceType);
+}
+
+function isForecastFieldDerivedInternalCalculation(fieldPath) {
+  return isDerivedInternalCalculationSourceType(getForecastFieldSourceMeta(fieldPath)?.sourceType);
+}
+
+function isTopLevelFieldDerivedInternalCalculation(fieldPath) {
+  return isDerivedInternalCalculationSourceType(getTopLevelFieldSourceMeta(fieldPath)?.sourceType);
+}
+
+function getAnnualRouteFieldSourceMeta(fieldPath) {
+  const normalizedFieldPath = String(fieldPath || "");
+
+  if (normalizedFieldPath.startsWith("forecastData.")) {
+    const forecastRelativePath = normalizedFieldPath.replace(/^forecastData\./, "");
+    const [, ...remainingParts] = forecastRelativePath.split(".");
+    return getForecastFieldSourceMeta(remainingParts.join("."));
+  }
+
+  if (
+    normalizedFieldPath.startsWith("growthForecasts.")
+    || normalizedFieldPath.startsWith("analystRevisions.")
+  ) {
+    return getTopLevelFieldSourceMeta(normalizedFieldPath);
+  }
+
+  return getAnnualFieldSourceMeta(normalizedFieldPath);
+}
+
+function isAnnualRouteFieldDirectlyOverrideable(fieldPath) {
+  return isDirectUserOverrideSourceType(getAnnualRouteFieldSourceMeta(fieldPath)?.sourceType);
+}
+
+function isAnnualRouteFieldDerivedInternalCalculation(fieldPath) {
+  return isDerivedInternalCalculationSourceType(getAnnualRouteFieldSourceMeta(fieldPath)?.sourceType);
+}
+
+const ANNUAL_OVERRIDEABLE_PATHS = ANNUAL_RELATIVE_METRIC_PATHS.filter(isAnnualFieldDirectlyOverrideable);
+const FORECAST_OVERRIDEABLE_PATHS = FORECAST_RELATIVE_METRIC_PATHS.filter(isForecastFieldDirectlyOverrideable);
+const TOP_LEVEL_OVERRIDEABLE_PATHS = TOP_LEVEL_METRIC_PATHS.filter(isTopLevelFieldDirectlyOverrideable);
+const ANNUAL_DERIVED_PATHS = ANNUAL_RELATIVE_METRIC_PATHS.filter(isAnnualFieldDerivedInternalCalculation);
+const FORECAST_DERIVED_PATHS = FORECAST_RELATIVE_METRIC_PATHS.filter(isForecastFieldDerivedInternalCalculation);
+const TOP_LEVEL_DERIVED_PATHS = TOP_LEVEL_METRIC_PATHS.filter(isTopLevelFieldDerivedInternalCalculation);
 
 function normalizeCategoryName(name) {
   return String(name || "")
@@ -442,19 +526,40 @@ module.exports = {
   ALLOWED_TOP_LEVEL_PATCH_FIELDS,
   ANALYST_REVISION_FIELDS: TOP_LEVEL_OVERRIDE_GROUP_FIELDS.analystRevisions,
   ANNUAL_FIELD_SOURCE_META,
+  ANNUAL_DERIVED_PATHS,
   ANNUAL_GROUP_FIELDS,
+  ANNUAL_OVERRIDEABLE_PATHS,
   ANNUAL_RELATIVE_METRIC_PATHS,
   CATEGORY_NAMES,
   DEFAULT_LENSES,
   DISPLAY_FIELD_DEFINITIONS,
+  FORECAST_BUCKET_KEYS,
   FORECAST_BUCKET_FIELDS,
+  FORECAST_DERIVED_PATHS,
   FORECAST_FIELD_SOURCE_META,
+  FORECAST_OVERRIDEABLE_PATHS,
   FORECAST_RELATIVE_METRIC_PATHS,
   GROWTH_FORECAST_FIELDS: TOP_LEVEL_OVERRIDE_GROUP_FIELDS.growthForecasts,
+  TOP_LEVEL_DERIVED_PATHS,
+  TOP_LEVEL_OVERRIDEABLE_PATHS,
   ROIC_ENDPOINTS,
   ROIC_ENDPOINTS_USED,
   TOP_LEVEL_FIELD_SOURCE_META,
   TOP_LEVEL_METRIC_PATHS,
   TOP_LEVEL_OVERRIDE_GROUP_FIELDS,
+  getAnnualFieldSourceMeta,
+  getAnnualRouteFieldSourceMeta,
+  getForecastFieldSourceMeta,
+  getTopLevelFieldSourceMeta,
+  isAnnualFieldDerivedInternalCalculation,
+  isAnnualFieldDirectlyOverrideable,
+  isAnnualRouteFieldDerivedInternalCalculation,
+  isAnnualRouteFieldDirectlyOverrideable,
+  isDerivedInternalCalculationSourceType,
+  isDirectUserOverrideSourceType,
+  isForecastFieldDerivedInternalCalculation,
+  isForecastFieldDirectlyOverrideable,
+  isTopLevelFieldDerivedInternalCalculation,
+  isTopLevelFieldDirectlyOverrideable,
   normalizeCategoryName,
 };

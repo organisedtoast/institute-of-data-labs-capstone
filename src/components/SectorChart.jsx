@@ -20,6 +20,7 @@ import {
   getClosestDataPoint,
   getJanuaryPositions,
 } from './timeSeriesChartCore';
+import { enhancedInternalScrollbarSx } from './sharedScrollbarStyles.js';
 
 const SECTOR_CHART_HEIGHT = 360;
 const SECTOR_CHART_RIGHT_PADDING = 16;
@@ -451,9 +452,11 @@ export default function SectorChart({
           width: '100%',
           overflowX: isPresetWindowMode ? 'auto' : 'hidden',
           WebkitOverflowScrolling: 'touch',
+          ...enhancedInternalScrollbarSx,
         }}
         data-testid="sector-chart-scroll-region"
         data-scroll-mode={isPresetWindowMode ? 'preset' : 'range'}
+        data-scrollbar-style="enhanced"
       >
         <Box
           sx={{

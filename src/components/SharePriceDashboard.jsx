@@ -40,6 +40,7 @@ import {
   updateDashboardInvestmentCategory,
   updateDashboardRowPreference,
 } from '../services/watchlistDashboardApi';
+import { enhancedInternalScrollbarSx } from './sharedScrollbarStyles.js';
 
 const CHART_HEIGHT = 280;
 const CHART_RIGHT_PADDING = 24;
@@ -76,6 +77,11 @@ const EDITABLE_METRIC_UNDERLINE_HOVER = 'rgba(100, 116, 139, 0.34)';
 const OVERRIDDEN_METRIC_UNDERLINE = 'rgba(109, 40, 217, 0.44)';
 const OVERRIDDEN_METRIC_UNDERLINE_HOVER = 'rgba(109, 40, 217, 0.64)';
 const FOCUSED_METRICS_VIEWPORT_MAX_HEIGHT = 'min(48vh, 420px)';
+const OVERLAY_VIEWPORT_PADDING_PX = 12;
+const ROW_ACTION_MENU_WIDTH_PX = 260;
+const METRIC_EDITOR_WIDTH_PX = 280;
+const ROW_ACTION_MENU_ESTIMATED_HEIGHT_PX = 180;
+const METRIC_EDITOR_ESTIMATED_HEIGHT_PX = 220;
 
 const PRESET_BUTTONS = [
   { key: 'MAX', label: 'MAX', monthCount: null },
@@ -269,13 +275,32 @@ function shouldDropPlainValueDecimals(value) {
   return Math.abs(Number(value)) >= PLAIN_VALUE_NO_DECIMALS_THRESHOLD;
 }
 
+function normalizeExactZeroValue(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return value;
+  }
+
+  // Exact zero carries no useful decimal detail for stock-card tables, so we
+  // normalize both `0` and JavaScript's `-0` to a plain display value of `0`
+  // before the normal magnitude-based formatting rules run.
+  return Number(value) === 0 ? 0 : Number(value);
+}
+
 function getPlainValueFractionDigits(value, fallbackFractionDigits) {
+  if (Number(value) === 0) {
+    return 0;
+  }
+
   return shouldDropPlainValueDecimals(value) ? 0 : fallbackFractionDigits;
 }
 
 function getCompactValueFractionDigits(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return 1;
+  }
+
+  if (Number(value) === 0) {
+    return 0;
   }
 
   const absoluteValue = Math.abs(Number(value));
@@ -290,27 +315,31 @@ function formatCurrency(value, options = {}) {
     return '--';
   }
 
+  const normalizedValue = normalizeExactZeroValue(value);
+
+  // These fields still follow the same "money-like" rounding rules as before,
+  // but we no longer prepend "$" because not every stock in the app reports in
+  // US dollars. This keeps the formatting behavior while dropping the currency
+  // assumption from the visible text.
   // Plain stock-card values at 100 or more are easier to scan without cents.
   // Compact values use their own rule: keep one decimal below 100 compact
   // units, then switch to whole numbers once the compact text reaches 3 digits.
   // That keeps compact formatting separate from the plain "100+" rule.
   const fractionDigits = options.compact
     ? {
-        minimumFractionDigits: getCompactValueFractionDigits(value),
-        maximumFractionDigits: getCompactValueFractionDigits(value),
+        minimumFractionDigits: getCompactValueFractionDigits(normalizedValue),
+        maximumFractionDigits: getCompactValueFractionDigits(normalizedValue),
       }
-    : {
-        minimumFractionDigits: getPlainValueFractionDigits(value, 2),
-        maximumFractionDigits: getPlainValueFractionDigits(value, 2),
+      : {
+        minimumFractionDigits: getPlainValueFractionDigits(normalizedValue, 2),
+        maximumFractionDigits: getPlainValueFractionDigits(normalizedValue, 2),
       };
 
   return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
     notation: options.compact ? 'compact' : 'standard',
     compactDisplay: options.compact ? 'short' : undefined,
     ...fractionDigits,
-  }).format(value);
+  }).format(normalizedValue);
 }
 
 function formatCompactNumber(value) {
@@ -318,14 +347,15 @@ function formatCompactNumber(value) {
     return '--';
   }
 
-  const compactFractionDigits = getCompactValueFractionDigits(value);
+  const normalizedValue = normalizeExactZeroValue(value);
+  const compactFractionDigits = getCompactValueFractionDigits(normalizedValue);
 
   return new Intl.NumberFormat('en-US', {
     notation: 'compact',
     compactDisplay: 'short',
     minimumFractionDigits: compactFractionDigits,
     maximumFractionDigits: compactFractionDigits,
-  }).format(value);
+  }).format(normalizedValue);
 }
 
 function formatPercent(value) {
@@ -333,7 +363,8 @@ function formatPercent(value) {
     return '--';
   }
 
-  return `${Number(value).toFixed(getPlainValueFractionDigits(value, 2))}%`;
+  const normalizedValue = normalizeExactZeroValue(value);
+  return `${normalizedValue.toFixed(getPlainValueFractionDigits(normalizedValue, 2))}%`;
 }
 
 function formatCompactPercent(value) {
@@ -341,7 +372,10 @@ function formatCompactPercent(value) {
     return '--';
   }
 
-  return `${Number(value).toFixed(1)}%`;
+  const normalizedValue = normalizeExactZeroValue(value);
+  const compactFractionDigits = Number(normalizedValue) === 0 ? 0 : 1;
+
+  return `${normalizedValue.toFixed(compactFractionDigits)}%`;
 }
 
 function formatShortCurrency(value) {
@@ -349,14 +383,14 @@ function formatShortCurrency(value) {
     return '--';
   }
 
-  const absoluteValue = Math.abs(Number(value));
+  const normalizedValue = normalizeExactZeroValue(value);
+  const absoluteValue = Math.abs(Number(normalizedValue));
+  const shortFractionDigits = absoluteValue === 0 ? 0 : absoluteValue < 10 ? 1 : 0;
 
   return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: absoluteValue < 10 ? 1 : 0,
-    maximumFractionDigits: absoluteValue < 10 ? 1 : 0,
-  }).format(value);
+    minimumFractionDigits: shortFractionDigits,
+    maximumFractionDigits: shortFractionDigits,
+  }).format(normalizedValue);
 }
 
 function formatFiscalReleaseLabel(dateString, useCompactLabel = false) {
@@ -407,9 +441,11 @@ function formatPlainNumber(value, maximumFractionDigits = 2) {
     return '--';
   }
 
+  const normalizedValue = normalizeExactZeroValue(value);
+
   return new Intl.NumberFormat('en-US', {
-    maximumFractionDigits: getPlainValueFractionDigits(value, maximumFractionDigits),
-  }).format(Number(value));
+    maximumFractionDigits: getPlainValueFractionDigits(normalizedValue, maximumFractionDigits),
+  }).format(normalizedValue);
 }
 
 function shouldUseCompactMagnitude(value) {
@@ -425,7 +461,7 @@ function formatMetricPercent(value) {
     return '--';
   }
 
-  const numericValue = Number(value);
+  const numericValue = normalizeExactZeroValue(value);
   const displayValue = Math.abs(numericValue) <= 1 ? numericValue * 100 : numericValue;
   // This rule uses absolute magnitude, so negative percentages follow the same
   // "100 or more means no decimals" display threshold as the table and chart.
@@ -559,6 +595,67 @@ function coerceMetricEditorValue(rawValue, fieldPath) {
   }
 
   return rawValue;
+}
+
+function clampNumber(value, minimum, maximum) {
+  return Math.min(Math.max(value, minimum), maximum);
+}
+
+function buildViewportSafeOverlayPosition({
+  anchorRect,
+  preferredWidth,
+  estimatedHeight,
+  viewportPadding = OVERLAY_VIEWPORT_PADDING_PX,
+  horizontalOffset = 0,
+  verticalOffset = 8,
+  useBottomSheet = false,
+}) {
+  if (useBottomSheet) {
+    return {
+      left: viewportPadding,
+      right: viewportPadding,
+      top: 'auto',
+      bottom: viewportPadding,
+      width: 'auto',
+      mode: 'bottom-sheet',
+      debugLeft: viewportPadding,
+      debugWidth: null,
+    };
+  }
+
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1024;
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
+  const safeDesktopWidth = Math.max(viewportWidth - (viewportPadding * 2), 0);
+  const clampedWidth = Math.min(preferredWidth, safeDesktopWidth || preferredWidth);
+  const maxLeft = Math.max(viewportPadding, viewportWidth - clampedWidth - viewportPadding);
+
+  // Browser zoom can make a desktop viewport too narrow for a fixed overlay.
+  // Clamping both sides keeps the whole panel visible while still anchoring it
+  // close to the row or cell the user actually opened.
+  const nextLeft = clampNumber(
+    (Number(anchorRect?.left) || 0) + horizontalOffset,
+    viewportPadding,
+    maxLeft,
+  );
+  const maxTop = Math.max(
+    viewportPadding,
+    viewportHeight - estimatedHeight - viewportPadding,
+  );
+
+  return {
+    left: nextLeft,
+    right: 'auto',
+    top: clampNumber(
+      (Number(anchorRect?.bottom) || 0) + verticalOffset,
+      viewportPadding,
+      maxTop,
+    ),
+    bottom: 'auto',
+    width: clampedWidth,
+    mode: 'desktop',
+    debugLeft: nextLeft,
+    debugWidth: clampedWidth,
+  };
 }
 
 function getColumnDensity(columnCount) {
@@ -779,6 +876,42 @@ function useMediaQueryMatch(mediaQuery) {
   return useSyncExternalStore(subscribe, getSnapshot, () => false);
 }
 
+function applyMainTableRowPreferenceState(annualMainTableRows, mainTableRowPreferences) {
+  if (!Array.isArray(annualMainTableRows) || !annualMainTableRows.length || !Array.isArray(mainTableRowPreferences)) {
+    return annualMainTableRows;
+  }
+
+  const preferenceByRowKey = new Map(
+    mainTableRowPreferences.map((rowPreference) => [rowPreference.rowKey, rowPreference]),
+  );
+
+  if (!preferenceByRowKey.size) {
+    return annualMainTableRows;
+  }
+
+  // The main table still renders one fiscal-year cell at a time. Copying the
+  // saved row preference onto each cell keeps the visible row bold everywhere
+  // it appears without creating a separate render model just for styling state.
+  return annualMainTableRows.map((annualRow) => ({
+    ...annualRow,
+    cells: Object.fromEntries(
+      Object.entries(annualRow?.cells || {}).map(([fieldKey, cell]) => {
+        const rowPreference = preferenceByRowKey.get(cell?.rowKey);
+
+        return [
+          fieldKey,
+          rowPreference
+            ? {
+                ...cell,
+                isBold: rowPreference.isBold === true,
+              }
+            : cell,
+        ];
+      }),
+    ),
+  }));
+}
+
 /**
  * This dashboard uses a custom SVG line chart because the table columns must line up with
  * exact dates on the chart timeline. For long MAX ranges we split the layout into:
@@ -897,6 +1030,12 @@ export default function SharePriceDashboard({
       const nextMetricsRows = Array.isArray(metricsUpdate?.metricsRows)
         ? metricsUpdate.metricsRows
         : previousDashboardData.metricsRows;
+      const nextAnnualMainTableRows = Array.isArray(metricsUpdate?.mainTableRowPreferences)
+        ? applyMainTableRowPreferenceState(
+            previousDashboardData.annualMainTableRows,
+            metricsUpdate.mainTableRowPreferences,
+          )
+        : previousDashboardData.annualMainTableRows;
       const hasLoadedMetricsView =
         metricsUpdate?.hasLoadedMetricsView === true
         || (Array.isArray(nextMetricsColumns) && nextMetricsColumns.length > 0)
@@ -905,6 +1044,7 @@ export default function SharePriceDashboard({
 
       return {
         ...previousDashboardData,
+        annualMainTableRows: nextAnnualMainTableRows,
         metricsColumns: nextMetricsColumns,
         metricsRows: nextMetricsRows,
         hasLoadedMetricsView,
@@ -1147,6 +1287,24 @@ export default function SharePriceDashboard({
   ), [dashboardData?.metricsRows]);
   const shouldUseShortLabels = useMediaQueryMatch(MOBILE_LABEL_BREAKPOINT_QUERY);
   const shouldUseBottomSheetMetricEditor = useMediaQueryMatch(MOBILE_METRIC_EDITOR_BREAKPOINT_QUERY);
+  const metricRowActionMenuPosition = metricRowActionMenuState
+    ? buildViewportSafeOverlayPosition({
+        anchorRect: metricRowActionMenuState.anchorRect,
+        preferredWidth: ROW_ACTION_MENU_WIDTH_PX,
+        estimatedHeight: ROW_ACTION_MENU_ESTIMATED_HEIGHT_PX,
+        horizontalOffset: -8,
+        useBottomSheet: shouldUseBottomSheetMetricEditor,
+      })
+    : null;
+  const metricEditorPosition = metricEditorState
+    ? buildViewportSafeOverlayPosition({
+        anchorRect: metricEditorState.anchorRect,
+        preferredWidth: METRIC_EDITOR_WIDTH_PX,
+        estimatedHeight: METRIC_EDITOR_ESTIMATED_HEIGHT_PX,
+        horizontalOffset: -16,
+        useBottomSheet: shouldUseBottomSheetMetricEditor,
+      })
+    : null;
   const activePresetConfig = PRESET_BUTTONS.find((preset) => preset.key === activePreset) || null;
   const fixedLengthPresetConfigs = PRESET_BUTTONS.filter((preset) => Boolean(preset.monthCount));
   const minAvailableMonth = priceRows.length ? getMonthStringFromDate(priceRows[0].date) : '';
@@ -1290,9 +1448,22 @@ export default function SharePriceDashboard({
   }, [metricsRows]);
 
   const dashboardFieldRows = useMemo(() => {
+    const resolveMainTableRowState = (fieldPath, fieldKey) => {
+      const fallbackRowKey = `main::${fieldPath}`;
+      const rowCell = annualMainTableRows.find((annualRow) => {
+        return Boolean(annualRow?.cells?.[fieldKey]);
+      })?.cells?.[fieldKey];
+
+      return {
+        rowKey: rowCell?.rowKey || fallbackRowKey,
+        isBold: rowCell?.isBold === true,
+      };
+    };
+
     return [
       {
         key: 'fiscalYearEndDate',
+        ...resolveMainTableRowState('annualData[].fiscalYearEndDate', 'fiscalYearEndDate'),
         fieldPath: 'annualData[].fiscalYearEndDate',
         label: 'FY end date',
         shortLabel: getShortLabel('FY end date'),
@@ -1301,6 +1472,7 @@ export default function SharePriceDashboard({
       },
       {
         key: 'fiscalYear',
+        ...resolveMainTableRowState('annualData[].fiscalYear', 'fiscalYear'),
         fieldPath: 'annualData[].fiscalYear',
         label: 'FY',
         shortLabel: getShortLabel('Fiscal year'),
@@ -1308,6 +1480,7 @@ export default function SharePriceDashboard({
       },
       {
         key: 'earningsReleaseDate',
+        ...resolveMainTableRowState('annualData[].earningsReleaseDate', 'earningsReleaseDate'),
         fieldPath: 'annualData[].earningsReleaseDate',
         label: 'FY release date',
         shortLabel: getShortLabel('FY release date'),
@@ -1315,6 +1488,7 @@ export default function SharePriceDashboard({
       },
       {
         key: 'sharePrice',
+        ...resolveMainTableRowState('annualData[].base.sharePrice', 'sharePrice'),
         fieldPath: 'annualData[].base.sharePrice',
         label: 'Share price',
         shortLabel: getShortLabel('Share price'),
@@ -1322,6 +1496,7 @@ export default function SharePriceDashboard({
       },
       {
         key: 'sharesOnIssue',
+        ...resolveMainTableRowState('annualData[].base.sharesOnIssue', 'sharesOnIssue'),
         fieldPath: 'annualData[].base.sharesOnIssue',
         label: 'Shares on issue',
         shortLabel: getShortLabel('Shares on issue'),
@@ -1329,17 +1504,19 @@ export default function SharePriceDashboard({
       },
       {
         key: 'marketCap',
+        ...resolveMainTableRowState('annualData[].base.marketCap', 'marketCap'),
         fieldPath: 'annualData[].base.marketCap',
         label: 'Market cap',
         shortLabel: getShortLabel('Market cap'),
         formatter: (value) => formatCurrency(value, { compact: true }),
       },
     ];
-  }, []);
+  }, [annualMainTableRows]);
 
   const tableRowDefinitions = useMemo(() => {
     return dashboardFieldRows.map((metric, metricIndex) => ({
         key: metric.key,
+        rowKey: metric.rowKey,
         label: metric.label,
         shortLabel: metric.shortLabel,
         fieldPath: metric.fieldPath,
@@ -1352,6 +1529,7 @@ export default function SharePriceDashboard({
             ? '1px solid #f1f5f9'
             : 'none',
         isHeader: Boolean(metric.isHeader),
+        isBold: metric.isBold === true,
         formatter: metric.formatter,
       }));
   }, [dashboardFieldRows]);
@@ -1367,13 +1545,6 @@ export default function SharePriceDashboard({
       return [];
     }
 
-    const firstRowKeyBySection = new Map();
-    metricsRows.forEach((metricRow) => {
-      if (!firstRowKeyBySection.has(metricRow.section)) {
-        firstRowKeyBySection.set(metricRow.section, metricRow.rowKey);
-      }
-    });
-
     return visibleMetricRows.map((metricRow, metricIndex) => ({
       startsVisibleSection: metricIndex === 0 || metricRow.section !== visibleMetricRows[metricIndex - 1]?.section,
       key: metricRow.rowKey,
@@ -1381,23 +1552,24 @@ export default function SharePriceDashboard({
       shortLabel: metricRow.shortLabel,
       section: metricRow.section,
       shortSection: metricRow.shortSection,
-      showSectionLabel:
-        (metricIndex === 0 || metricRow.section !== visibleMetricRows[metricIndex - 1]?.section) &&
-        firstRowKeyBySection.get(metricRow.section) === metricRow.rowKey,
+      // Section boundaries belong to the first visible row in each section, not
+      // the first hidden source row. That keeps labels and dividers correct even
+      // after users hide rows above the one they can still see.
+      showSectionLabel: metricIndex === 0 || metricRow.section !== visibleMetricRows[metricIndex - 1]?.section,
       fieldPath: metricRow.fieldPath,
       height: METRICS_DATA_ROW_HEIGHT,
       backgroundColor: metricIndex % 2 === 0 ? '#ffffff' : '#fafafa',
       borderTop:
         ((!(isMetricsOpen && isFocusedMetricsMode) && metricIndex === 0) ||
-          ((metricRow.section !== visibleMetricRows[metricIndex - 1]?.section) &&
-            firstRowKeyBySection.get(metricRow.section) === metricRow.rowKey))
+          (metricIndex > 0 && metricRow.section !== visibleMetricRows[metricIndex - 1]?.section))
           ? '2px solid #e2e8f0'
           : 'none',
       borderBottom: metricIndex < visibleMetricRows.length - 1 ? '1px solid #f1f5f9' : 'none',
       isHeader: false,
+      isBold: metricRow.isBold === true,
       cells: metricRow.cells,
     }));
-  }, [isFocusedMetricsMode, isMetricsOpen, metricsRows, visibleMetricRows]);
+  }, [isFocusedMetricsMode, isMetricsOpen, visibleMetricRows]);
 
   const columnDensity = useMemo(() => {
     return getColumnDensity(tablePoints.length);
@@ -2154,15 +2326,19 @@ export default function SharePriceDashboard({
   };
 
   const openMetricRowActionMenu = (metricRow, anchorRect) => {
-    if (!metricRow?.key) {
+    const rowKey = metricRow?.rowKey || metricRow?.key;
+
+    if (!rowKey) {
       return;
     }
 
     setMetricsActionError('');
     closeMetricEditor();
     setMetricRowActionMenuState({
-      rowKey: metricRow.key,
+      rowKey,
       rowLabel: metricRow.label,
+      canHide: metricRow?.canHide !== false,
+      isBold: metricRow?.isBold === true,
       anchorRect,
     });
   };
@@ -2247,6 +2423,7 @@ export default function SharePriceDashboard({
     fontSize,
     fiscalYearEndDate = null,
     isHeader = false,
+    isBold = false,
     testId,
   }) => {
     if (!cell || !Number.isFinite(centerX)) {
@@ -2265,6 +2442,7 @@ export default function SharePriceDashboard({
         data-row-key={fieldPath}
         data-column-key={columnKey}
         data-is-overridden={cell.isOverridden ? 'true' : 'false'}
+        data-is-bold={isBold === true ? 'true' : 'false'}
         data-fiscal-year={Number.isInteger(fiscalYear) ? String(fiscalYear) : undefined}
         data-date={typeof fiscalYearEndDate === 'string' ? fiscalYearEndDate : undefined}
         data-center-x={String(centerX)}
@@ -2281,7 +2459,7 @@ export default function SharePriceDashboard({
           transform: 'translateX(-50%)',
           height: `${height}px`,
           fontSize,
-          fontWeight: isHeader ? 600 : (cell.isOverridden ? 600 : 400),
+          fontWeight: isBold ? 700 : (isHeader ? 600 : (cell.isOverridden ? 600 : 400)),
           color: isHeader ? '#64748b' : (cell.isOverridden ? '#6d28d9' : '#334155'),
           textAlign: 'center',
           width: `${width}px`,
@@ -2434,19 +2612,19 @@ export default function SharePriceDashboard({
     }
   };
 
-  const handleMetricRowEnabledState = async (rowKey, isEnabled) => {
+  const handleMetricRowPreferenceState = async (rowKey, nextPreference) => {
     setIsUpdatingRowPreference(true);
     setMetricsActionError('');
 
     try {
-      const response = await updateDashboardRowPreference(identifier, rowKey, isEnabled);
+      const response = await updateDashboardRowPreference(identifier, rowKey, nextPreference);
       applyMetricsViewUpdate(response);
       return true;
     } catch (requestError) {
       setMetricsActionError(
         requestError.response?.data?.message
           || requestError.response?.data?.error
-          || 'Unable to save row visibility right now.',
+          || 'Unable to save row preferences right now.',
       );
       return false;
     } finally {
@@ -2459,9 +2637,25 @@ export default function SharePriceDashboard({
       return;
     }
 
-    const didHideRow = await handleMetricRowEnabledState(metricRowActionMenuState.rowKey, false);
+    const didHideRow = await handleMetricRowPreferenceState(metricRowActionMenuState.rowKey, {
+      isEnabled: false,
+    });
 
     if (didHideRow) {
+      closeMetricRowActionMenu();
+    }
+  };
+
+  const handleToggleMetricRowBoldState = async () => {
+    if (!metricRowActionMenuState?.rowKey) {
+      return;
+    }
+
+    const didUpdateRow = await handleMetricRowPreferenceState(metricRowActionMenuState.rowKey, {
+      isBold: !metricRowActionMenuState.isBold,
+    });
+
+    if (didUpdateRow) {
       closeMetricRowActionMenu();
     }
   };
@@ -2779,6 +2973,7 @@ export default function SharePriceDashboard({
           <Box
             key={tableRow.key}
             data-testid="share-price-dashboard-metric-row"
+            data-row-key={tableRow.key}
             data-section-start={tableRow.startsVisibleSection ? 'true' : 'false'}
             sx={{
               position: 'relative',
@@ -2787,13 +2982,16 @@ export default function SharePriceDashboard({
               width: baseSurfaceWidth,
               height: `${tableRow.height}px`,
               backgroundColor: tableRow.backgroundColor,
-              borderTop: tableRow.borderTop,
-              borderBottom: tableRow.borderBottom,
+              borderTop: 'none',
+              borderBottom: 'none',
             }}
           >
             <Box
               data-testid="share-price-dashboard-metric-row-left-rail"
               data-row-key={tableRow.key}
+              data-is-bold={tableRow.isBold === true ? 'true' : 'false'}
+              data-row-top-divider={tableRow.borderTop === 'none' ? 'none' : 'full-width'}
+              data-row-divider={tableRow.borderBottom === 'none' ? 'none' : 'full-width'}
               title={shouldUseShortLabels ? tableRow.label : undefined}
               aria-label={tableRow.label}
               onContextMenu={(event) => handleMetricRowContextMenu(event, tableRow)}
@@ -2817,6 +3015,10 @@ export default function SharePriceDashboard({
                 gap: tableRow.showSectionLabel ? 0.2 : 0,
                 backgroundColor: tableRow.backgroundColor,
                 borderRight: '1px solid #e2e8f0',
+                // Section starts need the same top divider on the frozen rail and
+                // the scrolling values area, otherwise the line breaks in half.
+                borderTop: tableRow.borderTop,
+                borderBottom: tableRow.borderBottom,
                 textAlign: 'left',
               }}
             >
@@ -2841,7 +3043,7 @@ export default function SharePriceDashboard({
               <Box
                 sx={{
                   fontSize: { xs: '11px', sm: '12px', md: '13px' },
-                  fontWeight: 400,
+                  fontWeight: tableRow.isBold === true ? 700 : 400,
                   color: '#475569',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
@@ -2856,12 +3058,19 @@ export default function SharePriceDashboard({
 
             <Box
               data-testid="share-price-dashboard-metric-row-values"
+              data-row-key={tableRow.key}
+              data-row-top-divider={tableRow.borderTop === 'none' ? 'none' : 'full-width'}
+              data-row-divider={tableRow.borderBottom === 'none' ? 'none' : 'full-width'}
               sx={{
                 position: 'relative',
                 width: `${timelineLayout.contentWidth}px`,
                 flexShrink: 0,
                 height: `${tableRow.height}px`,
                 backgroundColor: tableRow.backgroundColor,
+                // The values surface mirrors the same divider contract so every
+                // visible section start stays full-width after rows are hidden.
+                borderTop: tableRow.borderTop,
+                borderBottom: tableRow.borderBottom,
               }}
             >
               {renderedMetricsColumns.map((column) => {
@@ -2881,6 +3090,7 @@ export default function SharePriceDashboard({
                     data-row-key={tableRow.key}
                     data-column-key={column.key}
                     data-is-overridden={metricCell.isOverridden ? 'true' : 'false'}
+                    data-is-bold={tableRow.isBold === true ? 'true' : 'false'}
                     onContextMenu={(event) => handleMetricCellContextMenu(event, tableRow, metricCell)}
                     onMouseDown={(event) => handleMetricCellMouseDown(event, metricCell)}
                     onTouchStart={(event) => handleMetricCellTouchStart(event, tableRow, metricCell)}
@@ -2893,7 +3103,7 @@ export default function SharePriceDashboard({
                       transform: 'translateX(-50%)',
                       height: `${tableRow.height}px`,
                       fontSize: timelineLayout.bodyFontSize,
-                      fontWeight: metricCell.isOverridden ? 600 : 400,
+                      fontWeight: tableRow.isBold === true ? 700 : (metricCell.isOverridden ? 600 : 400),
                       color: metricCell.isOverridden ? '#6d28d9' : '#334155',
                       textAlign: 'center',
                       width: `${timelineLayout.yearCellWidth}px`,
@@ -3009,6 +3219,7 @@ export default function SharePriceDashboard({
           <Box
             key={tableRow.key}
             data-testid="share-price-dashboard-metric-row"
+            data-row-key={tableRow.key}
             data-section-start={tableRow.startsVisibleSection ? 'true' : 'false'}
             sx={{
               display: 'flex',
@@ -3016,13 +3227,16 @@ export default function SharePriceDashboard({
               width: `${focusedMetricsShellWidth}px`,
               height: `${tableRow.height}px`,
               backgroundColor: tableRow.backgroundColor,
-              borderTop: tableRow.borderTop,
-              borderBottom: tableRow.borderBottom,
+              borderTop: 'none',
+              borderBottom: 'none',
             }}
           >
             <Box
               data-testid="share-price-dashboard-metric-row-left-rail"
               data-row-key={tableRow.key}
+              data-is-bold={tableRow.isBold === true ? 'true' : 'false'}
+              data-row-top-divider={tableRow.borderTop === 'none' ? 'none' : 'full-width'}
+              data-row-divider={tableRow.borderBottom === 'none' ? 'none' : 'full-width'}
               title={shouldUseShortLabels ? tableRow.label : undefined}
               aria-label={tableRow.label}
               onContextMenu={(event) => handleMetricRowContextMenu(event, tableRow)}
@@ -3043,6 +3257,8 @@ export default function SharePriceDashboard({
                 gap: tableRow.showSectionLabel ? 0.2 : 0,
                 backgroundColor: tableRow.backgroundColor,
                 borderRight: '1px solid #e2e8f0',
+                borderTop: tableRow.borderTop,
+                borderBottom: tableRow.borderBottom,
                 textAlign: 'left',
               }}
             >
@@ -3067,7 +3283,7 @@ export default function SharePriceDashboard({
               <Box
                 sx={{
                   fontSize: { xs: '11px', sm: '12px', md: '13px' },
-                  fontWeight: 400,
+                  fontWeight: tableRow.isBold === true ? 700 : 400,
                   color: '#475569',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
@@ -3082,6 +3298,9 @@ export default function SharePriceDashboard({
 
             <Box
               data-testid="share-price-dashboard-metric-row-values"
+              data-row-key={tableRow.key}
+              data-row-top-divider={tableRow.borderTop === 'none' ? 'none' : 'full-width'}
+              data-row-divider={tableRow.borderBottom === 'none' ? 'none' : 'full-width'}
               sx={{
                 position: 'relative',
                 width: `${focusedMetricsVisibleValuesWidth}px`,
@@ -3089,6 +3308,8 @@ export default function SharePriceDashboard({
                 height: `${tableRow.height}px`,
                 overflow: 'hidden',
                 backgroundColor: tableRow.backgroundColor,
+                borderTop: tableRow.borderTop,
+                borderBottom: tableRow.borderBottom,
               }}
             >
               <Box
@@ -3117,6 +3338,7 @@ export default function SharePriceDashboard({
                       data-row-key={tableRow.key}
                       data-column-key={column.key}
                       data-is-overridden={metricCell.isOverridden ? 'true' : 'false'}
+                      data-is-bold={tableRow.isBold === true ? 'true' : 'false'}
                       onContextMenu={(event) => handleMetricCellContextMenu(event, tableRow, metricCell)}
                       onMouseDown={(event) => handleMetricCellMouseDown(event, metricCell)}
                       onTouchStart={(event) => handleMetricCellTouchStart(event, tableRow, metricCell)}
@@ -3129,7 +3351,7 @@ export default function SharePriceDashboard({
                         transform: 'translateX(-50%)',
                         height: `${tableRow.height}px`,
                         fontSize: timelineLayout.bodyFontSize,
-                        fontWeight: metricCell.isOverridden ? 600 : 400,
+                        fontWeight: tableRow.isBold === true ? 700 : (metricCell.isOverridden ? 600 : 400),
                         color: metricCell.isOverridden ? '#6d28d9' : '#334155',
                         textAlign: 'center',
                         width: `${timelineLayout.yearCellWidth}px`,
@@ -3195,9 +3417,11 @@ export default function SharePriceDashboard({
             overflowX: 'auto',
             overflowY: 'hidden',
             WebkitOverflowScrolling: 'touch',
+            ...enhancedInternalScrollbarSx,
           }}
           data-testid="share-price-dashboard-scroll-region"
           data-scroll-mode={isPresetWindowMode ? 'preset' : 'range'}
+          data-scrollbar-style="enhanced"
           data-surface-width={String(baseSurfaceWidth)}
           data-scroll-surface-width={String(scrollSurfaceWidth)}
           data-content-width={String(timelineLayout.contentWidth)}
@@ -3364,6 +3588,8 @@ export default function SharePriceDashboard({
                 {tableRowDefinitions.map((tableRow) => (
                   <Box
                     key={tableRow.key}
+                    data-testid="share-price-dashboard-main-table-row"
+                    data-row-key={tableRow.rowKey}
                     sx={{
                       display: 'flex',
                       alignItems: 'stretch',
@@ -3371,12 +3597,32 @@ export default function SharePriceDashboard({
                       height: `${tableRow.height}px`,
                       backgroundColor: tableRow.backgroundColor,
                       borderTop: tableRow.borderTop,
-                      borderBottom: tableRow.borderBottom,
+                      borderBottom: 'none',
                     }}
                   >
                     <Box
+                      data-testid="share-price-dashboard-main-table-row-left-rail"
+                      data-row-key={tableRow.rowKey}
+                      data-is-bold={tableRow.isBold === true ? 'true' : 'false'}
+                      data-row-divider={tableRow.borderBottom === 'none' ? 'none' : 'full-width'}
                       title={shouldUseShortLabels ? tableRow.label : undefined}
                       aria-label={tableRow.label}
+                      onContextMenu={(event) => handleMetricRowContextMenu(event, {
+                        rowKey: tableRow.rowKey,
+                        label: tableRow.label,
+                        isBold: tableRow.isBold,
+                        canHide: false,
+                      })}
+                      onMouseDown={handleMetricRowMouseDown}
+                      onTouchStart={(event) => handleMetricRowTouchStart(event, {
+                        rowKey: tableRow.rowKey,
+                        label: tableRow.label,
+                        isBold: tableRow.isBold,
+                        canHide: false,
+                      })}
+                      onTouchMove={handleMetricRowTouchMove}
+                      onTouchEnd={handleMetricRowTouchEnd}
+                      onTouchCancel={handleMetricRowTouchEnd}
                       sx={{
                         position: 'sticky',
                         left: 0,
@@ -3387,12 +3633,15 @@ export default function SharePriceDashboard({
                         fontSize: tableRow.isHeader
                           ? { xs: '11px', sm: '12px' }
                           : { xs: '11px', sm: '12px', md: '13px' },
-                        fontWeight: tableRow.isHeader ? 600 : 400,
+                        fontWeight: tableRow.isBold ? 700 : (tableRow.isHeader ? 600 : 400),
                         color: tableRow.isHeader ? '#64748b' : '#475569',
                         display: 'flex',
                         alignItems: 'center',
                         backgroundColor: tableRow.backgroundColor,
                         borderRight: '1px solid #e2e8f0',
+                        // The sticky left rail paints above the scrolling values area, so it
+                        // needs its own row divider to keep the bottom border visually continuous.
+                        borderBottom: tableRow.borderBottom,
                         whiteSpace: 'nowrap',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
@@ -3402,11 +3651,17 @@ export default function SharePriceDashboard({
                     </Box>
 
                     <Box
+                      data-testid="share-price-dashboard-main-table-row-values"
+                      data-row-key={tableRow.rowKey}
+                      data-row-divider={tableRow.borderBottom === 'none' ? 'none' : 'full-width'}
                       sx={{
                         position: 'relative',
                         width: timelineLayout.contentWidth,
                         flexShrink: 0,
                         height: `${tableRow.height}px`,
+                        // The main-table values surface owns the matching divider so the last
+                        // row border still spans the full width when the next section mounts below.
+                        borderBottom: tableRow.borderBottom,
                       }}
                     >
                       {tablePoints.map((annualRow, columnIndex) => {
@@ -3423,9 +3678,11 @@ export default function SharePriceDashboard({
                         return renderOverrideAwareAnnualValueCell({
                           cell: annualCell || {
                             columnKey: `annual-${annualRow.fiscalYear}`,
+                            rowKey: tableRow.rowKey,
                             value: displayValue,
                             sourceOfTruth: 'system',
                             isOverridden: false,
+                            isBold: tableRow.isBold === true,
                             isOverrideable: false,
                             overrideTarget: null,
                           },
@@ -3439,6 +3696,7 @@ export default function SharePriceDashboard({
                           fontSize: tableRow.isHeader ? timelineLayout.headerFontSize : timelineLayout.bodyFontSize,
                           fiscalYearEndDate: annualRow.fiscalYearEndDate,
                           isHeader: tableRow.isHeader,
+                          isBold: tableRow.isBold === true,
                           testId: tableRow.isHeader
                             ? 'share-price-dashboard-header-cell'
                             : 'share-price-dashboard-main-table-cell',
@@ -3453,6 +3711,7 @@ export default function SharePriceDashboard({
                     <Box
                       data-testid="share-price-dashboard-metrics-viewport"
                       data-vertical-scroll="true"
+                      data-scrollbar-style="enhanced"
                       data-visible-width={String(focusedMetricsShellWidth)}
                       data-full-content-width={String(baseSurfaceWidth)}
                       data-horizontal-offset={String(focusedMetricsHorizontalOffset)}
@@ -3466,6 +3725,7 @@ export default function SharePriceDashboard({
                         borderTop: '1px solid #e2e8f0',
                         backgroundColor: '#ffffff',
                         zIndex: 2,
+                        ...enhancedInternalScrollbarSx,
                       }}
                     >
                       <Box
@@ -3546,7 +3806,11 @@ export default function SharePriceDashboard({
                     }}
                   >
                     <Box>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      <Typography
+                        variant="body2"
+                        data-is-bold={metricRow.isBold === true ? 'true' : 'false'}
+                        sx={{ fontWeight: metricRow.isBold === true ? 700 : 600 }}
+                      >
                         {metricRow.label}
                       </Typography>
                       <Typography variant="caption" sx={{ color: 'text.secondary' }}>
@@ -3556,7 +3820,7 @@ export default function SharePriceDashboard({
                     <Button
                       size="small"
                       disabled={isUpdatingRowPreference}
-                      onClick={() => handleMetricRowEnabledState(metricRow.rowKey, true)}
+                      onClick={() => handleMetricRowPreferenceState(metricRow.rowKey, { isEnabled: true })}
                     >
                       SHOW ROW
                     </Button>
@@ -3797,21 +4061,25 @@ export default function SharePriceDashboard({
         <Box
           ref={metricRowActionMenuRef}
           data-testid="share-price-dashboard-metric-row-action-menu"
+          data-overlay-mode={metricRowActionMenuPosition?.mode}
+          data-overlay-left={
+            Number.isFinite(metricRowActionMenuPosition?.debugLeft)
+              ? String(metricRowActionMenuPosition.debugLeft)
+              : undefined
+          }
+          data-overlay-width={
+            Number.isFinite(metricRowActionMenuPosition?.debugWidth)
+              ? String(metricRowActionMenuPosition.debugWidth)
+              : undefined
+          }
           sx={{
             position: 'fixed',
             zIndex: 1400,
-            left: shouldUseBottomSheetMetricEditor
-              ? 12
-              : Math.max((metricRowActionMenuState.anchorRect?.left || 0) - 8, 12),
-            right: shouldUseBottomSheetMetricEditor ? 12 : 'auto',
-            top: shouldUseBottomSheetMetricEditor
-              ? 'auto'
-              : Math.min(
-                  (metricRowActionMenuState.anchorRect?.bottom || 0) + 8,
-                  ((typeof window !== 'undefined' ? window.innerHeight : 800) - 180),
-                ),
-            bottom: shouldUseBottomSheetMetricEditor ? 12 : 'auto',
-            width: shouldUseBottomSheetMetricEditor ? 'auto' : 260,
+            left: metricRowActionMenuPosition?.left,
+            right: metricRowActionMenuPosition?.right,
+            top: metricRowActionMenuPosition?.top,
+            bottom: metricRowActionMenuPosition?.bottom,
+            width: metricRowActionMenuPosition?.width,
             border: '1px solid #cbd5e1',
             borderRadius: shouldUseBottomSheetMetricEditor ? 2 : 1.5,
             backgroundColor: '#ffffff',
@@ -3819,26 +4087,30 @@ export default function SharePriceDashboard({
             p: 1.5,
           }}
         >
-          <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.75 }}>
-            Row actions
-          </Typography>
-          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mb: 1 }}>
-            Right click or long press the frozen metric label to hide this row.
-          </Typography>
           <Typography variant="body2" sx={{ color: '#334155', mb: 1.5 }}>
             {metricRowActionMenuState.rowLabel}
           </Typography>
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 1 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             <Button size="small" onClick={closeMetricRowActionMenu} disabled={isUpdatingRowPreference}>
               CANCEL
             </Button>
+            {metricRowActionMenuState.canHide ? (
+              <Button
+                size="small"
+                data-testid="share-price-dashboard-metric-row-hide-action"
+                onClick={handleHideMetricRow}
+                disabled={isUpdatingRowPreference}
+              >
+                HIDE ROW
+              </Button>
+            ) : null}
             <Button
               size="small"
-              data-testid="share-price-dashboard-metric-row-hide-action"
-              onClick={handleHideMetricRow}
+              data-testid="share-price-dashboard-metric-row-bold-action"
+              onClick={handleToggleMetricRowBoldState}
               disabled={isUpdatingRowPreference}
             >
-              HIDE ROW
+              {metricRowActionMenuState.isBold ? 'UNBOLD' : 'BOLD'}
             </Button>
           </Box>
         </Box>
@@ -3847,21 +4119,25 @@ export default function SharePriceDashboard({
       {metricEditorState ? (
         <Box
           data-testid="share-price-dashboard-metric-editor"
+          data-overlay-mode={metricEditorPosition?.mode}
+          data-overlay-left={
+            Number.isFinite(metricEditorPosition?.debugLeft)
+              ? String(metricEditorPosition.debugLeft)
+              : undefined
+          }
+          data-overlay-width={
+            Number.isFinite(metricEditorPosition?.debugWidth)
+              ? String(metricEditorPosition.debugWidth)
+              : undefined
+          }
           sx={{
             position: 'fixed',
             zIndex: 1400,
-            left: shouldUseBottomSheetMetricEditor
-              ? 12
-              : Math.max((metricEditorState.anchorRect?.left || 0) - 16, 12),
-            right: shouldUseBottomSheetMetricEditor ? 12 : 'auto',
-            top: shouldUseBottomSheetMetricEditor
-              ? 'auto'
-              : Math.min(
-                  (metricEditorState.anchorRect?.bottom || 0) + 8,
-                  ((typeof window !== 'undefined' ? window.innerHeight : 800) - 220),
-                ),
-            bottom: shouldUseBottomSheetMetricEditor ? 12 : 'auto',
-            width: shouldUseBottomSheetMetricEditor ? 'auto' : 280,
+            left: metricEditorPosition?.left,
+            right: metricEditorPosition?.right,
+            top: metricEditorPosition?.top,
+            bottom: metricEditorPosition?.bottom,
+            width: metricEditorPosition?.width,
             border: '1px solid #cbd5e1',
             borderRadius: shouldUseBottomSheetMetricEditor ? 2 : 1.5,
             backgroundColor: '#ffffff',

@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SectorCardComponent from '../SectorCardComponent';
+import { ENHANCED_INTERNAL_SCROLLBAR_SIZE, enhancedInternalScrollbarSx } from '../sharedScrollbarStyles.js';
 
 const mockSectorChart = vi.fn();
 
@@ -76,6 +77,10 @@ describe('SectorCardComponent', () => {
 
     expect(await screen.findByText('Alpha Corp')).toBeTruthy();
     expect(screen.getByTestId('sector-card-constituents-list')).toBeTruthy();
+    expect(screen.getByTestId('sector-card-constituents-list').getAttribute('data-scrollbar-style')).toBe('enhanced');
+    expect(
+      enhancedInternalScrollbarSx['@supports selector(::-webkit-scrollbar)']['&::-webkit-scrollbar'].width,
+    ).toBe(ENHANCED_INTERNAL_SCROLLBAR_SIZE);
     expect(screen.getAllByTestId('sector-card-constituent-status-chip')).toHaveLength(3);
     expect(screen.getByText('Disabled')).toBeTruthy();
     expect(screen.getByText('Unavailable for this range')).toBeTruthy();

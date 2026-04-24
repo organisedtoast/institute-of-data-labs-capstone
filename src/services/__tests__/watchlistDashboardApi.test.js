@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { isDefaultBoldMetricsFieldPath } from '../../../shared/defaultBoldStockRows.mjs';
 
 import {
   buildDashboardPayload,
@@ -7,8 +8,347 @@ import {
   fetchWatchlistDashboardBootstraps,
   fetchDashboardData,
   refreshWatchlistDashboardBootstrap,
+  updateDashboardRowPreference,
   updateDashboardInvestmentCategory,
 } from '../watchlistDashboardApi';
+
+function buildDefaultBoldMetricsPayload() {
+  return {
+    columns: [
+      {
+        key: 'annual-2024',
+        kind: 'annual',
+        label: 'FY 2024',
+        shortLabel: '2024',
+        fiscalYear: 2024,
+        fiscalYearEndDate: '2024-12-31',
+      },
+      {
+        key: 'annual-2025',
+        kind: 'annual',
+        label: 'FY 2025',
+        shortLabel: '2025',
+        fiscalYear: 2025,
+        fiscalYearEndDate: '2025-12-31',
+      },
+    ],
+    rows: [
+      {
+        rowKey: '670::annualData[].forecastData.fy1.marketCap',
+        fieldPath: 'annualData[].forecastData.fy1.marketCap',
+        label: 'Market cap FY+1',
+        shortLabel: 'Market cap FY+1',
+        section: 'Shares & Market Cap',
+        shortSection: 'Shares',
+        order: 670,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '680::annualData[].forecastData.fy2.marketCap',
+        fieldPath: 'annualData[].forecastData.fy2.marketCap',
+        label: 'Market cap FY+2',
+        shortLabel: 'Market cap FY+2',
+        section: 'Shares & Market Cap',
+        shortSection: 'Shares',
+        order: 680,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '690::annualData[].forecastData.fy3.marketCap',
+        fieldPath: 'annualData[].forecastData.fy3.marketCap',
+        label: 'Market cap FY+3',
+        shortLabel: 'Market cap FY+3',
+        section: 'Shares & Market Cap',
+        shortSection: 'Shares',
+        order: 690,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '810::annualData[].valuationMultiples.evSalesTrailing',
+        fieldPath: 'annualData[].valuationMultiples.evSalesTrailing',
+        label: 'EV/Sales trailing',
+        shortLabel: 'EV/Sales trailing',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 810,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '820::annualData[].forecastData.fy1.evSales',
+        fieldPath: 'annualData[].forecastData.fy1.evSales',
+        label: 'EV/Sales FY+1',
+        shortLabel: 'EV/Sales FY+1',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 820,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '830::annualData[].forecastData.fy2.evSales',
+        fieldPath: 'annualData[].forecastData.fy2.evSales',
+        label: 'EV/Sales FY+2',
+        shortLabel: 'EV/Sales FY+2',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 830,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '940::annualData[].valuationMultiples.evEbitTrailing',
+        fieldPath: 'annualData[].valuationMultiples.evEbitTrailing',
+        label: 'EV/EBIT trailing',
+        shortLabel: 'EV/EBIT trailing',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 940,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '950::annualData[].forecastData.fy1.evEbit',
+        fieldPath: 'annualData[].forecastData.fy1.evEbit',
+        label: 'EV/EBIT FY+1',
+        shortLabel: 'EV/EBIT FY+1',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 950,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '980::annualData[].valuationMultiples.peTrailing',
+        fieldPath: 'annualData[].valuationMultiples.peTrailing',
+        label: 'PE trailing',
+        shortLabel: 'PE trailing',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 980,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '990::annualData[].forecastData.fy1.pe',
+        fieldPath: 'annualData[].forecastData.fy1.pe',
+        label: 'PE FY+1',
+        shortLabel: 'PE FY+1',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 990,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '960::annualData[].forecastData.fy2.evEbit',
+        fieldPath: 'annualData[].forecastData.fy2.evEbit',
+        label: 'EV/EBIT FY+2',
+        shortLabel: 'EV/EBIT FY+2',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 960,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '970::annualData[].forecastData.fy3.evEbit',
+        fieldPath: 'annualData[].forecastData.fy3.evEbit',
+        label: 'EV/EBIT FY+3',
+        shortLabel: 'EV/EBIT FY+3',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 970,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '1000::annualData[].forecastData.fy2.pe',
+        fieldPath: 'annualData[].forecastData.fy2.pe',
+        label: 'PE FY+2',
+        shortLabel: 'PE FY+2',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 1000,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '1010::annualData[].forecastData.fy3.pe',
+        fieldPath: 'annualData[].forecastData.fy3.pe',
+        label: 'PE FY+3',
+        shortLabel: 'PE FY+3',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 1010,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '1410::annualData[].epsAndDividends.epsTrailing',
+        fieldPath: 'annualData[].epsAndDividends.epsTrailing',
+        label: 'EPS (trailing)',
+        shortLabel: 'EPS (trailing)',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1410,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '1420::annualData[].forecastData.fy1.eps',
+        fieldPath: 'annualData[].forecastData.fy1.eps',
+        label: 'EPS FY+1',
+        shortLabel: 'EPS FY+1',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1420,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '1430::annualData[].forecastData.fy2.eps',
+        fieldPath: 'annualData[].forecastData.fy2.eps',
+        label: 'EPS FY+2',
+        shortLabel: 'EPS FY+2',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1430,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '1440::annualData[].forecastData.fy3.eps',
+        fieldPath: 'annualData[].forecastData.fy3.eps',
+        label: 'EPS FY+3',
+        shortLabel: 'EPS FY+3',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1440,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '1450::annualData[].epsAndDividends.dyTrailing',
+        fieldPath: 'annualData[].epsAndDividends.dyTrailing',
+        label: 'DY trailing',
+        shortLabel: 'DY trailing',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1450,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '1460::annualData[].forecastData.fy1.dy',
+        fieldPath: 'annualData[].forecastData.fy1.dy',
+        label: 'DY FY+1',
+        shortLabel: 'DY FY+1',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1460,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '1470::annualData[].forecastData.fy2.dy',
+        fieldPath: 'annualData[].forecastData.fy2.dy',
+        label: 'DY FY+2',
+        shortLabel: 'DY FY+2',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1470,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '1480::annualData[].forecastData.fy3.dy',
+        fieldPath: 'annualData[].forecastData.fy3.dy',
+        label: 'DY FY+3',
+        shortLabel: 'DY FY+3',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1480,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '1490::annualData[].epsAndDividends.dpsTrailing',
+        fieldPath: 'annualData[].epsAndDividends.dpsTrailing',
+        label: 'DPS (trailing)',
+        shortLabel: 'DPS (trailing)',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1490,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '1500::annualData[].forecastData.fy1.dps',
+        fieldPath: 'annualData[].forecastData.fy1.dps',
+        label: 'DPS FY+1',
+        shortLabel: 'DPS FY+1',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1500,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '1510::annualData[].forecastData.fy2.dps',
+        fieldPath: 'annualData[].forecastData.fy2.dps',
+        label: 'DPS FY+2',
+        shortLabel: 'DPS FY+2',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1510,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+      {
+        rowKey: '1520::annualData[].forecastData.fy3.dps',
+        fieldPath: 'annualData[].forecastData.fy3.dps',
+        label: 'DPS FY+3',
+        shortLabel: 'DPS FY+3',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1520,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [],
+      },
+    ],
+    mainTableRowPreferences: [],
+  };
+}
 
 vi.mock('axios', () => ({
   default: {
@@ -57,6 +397,20 @@ function buildWatchlistStock(overrides = {}) {
 
 function buildMetricsViewPayload() {
   return {
+    mainTableRowPreferences: [
+      {
+        rowKey: 'main::annualData[].base.sharePrice',
+        fieldPath: 'annualData[].base.sharePrice',
+        label: 'Share price',
+        isBold: true,
+      },
+      {
+        rowKey: 'main::annualData[].base.marketCap',
+        fieldPath: 'annualData[].base.marketCap',
+        label: 'Market cap',
+        isBold: false,
+      },
+    ],
     columns: [
       {
         key: 'annual-2023',
@@ -86,6 +440,7 @@ function buildMetricsViewPayload() {
         order: 710,
         surface: 'detail',
         isEnabled: true,
+        isBold: true,
         cells: [
           {
             columnKey: 'annual-2023',
@@ -168,9 +523,11 @@ describe('watchlistDashboardApi', () => {
     ]);
     expect(payload.annualMainTableRows[0].cells.sharePrice).toEqual({
       columnKey: 'annual-2023',
+      rowKey: 'main::annualData[].base.sharePrice',
       value: 189.6,
       sourceOfTruth: 'user',
       isOverridden: true,
+      isBold: true,
       isOverrideable: true,
       overrideTarget: {
         kind: 'annual',
@@ -181,9 +538,11 @@ describe('watchlistDashboardApi', () => {
     });
     expect(payload.annualMainTableRows[1].cells.sharesOnIssue).toEqual({
       columnKey: 'annual-2024',
+      rowKey: 'main::annualData[].base.sharesOnIssue',
       value: 15500000000,
       sourceOfTruth: 'roic',
       isOverridden: false,
+      isBold: false,
       isOverrideable: true,
       overrideTarget: {
         kind: 'annual',
@@ -194,6 +553,11 @@ describe('watchlistDashboardApi', () => {
     });
     expect(payload.metricsColumns).toEqual([]);
     expect(payload.metricsRows).toEqual([]);
+    expect(payload.annualMainTableRows[0].cells.marketCap.isBold).toBe(true);
+    // Market cap still renders from the payload, but the derived-field policy
+    // now keeps it read-only so the stock card no longer opens the editor there.
+    expect(payload.annualMainTableRows[0].cells.marketCap.isOverrideable).toBe(false);
+    expect(payload.annualMainTableRows[0].cells.marketCap.overrideTarget).toBeNull();
   });
 
   it('normalizes annual metrics-mode rows from the backend metrics-view payload', () => {
@@ -239,6 +603,89 @@ describe('watchlistDashboardApi', () => {
         payloadPath: 'forecastData.fy1.ebit',
       },
     });
+    expect(payload.metricsRows[0].isBold).toBe(true);
+    expect(payload.annualMainTableRows[0].cells.sharePrice.isBold).toBe(true);
+  });
+
+  it('defaults the requested pricing, valuation, and dividend rows to bold when a payload omits explicit bold flags', () => {
+    const payload = buildDashboardPayload(
+      buildWatchlistStock(),
+      { prices: [] },
+      'aapl',
+      buildDefaultBoldMetricsPayload(),
+    );
+
+    // These rows start bold even before a user saves anything, so the stock
+    // card highlights the requested pricing, valuation, and dividend rows
+    // consistently across old payloads too.
+    expect(
+      Object.fromEntries(payload.metricsRows.map((row) => [row.fieldPath, row.isBold])),
+    ).toEqual({
+      'annualData[].forecastData.fy1.marketCap': true,
+      'annualData[].forecastData.fy2.marketCap': true,
+      'annualData[].forecastData.fy3.marketCap': true,
+      'annualData[].valuationMultiples.evSalesTrailing': true,
+      'annualData[].forecastData.fy1.evSales': true,
+      'annualData[].forecastData.fy2.evSales': true,
+      'annualData[].valuationMultiples.evEbitTrailing': true,
+      'annualData[].forecastData.fy1.evEbit': true,
+      'annualData[].forecastData.fy2.evEbit': true,
+      'annualData[].forecastData.fy3.evEbit': true,
+      'annualData[].valuationMultiples.peTrailing': true,
+      'annualData[].forecastData.fy1.pe': true,
+      'annualData[].forecastData.fy2.pe': true,
+      'annualData[].forecastData.fy3.pe': true,
+      'annualData[].epsAndDividends.epsTrailing': true,
+      'annualData[].forecastData.fy1.eps': true,
+      'annualData[].forecastData.fy2.eps': true,
+      'annualData[].forecastData.fy3.eps': true,
+      'annualData[].epsAndDividends.dyTrailing': true,
+      'annualData[].forecastData.fy1.dy': true,
+      'annualData[].forecastData.fy2.dy': true,
+      'annualData[].forecastData.fy3.dy': true,
+      'annualData[].epsAndDividends.dpsTrailing': true,
+      'annualData[].forecastData.fy1.dps': true,
+      'annualData[].forecastData.fy2.dps': true,
+      'annualData[].forecastData.fy3.dps': true,
+    });
+    expect(payload.annualMainTableRows[0].cells.sharePrice.isBold).toBe(true);
+    expect(payload.annualMainTableRows[0].cells.marketCap.isBold).toBe(true);
+  });
+
+  it('uses the browser-safe shared helper for frontend default-bold lookups', () => {
+    // This keeps the Edge import bug from coming back by proving the frontend
+    // can load the ESM helper and still see the canonical default-bold rows.
+    expect(isDefaultBoldMetricsFieldPath('annualData[].forecastData.fy3.dps')).toBe(true);
+    expect(isDefaultBoldMetricsFieldPath('annualData[].base.sharesOnIssue')).toBe(false);
+  });
+
+  it('keeps an explicit saved false when a user unbolds one of the default rows', () => {
+    const payload = buildDashboardPayload(
+      buildWatchlistStock(),
+      { prices: [] },
+      'aapl',
+      {
+        ...buildDefaultBoldMetricsPayload(),
+        rows: buildDefaultBoldMetricsPayload().rows.map((row) => {
+          return row.rowKey === '1490::annualData[].epsAndDividends.dpsTrailing'
+            ? { ...row, isBold: false }
+            : row;
+        }),
+        mainTableRowPreferences: [
+          {
+            rowKey: 'main::annualData[].base.sharePrice',
+            fieldPath: 'annualData[].base.sharePrice',
+            label: 'Share price',
+            isBold: false,
+          },
+        ],
+      },
+    );
+
+    expect(
+      payload.metricsRows.find((row) => row.rowKey === '1490::annualData[].epsAndDividends.dpsTrailing')?.isBold,
+    ).toBe(false);
+    expect(payload.annualMainTableRows[0].cells.sharePrice.isBold).toBe(false);
   });
 
   it('preserves the Mongo-backed fiscal year on each normalized annual metric row', () => {
@@ -333,9 +780,11 @@ describe('watchlistDashboardApi', () => {
                 cells: {
                   sharePrice: {
                     columnKey: 'annual-2024',
+                    rowKey: 'main::annualData[].base.sharePrice',
                     value: 210.4,
                     sourceOfTruth: 'roic',
                     isOverridden: false,
+                    isBold: true,
                     isOverrideable: true,
                     overrideTarget: {
                       kind: 'annual',
@@ -345,9 +794,11 @@ describe('watchlistDashboardApi', () => {
                   },
                   sharesOnIssue: {
                     columnKey: 'annual-2024',
+                    rowKey: 'main::annualData[].base.sharesOnIssue',
                     value: 15500000000,
                     sourceOfTruth: 'user',
                     isOverridden: true,
+                    isBold: false,
                     isOverrideable: true,
                     overrideTarget: {
                       kind: 'annual',
@@ -402,36 +853,44 @@ describe('watchlistDashboardApi', () => {
             cells: {
               fiscalYearEndDate: {
                 columnKey: 'annual-2024',
+                rowKey: 'main::annualData[].fiscalYearEndDate',
                 value: null,
                 sourceOfTruth: 'system',
                 isOverridden: false,
+                isBold: false,
                 isOverrideable: false,
                 overrideTarget: null,
                 fieldKey: 'fiscalYearEndDate',
               },
               fiscalYear: {
                 columnKey: 'annual-2024',
+                rowKey: 'main::annualData[].fiscalYear',
                 value: null,
                 sourceOfTruth: 'system',
                 isOverridden: false,
+                isBold: false,
                 isOverrideable: false,
                 overrideTarget: null,
                 fieldKey: 'fiscalYear',
               },
               earningsReleaseDate: {
                 columnKey: 'annual-2024',
+                rowKey: 'main::annualData[].earningsReleaseDate',
                 value: null,
                 sourceOfTruth: 'system',
                 isOverridden: false,
+                isBold: false,
                 isOverrideable: false,
                 overrideTarget: null,
                 fieldKey: 'earningsReleaseDate',
               },
               sharePrice: {
                 columnKey: 'annual-2024',
+                rowKey: 'main::annualData[].base.sharePrice',
                 value: 210.4,
                 sourceOfTruth: 'roic',
                 isOverridden: false,
+                isBold: true,
                 isOverrideable: true,
                 overrideTarget: {
                   kind: 'annual',
@@ -442,9 +901,11 @@ describe('watchlistDashboardApi', () => {
               },
               sharesOnIssue: {
                 columnKey: 'annual-2024',
+                rowKey: 'main::annualData[].base.sharesOnIssue',
                 value: 15500000000,
                 sourceOfTruth: 'user',
                 isOverridden: true,
+                isBold: false,
                 isOverrideable: true,
                 overrideTarget: {
                   kind: 'annual',
@@ -455,9 +916,11 @@ describe('watchlistDashboardApi', () => {
               },
               marketCap: {
                 columnKey: 'annual-2024',
+                rowKey: 'main::annualData[].base.marketCap',
                 value: null,
                 sourceOfTruth: 'system',
                 isOverridden: false,
+                isBold: true,
                 isOverrideable: false,
                 overrideTarget: null,
                 fieldKey: 'marketCap',
@@ -467,6 +930,7 @@ describe('watchlistDashboardApi', () => {
         ],
         metricsColumns: [],
         metricsRows: [],
+        mainTableRowPreferences: [],
         hasLoadedMetricsView: false,
         needsBackgroundRefresh: true,
         loadError: '',
@@ -486,6 +950,36 @@ describe('watchlistDashboardApi', () => {
     expect(axios.get).toHaveBeenCalledWith('/api/watchlist/AAPL/metrics-view', { signal: abortSignal });
     expect(payload.hasLoadedMetricsView).toBe(true);
     expect(payload.metricsRows[0].fieldPath).toBe('annualData[].forecastData.fy1.ebit');
+    expect(payload.metricsRows[0].isBold).toBe(true);
+    expect(payload.mainTableRowPreferences[0]).toEqual({
+      rowKey: 'main::annualData[].base.sharePrice',
+      fieldPath: 'annualData[].base.sharePrice',
+      label: 'Share price',
+      isBold: true,
+    });
+  });
+
+  it('updates row preferences through the shared hide-and-bold route contract', async () => {
+    axios.patch.mockResolvedValueOnce({
+      data: buildMetricsViewPayload(),
+    });
+
+    const payload = await updateDashboardRowPreference('aapl', '710::annualData[].forecastData.fy1.ebit', {
+      isBold: true,
+    });
+
+    // The same helper now sends whichever preference changed so bolding one
+    // row does not accidentally wipe the saved hide/show state.
+    expect(axios.patch).toHaveBeenCalledWith(
+      '/api/watchlist/AAPL/metrics-row-preferences',
+      {
+        rowKey: '710::annualData[].forecastData.fy1.ebit',
+        isBold: true,
+      },
+      undefined,
+    );
+    expect(payload.metricsRows[0].isBold).toBe(true);
+    expect(payload.mainTableRowPreferences[0].isBold).toBe(true);
   });
 
   it('refreshes one dashboard in the background and then reloads its bootstrap payload', async () => {

@@ -1,5 +1,11 @@
 const WatchlistStock = require("../models/WatchlistStock");
+const StockMetricsRowPreference = require("../models/StockMetricsRowPreference");
 const roicService = require("./roicService");
+const { isAnnualFieldDirectlyOverrideable } = require("../catalog/fieldCatalog");
+const { buildMainTableRowKey } = require("./stockMetricsViewService");
+const { clearLegacyDerivedMetricOverrides } = require("../utils/derivedMetricOverrideCleanup");
+const { recalculateDerived } = require("../utils/derivedCalc");
+const { isDefaultBoldMainTableRowKey } = require("../shared/defaultBoldStockRows");
 
 const ANNUAL_HISTORY_FETCH_VERSION = 3;
 
@@ -57,49 +63,68 @@ function normalizePriceRows(priceRows = []) {
 
 const MAIN_TABLE_FIELD_CONFIG = {
   fiscalYearEndDate: {
+    rowKey: buildMainTableRowKey("annualData[].fiscalYearEndDate"),
     payloadPath: null,
     resolveField: (annualRow) => annualRow?.fiscalYearEndDate ?? null,
   },
   fiscalYear: {
+    rowKey: buildMainTableRowKey("annualData[].fiscalYear"),
     payloadPath: null,
     resolveField: (annualRow) => annualRow?.fiscalYear ?? null,
   },
   earningsReleaseDate: {
+    rowKey: buildMainTableRowKey("annualData[].earningsReleaseDate"),
     payloadPath: null,
     resolveField: (annualRow) => annualRow?.earningsReleaseDate ?? null,
   },
   sharePrice: {
+    rowKey: buildMainTableRowKey("annualData[].base.sharePrice"),
     payloadPath: "base.sharePrice",
     resolveField: (annualRow) => annualRow?.base?.sharePrice ?? null,
   },
   sharesOnIssue: {
+    rowKey: buildMainTableRowKey("annualData[].base.sharesOnIssue"),
     payloadPath: "base.sharesOnIssue",
     resolveField: (annualRow) => annualRow?.base?.sharesOnIssue ?? null,
   },
   marketCap: {
+    rowKey: buildMainTableRowKey("annualData[].base.marketCap"),
     payloadPath: "base.marketCap",
     resolveField: (annualRow) => annualRow?.base?.marketCap ?? null,
   },
 };
 
-function createAnnualMainTableCell(fieldKey, annualRow, fiscalYear) {
+function createAnnualMainTableCell(fieldKey, annualRow, fiscalYear, rowPreferenceByKey = new Map()) {
   const fieldConfig = MAIN_TABLE_FIELD_CONFIG[fieldKey];
   const rawField = fieldConfig?.resolveField?.(annualRow);
   const value = getEffectiveValue(rawField);
   const hasMetricMetadata = rawField && typeof rawField === "object" && "sourceOfTruth" in rawField;
+  const rowPreference = rowPreferenceByKey.get(fieldConfig?.rowKey);
+  const nextBoldState = typeof rowPreference?.isBold === "boolean"
+    ? rowPreference.isBold
+    : isDefaultBoldMainTableRowKey(fieldConfig?.rowKey);
+  const isDirectlyOverrideable =
+    Boolean(fieldConfig?.payloadPath && Number.isInteger(fiscalYear) && hasMetricMetadata)
+    && isAnnualFieldDirectlyOverrideable(fieldConfig.payloadPath);
 
   // The main table now needs the same per-cell override metadata as the
   // detailed metrics table. Shipping it in the bootstrap payload lets the page
   // decide at first paint which annual cells should open the shared editor.
+  // Bold defaults also come from one shared helper, so saved row choices and
+  // frontend fallback logic do not drift apart over time. Derived fields still
+  // show their recalculated values here, but they no longer advertise a direct
+  // override affordance because the catalog marks them as internal formulas.
   return {
     columnKey: Number.isInteger(fiscalYear) ? `annual-${fiscalYear}` : "",
+    rowKey: fieldConfig?.rowKey || "",
     value,
     sourceOfTruth:
       hasMetricMetadata && typeof rawField.sourceOfTruth === "string" ? rawField.sourceOfTruth : "system",
     isOverridden: hasMetricMetadata && rawField.sourceOfTruth === "user",
-    isOverrideable: Boolean(fieldConfig?.payloadPath && Number.isInteger(fiscalYear) && hasMetricMetadata),
+    isBold: nextBoldState,
+    isOverrideable: isDirectlyOverrideable,
     overrideTarget:
-      fieldConfig?.payloadPath && Number.isInteger(fiscalYear) && hasMetricMetadata
+      isDirectlyOverrideable
         ? {
             kind: "annual",
             fiscalYear,
@@ -107,6 +132,23 @@ function createAnnualMainTableCell(fieldKey, annualRow, fiscalYear) {
           }
         : null,
   };
+}
+
+async function persistLegacyDerivedCleanup(stockDocument) {
+  if (!stockDocument || typeof stockDocument !== "object") {
+    return stockDocument;
+  }
+
+  // Read paths now repair any legacy derived overrides too, so old user-owned
+  // market-cap style values stop resurfacing after the new lockout ships.
+  if (clearLegacyDerivedMetricOverrides(stockDocument)) {
+    recalculateDerived(stockDocument);
+    if (typeof stockDocument.save === "function") {
+      await stockDocument.save();
+    }
+  }
+
+  return stockDocument;
 }
 
 function normalizeAnnualMetrics(stockDocument) {
@@ -134,7 +176,7 @@ function normalizeAnnualMetrics(stockDocument) {
     });
 }
 
-function normalizeAnnualMainTableRows(stockDocument) {
+function normalizeAnnualMainTableRows(stockDocument, rowPreferenceByKey = new Map()) {
   const annualRows = Array.isArray(stockDocument?.annualData) ? stockDocument.annualData : [];
 
   return annualRows
@@ -149,7 +191,7 @@ function normalizeAnnualMainTableRows(stockDocument) {
         cells: Object.fromEntries(
           Object.keys(MAIN_TABLE_FIELD_CONFIG).map((fieldKey) => [
             fieldKey,
-            createAnnualMainTableCell(fieldKey, annualRow, normalizedFiscalYear),
+            createAnnualMainTableCell(fieldKey, annualRow, normalizedFiscalYear, rowPreferenceByKey),
           ])
         ),
       };
@@ -199,6 +241,9 @@ function buildSummaryPayload(stockDocument) {
 
 function buildDashboardBootstrapPayload(stockDocument, priceRows, options = {}) {
   const identifier = normalizeTickerSymbol(stockDocument?.tickerSymbol);
+  const rowPreferenceByKey = options.rowPreferenceByKey instanceof Map
+    ? options.rowPreferenceByKey
+    : new Map();
 
   return {
     identifier,
@@ -210,7 +255,7 @@ function buildDashboardBootstrapPayload(stockDocument, priceRows, options = {}) 
     priceCurrency: stockDocument?.priceCurrency || "USD",
     prices: normalizePriceRows(priceRows),
     annualMetrics: normalizeAnnualMetrics(stockDocument),
-    annualMainTableRows: normalizeAnnualMainTableRows(stockDocument),
+    annualMainTableRows: normalizeAnnualMainTableRows(stockDocument, rowPreferenceByKey),
     metricsColumns: [],
     metricsRows: [],
     hasLoadedMetricsView: false,
@@ -272,7 +317,7 @@ async function listWatchlistDashboardBootstraps(options = {}) {
       sourceMeta: 1,
       annualData: 1,
     }
-  ).lean();
+  );
 
   const stockDocumentsByTicker = new Map(
     stockDocuments.map((stockDocument) => [normalizeTickerSymbol(stockDocument.tickerSymbol), stockDocument])
@@ -285,18 +330,27 @@ async function listWatchlistDashboardBootstraps(options = {}) {
 
   const dashboardPayloads = await Promise.all(
     orderedStockDocuments.map(async (stockDocument) => {
+      await persistLegacyDerivedCleanup(stockDocument);
       const identifier = normalizeTickerSymbol(stockDocument.tickerSymbol);
       const needsBackgroundRefresh = shouldUpgradeLegacyAnnualHistory(stockDocument);
+      const storedPreferences = await StockMetricsRowPreference.find({
+        tickerSymbol: identifier,
+      }).lean();
+      const rowPreferenceByKey = new Map(
+        storedPreferences.map((preference) => [preference.rowKey, preference])
+      );
 
       try {
         const priceRows = await fetchBootstrapPriceRows(identifier);
 
         return buildDashboardBootstrapPayload(stockDocument, priceRows, {
           needsBackgroundRefresh,
+          rowPreferenceByKey,
         });
       } catch (_error) {
         return buildDashboardBootstrapPayload(stockDocument, [], {
           needsBackgroundRefresh,
+          rowPreferenceByKey,
           loadError: `Unable to load dashboard data for ${identifier}.`,
         });
       }

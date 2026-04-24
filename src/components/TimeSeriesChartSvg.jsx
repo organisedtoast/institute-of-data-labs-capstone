@@ -6,6 +6,36 @@ import {
   getChartPlotHeight,
 } from './timeSeriesChartCore';
 
+const HOVER_TOOLTIP_HORIZONTAL_PADDING = 8;
+const HOVER_TOOLTIP_MIN_WIDTH = 120;
+const HOVER_TOOLTIP_MAX_WIDTH = 180;
+const HOVER_TOOLTIP_LABEL_CHARACTER_WIDTH = 5.5;
+const HOVER_TOOLTIP_VALUE_CHARACTER_WIDTH = 7;
+
+function getHoverTooltipWidth(labelText, valueText, plotWidth) {
+  const safePlotWidth = Math.max(Number(plotWidth) || 0, 1);
+  const estimatedLabelWidth = String(labelText ?? '').length * HOVER_TOOLTIP_LABEL_CHARACTER_WIDTH;
+  const estimatedValueWidth = String(valueText ?? '').length * HOVER_TOOLTIP_VALUE_CHARACTER_WIDTH;
+  const estimatedContentWidth = Math.max(estimatedLabelWidth, estimatedValueWidth);
+  const desiredWidth = Math.max(
+    HOVER_TOOLTIP_MIN_WIDTH,
+    Math.min(HOVER_TOOLTIP_MAX_WIDTH, estimatedContentWidth + (HOVER_TOOLTIP_HORIZONTAL_PADDING * 2)),
+  );
+
+  return Math.min(desiredWidth, safePlotWidth);
+}
+
+function buildHoverTooltipLayout({ hoverX, labelText, valueText, plotWidth }) {
+  const tooltipWidth = getHoverTooltipWidth(labelText, valueText, plotWidth);
+  const clampedLeft = Math.max(0, Math.min(hoverX - (tooltipWidth / 2), Math.max((plotWidth || 0) - tooltipWidth, 0)));
+
+  return {
+    width: tooltipWidth,
+    x: clampedLeft,
+    centerX: clampedLeft + (tooltipWidth / 2),
+  };
+}
+
 function applyDataAttributes(baseProps, dataAttributes = {}) {
   return Object.entries(dataAttributes).reduce((props, [key, value]) => {
     props[`data-${key}`] = String(value);
@@ -46,6 +76,19 @@ export default function TimeSeriesChartSvg({
     topPadding,
     bottomPadding,
   });
+  const hoverValueText = hoverState?.value !== null && hoverState?.value !== undefined
+    ? hoverValueFormatter(hoverState.value)
+    : '';
+  // The hover guide marks the true data point, but the tooltip box and both
+  // text lines need one shared clamped center so edge hovers stay readable.
+  const hoverTooltipLayout = hoverState?.x !== null && hoverState?.x !== undefined && hoverState?.value !== null && hoverState?.value !== undefined
+    ? buildHoverTooltipLayout({
+        hoverX: hoverState.x,
+        labelText: hoverState.label,
+        valueText: hoverValueText,
+        plotWidth,
+      })
+    : null;
 
   return (
     <svg
@@ -180,27 +223,37 @@ export default function TimeSeriesChartSvg({
             opacity="0.8"
           />
           <rect
-            x={Math.max(0, Math.min(hoverState.x - 60, plotWidth - 120))}
+            data-testid="time-series-chart-hover-box"
+            x={hoverTooltipLayout.x}
             y="5"
-            width="120"
+            width={hoverTooltipLayout.width}
             height="36"
             fill="white"
             stroke="#3b82f6"
             rx="4"
             opacity="0.95"
           />
-          <text x={hoverState.x} y="18" textAnchor="middle" fontSize="8" fontWeight="600" fill="#64748b">
+          <text
+            data-testid="time-series-chart-hover-label"
+            x={hoverTooltipLayout.centerX}
+            y="18"
+            textAnchor="middle"
+            fontSize="8"
+            fontWeight="600"
+            fill="#64748b"
+          >
             {hoverState.label}
           </text>
           <text
-            x={hoverState.x}
+            data-testid="time-series-chart-hover-value"
+            x={hoverTooltipLayout.centerX}
             y="32"
             textAnchor="middle"
             fontSize="10"
             fontWeight="700"
             fill={hoverState.valueColor ?? '#c2410c'}
           >
-            {hoverValueFormatter(hoverState.value)}
+            {hoverValueText}
           </text>
         </g>
       ) : null}

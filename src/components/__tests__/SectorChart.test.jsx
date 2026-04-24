@@ -3,6 +3,12 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SectorChart from '../SectorChart';
+import {
+  ENHANCED_INTERNAL_SCROLLBAR_COLORS,
+  ENHANCED_INTERNAL_SCROLLBAR_SIZE,
+  ENHANCED_INTERNAL_SCROLLBAR_THUMB_BORDER,
+  enhancedInternalScrollbarSx,
+} from '../sharedScrollbarStyles.js';
 
 function createMockComponent(tagName, omittedPropNames = []) {
   return function MockComponent({ children, ...props }) {
@@ -177,6 +183,25 @@ describe('SectorChart', () => {
     expect(onPresetPanOffsetChange).toHaveBeenCalledWith(4);
   });
 
+  it('marks the sector chart scroller with the shared enhanced scrollbar contract', async () => {
+    // This protects the shared scrollbar rule itself, not the chart math.
+    render(<SectorChart {...baseProps} isPresetWindowMode maxPresetPanOffset={6} presetPanOffsetMonths={0} />);
+
+    const scrollRegion = await screen.findByTestId('sector-chart-scroll-region');
+    expect(scrollRegion.getAttribute('data-scrollbar-style')).toBe('enhanced');
+  });
+
+  it('publishes a visibly wider shared scrollbar size contract', () => {
+    // The older test only proved the chart opted into the shared rule.
+    // This one protects the actual width values so "styled but not wider"
+    // cannot sneak back in during a future refactor.
+    expect(enhancedInternalScrollbarSx['@supports selector(::-webkit-scrollbar)']['&::-webkit-scrollbar'].width).toBe(ENHANCED_INTERNAL_SCROLLBAR_SIZE);
+    expect(enhancedInternalScrollbarSx['@supports selector(::-webkit-scrollbar)']['&::-webkit-scrollbar'].height).toBe(ENHANCED_INTERNAL_SCROLLBAR_SIZE);
+    expect(enhancedInternalScrollbarSx['@supports selector(::-webkit-scrollbar)']['&::-webkit-scrollbar-thumb'].border).toBe(ENHANCED_INTERNAL_SCROLLBAR_THUMB_BORDER);
+    expect(enhancedInternalScrollbarSx['@supports not selector(::-webkit-scrollbar)'].scrollbarWidth).toBe('auto');
+    expect(enhancedInternalScrollbarSx['@supports not selector(::-webkit-scrollbar)'].scrollbarColor).toBe(ENHANCED_INTERNAL_SCROLLBAR_COLORS);
+  });
+
   it('uses a sticky left rail for the Y-axis during preset scrolling', async () => {
     render(
       <SectorChart
@@ -258,5 +283,66 @@ describe('SectorChart', () => {
     const renderedYears = xAxisLabels.map((labelNode) => labelNode.textContent);
 
     expect(renderedYears).toEqual(['2024']);
+  });
+
+  it('keeps the shared hover tooltip fully inside the chart near both x-axis edges', async () => {
+    render(<SectorChart {...baseProps} />);
+
+    const svg = await screen.findByTestId('sector-chart-svg');
+    const [, , contentWidthText] = svg.getAttribute('viewBox').split(' ');
+    const contentWidth = Number(contentWidthText);
+    const plotWidth = contentWidth - 16;
+
+    Object.defineProperty(svg, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        left: 0,
+        top: 0,
+        width: contentWidth,
+        height: 360,
+        right: contentWidth,
+        bottom: 360,
+      }),
+    });
+
+    // This protects the real bug: near-edge hovers used to clamp the box but
+    // leave the text behind, which let the tooltip content get clipped.
+    await fireEvent.mouseMove(svg, { clientX: 1, clientY: 140 });
+
+    const leftHoverBox = screen.getByTestId('time-series-chart-hover-box');
+    const leftHoverLabel = screen.getByTestId('time-series-chart-hover-label');
+    const leftHoverValue = screen.getByTestId('time-series-chart-hover-value');
+    const leftBoxX = Number(leftHoverBox.getAttribute('x'));
+    const leftBoxWidth = Number(leftHoverBox.getAttribute('width'));
+    const leftLabelX = Number(leftHoverLabel.getAttribute('x'));
+    const leftValueX = Number(leftHoverValue.getAttribute('x'));
+
+    expect(leftHoverLabel.textContent).toBe('Jan 2024');
+    expect(leftHoverValue.textContent).toBe('100');
+    expect(leftBoxX).toBeGreaterThanOrEqual(0);
+    expect(leftBoxX + leftBoxWidth).toBeLessThanOrEqual(plotWidth);
+    expect(leftLabelX).toBeGreaterThanOrEqual(leftBoxX);
+    expect(leftLabelX).toBeLessThanOrEqual(leftBoxX + leftBoxWidth);
+    expect(leftValueX).toBeGreaterThanOrEqual(leftBoxX);
+    expect(leftValueX).toBeLessThanOrEqual(leftBoxX + leftBoxWidth);
+
+    await fireEvent.mouseMove(svg, { clientX: plotWidth - 1, clientY: 140 });
+
+    const rightHoverBox = screen.getByTestId('time-series-chart-hover-box');
+    const rightHoverLabel = screen.getByTestId('time-series-chart-hover-label');
+    const rightHoverValue = screen.getByTestId('time-series-chart-hover-value');
+    const rightBoxX = Number(rightHoverBox.getAttribute('x'));
+    const rightBoxWidth = Number(rightHoverBox.getAttribute('width'));
+    const rightLabelX = Number(rightHoverLabel.getAttribute('x'));
+    const rightValueX = Number(rightHoverValue.getAttribute('x'));
+
+    expect(rightHoverLabel.textContent).toBe('Mar 2024');
+    expect(rightHoverValue.textContent).toBe('125');
+    expect(rightBoxX).toBeGreaterThanOrEqual(0);
+    expect(rightBoxX + rightBoxWidth).toBeLessThanOrEqual(plotWidth);
+    expect(rightLabelX).toBeGreaterThanOrEqual(rightBoxX);
+    expect(rightLabelX).toBeLessThanOrEqual(rightBoxX + rightBoxWidth);
+    expect(rightValueX).toBeGreaterThanOrEqual(rightBoxX);
+    expect(rightValueX).toBeLessThanOrEqual(rightBoxX + rightBoxWidth);
   });
 });

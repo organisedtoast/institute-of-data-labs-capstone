@@ -1,6 +1,12 @@
 import axios from 'axios';
+import {
+  isDefaultBoldMainTableRowKey,
+  isDefaultBoldMetricsFieldPath,
+} from '../../shared/defaultBoldStockRows.mjs';
 
 const ANNUAL_HISTORY_FETCH_VERSION = 3;
+// The browser uses the ESM wrapper here so Vite and real browsers both see a
+// valid module, while still sharing the same JSON-backed default-bold source.
 
 function getEffectiveValue(metricField) {
   if (!metricField || typeof metricField !== 'object') {
@@ -12,6 +18,19 @@ function getEffectiveValue(metricField) {
   }
 
   return metricField;
+}
+
+function isDirectlyOverrideableMetricField(metricField) {
+  const nonUserSource =
+    typeof metricField?.baseSourceOfTruth === 'string' && metricField.baseSourceOfTruth !== 'user'
+      ? metricField.baseSourceOfTruth
+      : typeof metricField?.sourceOfTruth === 'string' && metricField.sourceOfTruth !== 'user'
+        ? metricField.sourceOfTruth
+        : 'system';
+
+  // This raw-document fallback does not have the richer backend payload yet, so
+  // it uses the stored source metadata to keep derived fields read-only too.
+  return nonUserSource !== 'derived';
 }
 
 function normalizePriceRows(pricePayload) {
@@ -68,32 +87,43 @@ const MAIN_TABLE_FIELD_KEYS = [
 ];
 const MAIN_TABLE_FIELD_CONFIG = {
   fiscalYearEndDate: {
+    rowKey: 'main::annualData[].fiscalYearEndDate',
     payloadPath: null,
     resolveField: (annualRow) => annualRow?.fiscalYearEndDate ?? null,
   },
   fiscalYear: {
+    rowKey: 'main::annualData[].fiscalYear',
     payloadPath: null,
     resolveField: (annualRow) => annualRow?.fiscalYear ?? null,
   },
   earningsReleaseDate: {
+    rowKey: 'main::annualData[].earningsReleaseDate',
     payloadPath: null,
     resolveField: (annualRow) => annualRow?.earningsReleaseDate ?? null,
   },
   sharePrice: {
+    rowKey: 'main::annualData[].base.sharePrice',
     payloadPath: 'base.sharePrice',
     resolveField: (annualRow) => annualRow?.base?.sharePrice ?? null,
   },
   sharesOnIssue: {
+    rowKey: 'main::annualData[].base.sharesOnIssue',
     payloadPath: 'base.sharesOnIssue',
     resolveField: (annualRow) => annualRow?.base?.sharesOnIssue ?? null,
   },
   marketCap: {
+    rowKey: 'main::annualData[].base.marketCap',
     payloadPath: 'base.marketCap',
     resolveField: (annualRow) => annualRow?.base?.marketCap ?? null,
   },
 };
 
 function normalizeAnnualMainTableCell(cell, fallbackFiscalYear, fieldKey) {
+  const fieldConfig = MAIN_TABLE_FIELD_CONFIG[fieldKey];
+  const normalizedRowKey = typeof cell?.rowKey === 'string' && cell.rowKey
+    ? cell.rowKey
+    : fieldConfig?.rowKey || '';
+
   return {
     columnKey:
       typeof cell?.columnKey === 'string' && cell.columnKey
@@ -101,9 +131,13 @@ function normalizeAnnualMainTableCell(cell, fallbackFiscalYear, fieldKey) {
         : Number.isInteger(fallbackFiscalYear)
           ? `annual-${fallbackFiscalYear}`
           : '',
+    rowKey: normalizedRowKey,
     value: cell?.value ?? null,
     sourceOfTruth: typeof cell?.sourceOfTruth === 'string' ? cell.sourceOfTruth : 'system',
     isOverridden: cell?.isOverridden === true,
+    // Older payloads can omit this field. Falling back to the shared default
+    // keeps the important valuation rows bold until a saved user choice says otherwise.
+    isBold: typeof cell?.isBold === 'boolean' ? cell.isBold : isDefaultBoldMainTableRowKey(normalizedRowKey),
     // The base table now needs the same rich cell metadata as detail metrics.
     // That keeps one editor flow for both surfaces and only makes truly
     // overrideable cells interactive.
@@ -149,16 +183,22 @@ function createAnnualMainTableCellFromStockDocument(fieldKey, annualRow, fiscalY
   const fieldConfig = MAIN_TABLE_FIELD_CONFIG[fieldKey];
   const rawField = fieldConfig?.resolveField?.(annualRow);
   const hasMetricMetadata = rawField && typeof rawField === 'object' && 'sourceOfTruth' in rawField;
+  const normalizedRowKey = fieldConfig?.rowKey || '';
+  const isDirectlyOverrideable =
+    Boolean(fieldConfig?.payloadPath && Number.isInteger(fiscalYear) && hasMetricMetadata)
+    && isDirectlyOverrideableMetricField(rawField);
 
   return {
     columnKey: Number.isInteger(fiscalYear) ? `annual-${fiscalYear}` : '',
+    rowKey: normalizedRowKey,
     value: getEffectiveValue(rawField),
     sourceOfTruth: hasMetricMetadata && typeof rawField.sourceOfTruth === 'string'
       ? rawField.sourceOfTruth
       : 'system',
     isOverridden: hasMetricMetadata && rawField.sourceOfTruth === 'user',
-    isOverrideable: Boolean(fieldConfig?.payloadPath && Number.isInteger(fiscalYear) && hasMetricMetadata),
-    overrideTarget: fieldConfig?.payloadPath && Number.isInteger(fiscalYear) && hasMetricMetadata
+    isBold: isDefaultBoldMainTableRowKey(normalizedRowKey),
+    isOverrideable: isDirectlyOverrideable,
+    overrideTarget: isDirectlyOverrideable
       ? {
           kind: 'annual',
           fiscalYear,
@@ -227,6 +267,12 @@ function normalizeMetricsRows(metricsPayload) {
     order: Number.isFinite(Number(row?.order)) ? Number(row.order) : 0,
     surface: String(row?.surface || ''),
     isEnabled: row?.isEnabled !== false,
+    // Default bolding is now part of the stock-card contract. The backend
+    // sends explicit values for new payloads, and this fallback keeps older
+    // payload shapes aligned without overriding a saved false value.
+    isBold: typeof row?.isBold === 'boolean'
+      ? row.isBold
+      : isDefaultBoldMetricsFieldPath(row?.fieldPath),
     cells: Array.isArray(row?.cells)
       ? row.cells.map((cell) => ({
           columnKey: String(cell?.columnKey || ''),
@@ -237,6 +283,59 @@ function normalizeMetricsRows(metricsPayload) {
           overrideTarget: cell?.overrideTarget || null,
         }))
       : [],
+  }));
+}
+
+function normalizeMainTableRowPreferences(metricsPayload) {
+  const rowPreferences = Array.isArray(metricsPayload?.mainTableRowPreferences)
+    ? metricsPayload.mainTableRowPreferences
+    : [];
+
+  return rowPreferences.map((rowPreference) => ({
+    rowKey: String(rowPreference?.rowKey || ''),
+    fieldPath: String(rowPreference?.fieldPath || ''),
+    label: String(rowPreference?.label || ''),
+    // Older payloads can safely omit this field. The dashboard treats that as
+    // "use the shared default" so older reads still highlight the key rows.
+    isBold: typeof rowPreference?.isBold === 'boolean'
+      ? rowPreference.isBold
+      : isDefaultBoldMainTableRowKey(rowPreference?.rowKey),
+  }));
+}
+
+function applyMainTableRowPreferences(annualMainTableRows, mainTableRowPreferences = []) {
+  if (!Array.isArray(annualMainTableRows) || !annualMainTableRows.length || !Array.isArray(mainTableRowPreferences)) {
+    return annualMainTableRows;
+  }
+
+  const preferenceByRowKey = new Map(
+    mainTableRowPreferences.map((rowPreference) => [rowPreference.rowKey, rowPreference])
+  );
+
+  if (!preferenceByRowKey.size) {
+    return annualMainTableRows;
+  }
+
+  // The backend returns row-level bold preferences, but the main table still
+  // renders annual cells column-by-column. Stamping the row preference onto
+  // each cell keeps the render path simple and consistent.
+  return annualMainTableRows.map((annualRow) => ({
+    ...annualRow,
+    cells: Object.fromEntries(
+      Object.entries(annualRow?.cells || {}).map(([fieldKey, cell]) => {
+        const rowPreference = preferenceByRowKey.get(cell?.rowKey);
+
+        return [
+          fieldKey,
+          rowPreference
+            ? {
+                ...cell,
+                isBold: rowPreference.isBold === true,
+              }
+            : cell,
+        ];
+      }),
+    ),
   }));
 }
 
@@ -306,6 +405,11 @@ export function buildDashboardPayload(
       ? rawCompanyName.trim()
       : normalizedIdentifier;
 
+  const mainTableRowPreferences = normalizeMainTableRowPreferences(metricsPayload);
+  const annualMainTableRows = Array.isArray(stockDocument?.annualMainTableRows)
+    ? normalizeAnnualMainTableRowsPayload(stockDocument.annualMainTableRows)
+    : normalizeAnnualMainTableRows(stockDocument);
+
   return {
     identifier: normalizedIdentifier,
     companyName,
@@ -316,11 +420,10 @@ export function buildDashboardPayload(
     priceCurrency: stockDocument?.priceCurrency || 'USD',
     prices: normalizePriceRows(pricePayload),
     annualMetrics: normalizeAnnualMetrics(stockDocument),
-    annualMainTableRows: Array.isArray(stockDocument?.annualMainTableRows)
-      ? normalizeAnnualMainTableRowsPayload(stockDocument.annualMainTableRows)
-      : normalizeAnnualMainTableRows(stockDocument),
+    annualMainTableRows: applyMainTableRowPreferences(annualMainTableRows, mainTableRowPreferences),
     metricsColumns: normalizeMetricsColumns(metricsPayload),
     metricsRows: normalizeMetricsRows(metricsPayload),
+    mainTableRowPreferences,
     hasLoadedMetricsView: hasMetricsView(metricsPayload),
     needsBackgroundRefresh: options.needsBackgroundRefresh === true,
     loadError: typeof options.loadError === 'string' ? options.loadError : '',
@@ -328,6 +431,9 @@ export function buildDashboardPayload(
 }
 
 function normalizeDashboardBootstrapPayload(rawPayload) {
+  const normalizedAnnualMainTableRows = normalizeAnnualMainTableRowsPayload(rawPayload?.annualMainTableRows);
+  const mainTableRowPreferences = normalizeMainTableRowPreferences(rawPayload);
+
   return {
     identifier: String(rawPayload?.identifier || '').trim().toUpperCase(),
     companyName:
@@ -361,9 +467,10 @@ function normalizeDashboardBootstrapPayload(rawPayload) {
             return leftDate.localeCompare(rightDate);
           })
       : [],
-    annualMainTableRows: normalizeAnnualMainTableRowsPayload(rawPayload?.annualMainTableRows),
+    annualMainTableRows: applyMainTableRowPreferences(normalizedAnnualMainTableRows, mainTableRowPreferences),
     metricsColumns: normalizeMetricsColumns(rawPayload),
     metricsRows: normalizeMetricsRows(rawPayload),
+    mainTableRowPreferences,
     hasLoadedMetricsView: rawPayload?.hasLoadedMetricsView === true,
     needsBackgroundRefresh: rawPayload?.needsBackgroundRefresh === true,
     loadError: typeof rawPayload?.loadError === 'string' ? rawPayload.loadError : '',
@@ -413,6 +520,7 @@ export async function fetchDashboardMetricsView(identifier, options = {}) {
     identifier: normalizedIdentifier,
     metricsColumns: normalizeMetricsColumns(response.data),
     metricsRows: normalizeMetricsRows(response.data),
+    mainTableRowPreferences: normalizeMainTableRowPreferences(response.data),
     hasLoadedMetricsView: true,
   };
 }
@@ -528,15 +636,29 @@ export async function updateDashboardMetricOverride(identifier, overrideTarget, 
   throw new Error(`Unsupported override target kind: ${overrideTarget.kind}`);
 }
 
-export async function updateDashboardRowPreference(identifier, rowKey, isEnabled, options = {}) {
+export async function updateDashboardRowPreference(identifier, rowKey, nextPreference, options = {}) {
   const normalizedIdentifier = String(identifier || '').trim().toUpperCase();
   const requestOptions = options.signal ? { signal: options.signal } : undefined;
+  const normalizedPreference = typeof nextPreference === 'boolean'
+    ? { isEnabled: nextPreference }
+    : (nextPreference && typeof nextPreference === 'object' ? nextPreference : {});
+  const requestPayload = {
+    rowKey,
+  };
+
+  // Both table surfaces now share one row-preference endpoint. Sending only
+  // the changed fields keeps one update from wiping the other saved choice.
+  if (typeof normalizedPreference.isEnabled === 'boolean') {
+    requestPayload.isEnabled = normalizedPreference.isEnabled;
+  }
+
+  if (typeof normalizedPreference.isBold === 'boolean') {
+    requestPayload.isBold = normalizedPreference.isBold;
+  }
+
   const response = await axios.patch(
     `/api/watchlist/${normalizedIdentifier}/metrics-row-preferences`,
-    {
-      rowKey,
-      isEnabled,
-    },
+    requestPayload,
     requestOptions,
   );
 
@@ -544,5 +666,6 @@ export async function updateDashboardRowPreference(identifier, rowKey, isEnabled
     identifier: normalizedIdentifier,
     metricsColumns: normalizeMetricsColumns(response.data),
     metricsRows: normalizeMetricsRows(response.data),
+    mainTableRowPreferences: normalizeMainTableRowPreferences(response.data),
   };
 }

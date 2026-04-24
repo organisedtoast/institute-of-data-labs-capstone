@@ -34,7 +34,7 @@ module.exports = [
     },
   },
   {
-    files: ["src/**/*.{js,jsx}", "services/stockSearchApi.js", "vite.config.mjs"],
+    files: ["src/**/*.{js,jsx}", "services/stockSearchApi.js", "vite.config.mjs", "shared/**/*.mjs"],
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",

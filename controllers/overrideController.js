@@ -4,22 +4,39 @@
 // document is being edited.
 
 const {
-  ANALYST_REVISION_FIELDS,
+  ANNUAL_DERIVED_PATHS,
+  ANNUAL_OVERRIDEABLE_PATHS,
+  FORECAST_BUCKET_KEYS,
+  FORECAST_OVERRIDEABLE_PATHS,
   FORECAST_RELATIVE_METRIC_PATHS,
-  GROWTH_FORECAST_FIELDS,
+  TOP_LEVEL_OVERRIDEABLE_PATHS,
   TOP_LEVEL_METRIC_PATHS,
+  isForecastFieldDerivedInternalCalculation,
+  isTopLevelFieldDerivedInternalCalculation,
 } = require("../catalog/fieldCatalog");
 const WatchlistStock = require("../models/WatchlistStock");
+const { clearLegacyDerivedMetricOverrides } = require("../utils/derivedMetricOverrideCleanup");
 const { recalculateDerived } = require("../utils/derivedCalc");
 const { createMetricField } = require("../utils/metricField");
 const { flattenObjectPaths, getNestedValue, setNestedValue } = require("../utils/pathUtils");
 const { getBaseSourceOfTruth, resolveEffectiveValue } = require("../utils/effectiveValue");
 
-function applyMetricOverrides(target, allowedPaths, payload) {
+function applyMetricOverrides(target, allowedPaths, derivedLockedPaths, payload) {
   const flattened = flattenObjectPaths(payload);
+  const blockedDerivedPaths = flattened
+    .map((entry) => entry.path)
+    .filter((path) => derivedLockedPaths.includes(path));
   const unsupportedPaths = flattened
     .map((entry) => entry.path)
-    .filter((path) => !allowedPaths.includes(path));
+    .filter((path) => !allowedPaths.includes(path) && !derivedLockedPaths.includes(path));
+
+  if (blockedDerivedPaths.length > 0) {
+    const error = new Error(
+      `Derived/internal-calculation field(s) cannot be directly overridden: ${blockedDerivedPaths.join(", ")}. Update the editable input fields instead so the backend can recalculate them.`
+    );
+    error.statusCode = 400;
+    throw error;
+  }
 
   if (unsupportedPaths.length > 0) {
     const error = new Error(`Unsupported override field(s): ${unsupportedPaths.join(", ")}`);
@@ -75,56 +92,35 @@ async function setAnnualOverride(req, res, next) {
       return res.status(404).json({ error: "Year not found" });
     }
 
-    const allowedPaths = [
-      "earningsReleaseDate",
-      "base.sharePrice",
-      "base.sharesOnIssue",
-      "base.marketCap",
-      "base.returnOnInvestedCapital",
-      "balanceSheet.cash",
-      "balanceSheet.nonCashInvestments",
-      "balanceSheet.debt",
-      "balanceSheet.netDebtOrCash",
-      "balanceSheet.netDebtToEbitda",
-      "balanceSheet.ebitInterestCoverage",
-      "balanceSheet.assets",
-      "balanceSheet.liabilities",
-      "balanceSheet.equity",
-      "balanceSheet.leverageRatio",
-      "balanceSheet.enterpriseValueTrailing",
-      "incomeStatement.revenue",
-      "incomeStatement.grossProfit",
-      "incomeStatement.codb",
-      "incomeStatement.ebitda",
-      "incomeStatement.depreciationAndAmortization",
-      "incomeStatement.ebit",
-      "incomeStatement.netInterestExpense",
-      "incomeStatement.npbt",
-      "incomeStatement.incomeTaxExpense",
-      "incomeStatement.npat",
-      "incomeStatement.capitalExpenditures",
-      "incomeStatement.fcf",
-      "ownerEarningsBridge.deemedMaintenanceCapex",
-      "ownerEarningsBridge.ownerEarnings",
-      "sharesAndMarketCap.changeInShares",
-      "valuationMultiples.evSalesTrailing",
-      "valuationMultiples.ebitdaMarginTrailing",
-      "valuationMultiples.ebitMarginTrailing",
-      "valuationMultiples.npatMarginTrailing",
-      "valuationMultiples.evEbitTrailing",
-      "valuationMultiples.peTrailing",
-      "valuationMultiples.tangibleBookValuePerShare",
-      "valuationMultiples.priceToNta",
-      "valuationMultiples.dividendPayout",
-      "epsAndDividends.epsTrailing",
-      "epsAndDividends.dyTrailing",
-      "epsAndDividends.dpsTrailing",
-      ...FORECAST_RELATIVE_METRIC_PATHS.map((path) => `forecastData.${path}`),
-      ...GROWTH_FORECAST_FIELDS.map((fieldName) => `growthForecasts.${fieldName}`),
-      ...ANALYST_REVISION_FIELDS.map((fieldName) => `analystRevisions.${fieldName}`),
+    const annualRouteForecastDerivedPaths = FORECAST_BUCKET_KEYS.flatMap((bucketKey) =>
+      FORECAST_RELATIVE_METRIC_PATHS
+        .filter((path) => isForecastFieldDerivedInternalCalculation(path))
+        .map((path) => `forecastData.${bucketKey}.${path}`)
+    );
+    const annualRouteOverrideablePaths = [
+      ...ANNUAL_OVERRIDEABLE_PATHS,
+      ...FORECAST_BUCKET_KEYS.flatMap((bucketKey) =>
+        FORECAST_OVERRIDEABLE_PATHS.map((path) => `forecastData.${bucketKey}.${path}`)
+      ),
+      ...TOP_LEVEL_OVERRIDEABLE_PATHS,
     ];
 
-    applyMetricOverrides(annualEntry, allowedPaths, req.body);
+    if (clearLegacyDerivedMetricOverrides(stock)) {
+      recalculateDerived(stock);
+    }
+
+    // The catalog source metadata is now the only policy source. That keeps
+    // "derived means recalculated-but-locked" consistent between routes and UI.
+    applyMetricOverrides(
+      annualEntry,
+      annualRouteOverrideablePaths,
+      [
+        ...ANNUAL_DERIVED_PATHS,
+        ...annualRouteForecastDerivedPaths,
+        ...TOP_LEVEL_METRIC_PATHS.filter((path) => isTopLevelFieldDerivedInternalCalculation(path)),
+      ],
+      req.body
+    );
     recalculateDerived(stock);
     await stock.save();
     res.json(stock);
@@ -147,7 +143,16 @@ async function setForecastOverride(req, res, next) {
       return res.status(404).json({ error: "Forecast bucket not found" });
     }
 
-    applyMetricOverrides(forecastBucket, FORECAST_RELATIVE_METRIC_PATHS, req.body);
+    if (clearLegacyDerivedMetricOverrides(stock)) {
+      recalculateDerived(stock);
+    }
+
+    applyMetricOverrides(
+      forecastBucket,
+      FORECAST_OVERRIDEABLE_PATHS,
+      FORECAST_RELATIVE_METRIC_PATHS.filter((path) => isForecastFieldDerivedInternalCalculation(path)),
+      req.body
+    );
     recalculateDerived(stock);
     await stock.save();
     res.json(stock);
@@ -164,7 +169,16 @@ async function setTopLevelMetricOverride(req, res, next) {
       return res.status(404).json({ error: "Stock not found" });
     }
 
-    applyMetricOverrides(stock, TOP_LEVEL_METRIC_PATHS, req.body);
+    if (clearLegacyDerivedMetricOverrides(stock)) {
+      recalculateDerived(stock);
+    }
+
+    applyMetricOverrides(
+      stock,
+      TOP_LEVEL_OVERRIDEABLE_PATHS,
+      TOP_LEVEL_METRIC_PATHS.filter((path) => isTopLevelFieldDerivedInternalCalculation(path)),
+      req.body
+    );
     recalculateDerived(stock);
     await stock.save();
     res.json(stock);

@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SharePriceDashboard from '../SharePriceDashboard';
+import { ENHANCED_INTERNAL_SCROLLBAR_SIZE, enhancedInternalScrollbarSx } from '../sharedScrollbarStyles.js';
 import {
   fetchDashboardData,
   fetchDashboardMetricsView,
@@ -116,6 +117,8 @@ let originalRequestAnimationFrame;
 let originalCancelAnimationFrame;
 let originalMatchMedia;
 let originalResizeObserver;
+let originalInnerWidth;
+let originalInnerHeight;
 let currentMatchMediaWidth = 1024;
 let mountedContainer;
 let mountedRoot;
@@ -126,6 +129,19 @@ let nextAnimationFrameHandle = 1;
 
 function setViewportWidth(width) {
   currentMatchMediaWidth = width;
+}
+
+function setWindowViewportSize({ width, height }) {
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    writable: true,
+    value: width,
+  });
+  Object.defineProperty(window, 'innerHeight', {
+    configurable: true,
+    writable: true,
+    value: height,
+  });
 }
 
 function getMediaQueryMatch(query) {
@@ -275,25 +291,31 @@ function buildAnnualMainTableRows(annualMetrics = []) {
     cells: {
       fiscalYearEndDate: {
         columnKey: `annual-${annualRow.fiscalYear}`,
+        rowKey: 'main::annualData[].fiscalYearEndDate',
         value: annualRow.fiscalYearEndDate,
         sourceOfTruth: 'system',
         isOverridden: false,
+        isBold: false,
         isOverrideable: false,
         overrideTarget: null,
       },
       fiscalYear: {
         columnKey: `annual-${annualRow.fiscalYear}`,
+        rowKey: 'main::annualData[].fiscalYear',
         value: annualRow.fiscalYear,
         sourceOfTruth: 'system',
         isOverridden: false,
+        isBold: false,
         isOverrideable: false,
         overrideTarget: null,
       },
       earningsReleaseDate: {
         columnKey: `annual-${annualRow.fiscalYear}`,
+        rowKey: 'main::annualData[].earningsReleaseDate',
         value: annualRow.earningsReleaseDate,
         sourceOfTruth: 'system',
         isOverridden: false,
+        isBold: false,
         isOverrideable: false,
         overrideTarget: null,
       },
@@ -301,9 +323,11 @@ function buildAnnualMainTableRows(annualMetrics = []) {
       // same override editor flow as the detail metrics surface.
       sharePrice: {
         columnKey: `annual-${annualRow.fiscalYear}`,
+        rowKey: 'main::annualData[].base.sharePrice',
         value: annualRow.sharePrice,
         sourceOfTruth: 'roic',
         isOverridden: false,
+        isBold: true,
         isOverrideable: true,
         overrideTarget: {
           kind: 'annual',
@@ -313,9 +337,11 @@ function buildAnnualMainTableRows(annualMetrics = []) {
       },
       sharesOnIssue: {
         columnKey: `annual-${annualRow.fiscalYear}`,
+        rowKey: 'main::annualData[].base.sharesOnIssue',
         value: annualRow.sharesOnIssue,
         sourceOfTruth: 'roic',
         isOverridden: false,
+        isBold: false,
         isOverrideable: true,
         overrideTarget: {
           kind: 'annual',
@@ -325,15 +351,15 @@ function buildAnnualMainTableRows(annualMetrics = []) {
       },
       marketCap: {
         columnKey: `annual-${annualRow.fiscalYear}`,
+        rowKey: 'main::annualData[].base.marketCap',
         value: annualRow.marketCap,
         sourceOfTruth: 'derived',
         isOverridden: false,
-        isOverrideable: true,
-        overrideTarget: {
-          kind: 'annual',
-          fiscalYear: annualRow.fiscalYear,
-          payloadPath: 'base.marketCap',
-        },
+        isBold: true,
+        // Market cap stays bold and visible, but the new derived-field policy
+        // keeps it read-only so the user edits share price or shares instead.
+        isOverrideable: false,
+        overrideTarget: null,
       },
     },
   }));
@@ -421,6 +447,7 @@ function buildMetricsModePayload(overrides = {}) {
         order: 710,
         surface: 'detail',
         isEnabled: true,
+        isBold: false,
         cells: [
           {
             columnKey: 'annual-2023',
@@ -458,6 +485,7 @@ function buildMetricsModePayload(overrides = {}) {
         order: 715,
         surface: 'detail',
         isEnabled: true,
+        isBold: false,
         cells: [
           {
             columnKey: 'annual-2023',
@@ -495,6 +523,7 @@ function buildMetricsModePayload(overrides = {}) {
         order: 810,
         surface: 'detail',
         isEnabled: true,
+        isBold: false,
         cells: [
           {
             columnKey: 'annual-2023',
@@ -532,6 +561,7 @@ function buildMetricsModePayload(overrides = {}) {
         order: 1110,
         surface: 'detail',
         isEnabled: false,
+        isBold: false,
         cells: [
           {
             columnKey: 'annual-2023',
@@ -562,6 +592,824 @@ function buildMetricsModePayload(overrides = {}) {
     ],
     ...overrides,
   });
+}
+
+function buildDefaultBoldValuationMetricsPayload(overrides = {}) {
+  return buildDashboardPayload({
+    metricsColumns: [
+      {
+        key: 'annual-2024',
+        kind: 'annual',
+        label: 'FY 2024',
+        shortLabel: '2024',
+        fiscalYear: 2024,
+        fiscalYearEndDate: '2024-12-31',
+      },
+      {
+        key: 'annual-2025',
+        kind: 'annual',
+        label: 'FY 2025',
+        shortLabel: '2025',
+        fiscalYear: 2025,
+        fiscalYearEndDate: '2025-12-31',
+      },
+    ],
+    metricsRows: [
+      {
+        rowKey: '670::annualData[].forecastData.fy1.marketCap',
+        fieldPath: 'annualData[].forecastData.fy1.marketCap',
+        label: 'Market cap FY+1',
+        shortLabel: 'Market cap FY+1',
+        section: 'Shares & Market Cap',
+        shortSection: 'Shares',
+        order: 670,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 3300000000000,
+            sourceOfTruth: 'derived',
+            isOverridden: false,
+            isOverrideable: false,
+            overrideTarget: null,
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 3450000000000,
+            sourceOfTruth: 'derived',
+            isOverridden: false,
+            isOverrideable: false,
+            overrideTarget: null,
+          },
+        ],
+      },
+      {
+        rowKey: '680::annualData[].forecastData.fy2.marketCap',
+        fieldPath: 'annualData[].forecastData.fy2.marketCap',
+        label: 'Market cap FY+2',
+        shortLabel: 'Market cap FY+2',
+        section: 'Shares & Market Cap',
+        shortSection: 'Shares',
+        order: 680,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 3500000000000,
+            sourceOfTruth: 'derived',
+            isOverridden: false,
+            isOverrideable: false,
+            overrideTarget: null,
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 3650000000000,
+            sourceOfTruth: 'derived',
+            isOverridden: false,
+            isOverrideable: false,
+            overrideTarget: null,
+          },
+        ],
+      },
+      {
+        rowKey: '690::annualData[].forecastData.fy3.marketCap',
+        fieldPath: 'annualData[].forecastData.fy3.marketCap',
+        label: 'Market cap FY+3',
+        shortLabel: 'Market cap FY+3',
+        section: 'Shares & Market Cap',
+        shortSection: 'Shares',
+        order: 690,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 3700000000000,
+            sourceOfTruth: 'derived',
+            isOverridden: false,
+            isOverrideable: false,
+            overrideTarget: null,
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 3850000000000,
+            sourceOfTruth: 'derived',
+            isOverridden: false,
+            isOverrideable: false,
+            overrideTarget: null,
+          },
+        ],
+      },
+      {
+        rowKey: '810::annualData[].valuationMultiples.evSalesTrailing',
+        fieldPath: 'annualData[].valuationMultiples.evSalesTrailing',
+        label: 'EV/Sales trailing',
+        shortLabel: 'EV/Sales trailing',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 810,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 5.8,
+            sourceOfTruth: 'derived',
+            isOverridden: false,
+            isOverrideable: false,
+            overrideTarget: null,
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 5.4,
+            sourceOfTruth: 'derived',
+            isOverridden: false,
+            isOverrideable: false,
+            overrideTarget: null,
+          },
+        ],
+      },
+      {
+        rowKey: '820::annualData[].forecastData.fy1.evSales',
+        fieldPath: 'annualData[].forecastData.fy1.evSales',
+        label: 'EV/Sales FY+1',
+        shortLabel: 'EV/Sales FY+1',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 820,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 5.2,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy1.evSales' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 4.9,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy1.evSales' },
+          },
+        ],
+      },
+      {
+        rowKey: '830::annualData[].forecastData.fy2.evSales',
+        fieldPath: 'annualData[].forecastData.fy2.evSales',
+        label: 'EV/Sales FY+2',
+        shortLabel: 'EV/Sales FY+2',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 830,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 4.7,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy2.evSales' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 4.4,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy2.evSales' },
+          },
+        ],
+      },
+      {
+        rowKey: '940::annualData[].valuationMultiples.evEbitTrailing',
+        fieldPath: 'annualData[].valuationMultiples.evEbitTrailing',
+        label: 'EV/EBIT trailing',
+        shortLabel: 'EV/EBIT trailing',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 940,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 18.4,
+            sourceOfTruth: 'derived',
+            isOverridden: false,
+            isOverrideable: false,
+            overrideTarget: null,
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 16.2,
+            sourceOfTruth: 'derived',
+            isOverridden: false,
+            isOverrideable: false,
+            overrideTarget: null,
+          },
+        ],
+      },
+      {
+        rowKey: '950::annualData[].forecastData.fy1.evEbit',
+        fieldPath: 'annualData[].forecastData.fy1.evEbit',
+        label: 'EV/EBIT FY+1',
+        shortLabel: 'EV/EBIT FY+1',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 950,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 15.8,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy1.evEbit' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 14.4,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy1.evEbit' },
+          },
+        ],
+      },
+      {
+        rowKey: '960::annualData[].forecastData.fy2.evEbit',
+        fieldPath: 'annualData[].forecastData.fy2.evEbit',
+        label: 'EV/EBIT FY+2',
+        shortLabel: 'EV/EBIT FY+2',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 960,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 14.7,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy2.evEbit' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 13.8,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy2.evEbit' },
+          },
+        ],
+      },
+      {
+        rowKey: '970::annualData[].forecastData.fy3.evEbit',
+        fieldPath: 'annualData[].forecastData.fy3.evEbit',
+        label: 'EV/EBIT FY+3',
+        shortLabel: 'EV/EBIT FY+3',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 970,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 13.9,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy3.evEbit' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 13.1,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy3.evEbit' },
+          },
+        ],
+      },
+      {
+        rowKey: '980::annualData[].valuationMultiples.peTrailing',
+        fieldPath: 'annualData[].valuationMultiples.peTrailing',
+        label: 'PE trailing',
+        shortLabel: 'PE trailing',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 980,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 27.1,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'valuationMultiples.peTrailing' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 24.8,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'valuationMultiples.peTrailing' },
+          },
+        ],
+      },
+      {
+        rowKey: '990::annualData[].forecastData.fy1.pe',
+        fieldPath: 'annualData[].forecastData.fy1.pe',
+        label: 'PE FY+1',
+        shortLabel: 'PE FY+1',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 990,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 23.6,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy1.pe' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 21.3,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy1.pe' },
+          },
+        ],
+      },
+      {
+        rowKey: '1000::annualData[].forecastData.fy2.pe',
+        fieldPath: 'annualData[].forecastData.fy2.pe',
+        label: 'PE FY+2',
+        shortLabel: 'PE FY+2',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 1000,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 20.5,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy2.pe' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 18.9,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy2.pe' },
+          },
+        ],
+      },
+      {
+        rowKey: '1010::annualData[].forecastData.fy3.pe',
+        fieldPath: 'annualData[].forecastData.fy3.pe',
+        label: 'PE FY+3',
+        shortLabel: 'PE FY+3',
+        section: 'Valuation Multiples',
+        shortSection: 'Value',
+        order: 1010,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 18.2,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy3.pe' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 17.1,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy3.pe' },
+          },
+        ],
+      },
+      {
+        rowKey: '1410::annualData[].epsAndDividends.epsTrailing',
+        fieldPath: 'annualData[].epsAndDividends.epsTrailing',
+        label: 'EPS (trailing)',
+        shortLabel: 'EPS (trailing)',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1410,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 6.1,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'epsAndDividends.epsTrailing' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 6.4,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'epsAndDividends.epsTrailing' },
+          },
+        ],
+      },
+      {
+        rowKey: '1420::annualData[].forecastData.fy1.eps',
+        fieldPath: 'annualData[].forecastData.fy1.eps',
+        label: 'EPS FY+1',
+        shortLabel: 'EPS FY+1',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1420,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 6.8,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy1.eps' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 7.2,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy1.eps' },
+          },
+        ],
+      },
+      {
+        rowKey: '1430::annualData[].forecastData.fy2.eps',
+        fieldPath: 'annualData[].forecastData.fy2.eps',
+        label: 'EPS FY+2',
+        shortLabel: 'EPS FY+2',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1430,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 7.4,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy2.eps' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 7.8,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy2.eps' },
+          },
+        ],
+      },
+      {
+        rowKey: '1440::annualData[].forecastData.fy3.eps',
+        fieldPath: 'annualData[].forecastData.fy3.eps',
+        label: 'EPS FY+3',
+        shortLabel: 'EPS FY+3',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1440,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 7.9,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy3.eps' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 8.3,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy3.eps' },
+          },
+        ],
+      },
+      {
+        rowKey: '1450::annualData[].epsAndDividends.dyTrailing',
+        fieldPath: 'annualData[].epsAndDividends.dyTrailing',
+        label: 'DY trailing',
+        shortLabel: 'DY trailing',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1450,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 1.2,
+            sourceOfTruth: 'derived',
+            isOverridden: false,
+            isOverrideable: false,
+            overrideTarget: null,
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 1.3,
+            sourceOfTruth: 'derived',
+            isOverridden: false,
+            isOverrideable: false,
+            overrideTarget: null,
+          },
+        ],
+      },
+      {
+        rowKey: '1460::annualData[].forecastData.fy1.dy',
+        fieldPath: 'annualData[].forecastData.fy1.dy',
+        label: 'DY FY+1',
+        shortLabel: 'DY FY+1',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1460,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 1.4,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy1.dy' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 1.5,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy1.dy' },
+          },
+        ],
+      },
+      {
+        rowKey: '1470::annualData[].forecastData.fy2.dy',
+        fieldPath: 'annualData[].forecastData.fy2.dy',
+        label: 'DY FY+2',
+        shortLabel: 'DY FY+2',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1470,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 1.6,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy2.dy' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 1.7,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy2.dy' },
+          },
+        ],
+      },
+      {
+        rowKey: '1480::annualData[].forecastData.fy3.dy',
+        fieldPath: 'annualData[].forecastData.fy3.dy',
+        label: 'DY FY+3',
+        shortLabel: 'DY FY+3',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1480,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 1.8,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy3.dy' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 1.9,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy3.dy' },
+          },
+        ],
+      },
+      {
+        rowKey: '1490::annualData[].epsAndDividends.dpsTrailing',
+        fieldPath: 'annualData[].epsAndDividends.dpsTrailing',
+        label: 'DPS (trailing)',
+        shortLabel: 'DPS (trailing)',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1490,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 0.94,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'epsAndDividends.dpsTrailing' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 0.99,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'epsAndDividends.dpsTrailing' },
+          },
+        ],
+      },
+      {
+        rowKey: '1500::annualData[].forecastData.fy1.dps',
+        fieldPath: 'annualData[].forecastData.fy1.dps',
+        label: 'DPS FY+1',
+        shortLabel: 'DPS FY+1',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1500,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 1.03,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy1.dps' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 1.08,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy1.dps' },
+          },
+        ],
+      },
+      {
+        rowKey: '1510::annualData[].forecastData.fy2.dps',
+        fieldPath: 'annualData[].forecastData.fy2.dps',
+        label: 'DPS FY+2',
+        shortLabel: 'DPS FY+2',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1510,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 1.11,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy2.dps' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 1.16,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy2.dps' },
+          },
+        ],
+      },
+      {
+        rowKey: '1520::annualData[].forecastData.fy3.dps',
+        fieldPath: 'annualData[].forecastData.fy3.dps',
+        label: 'DPS FY+3',
+        shortLabel: 'DPS FY+3',
+        section: 'EPS & Dividends',
+        shortSection: 'EPS & Dividends',
+        order: 1520,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 1.19,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy3.dps' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 1.24,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy3.dps' },
+          },
+        ],
+      },
+    ],
+    ...overrides,
+  });
+}
+
+function buildMetricsModePayloadWithHiddenSectionLeader() {
+  const payload = buildMetricsModePayload();
+
+  payload.metricsRows = payload.metricsRows.map((row) => {
+    return row.rowKey === '710::annualData[].forecastData.fy1.ebit'
+      ? { ...row, isEnabled: false }
+      : row;
+  });
+
+  return payload;
 }
 
 function buildPlainValueBoundaryDashboardPayload(overrides = {}) {
@@ -723,6 +1571,172 @@ function buildPlainValueBoundaryMetricsPayload(overrides = {}) {
           {
             columnKey: 'annual-2025',
             value: 123.45,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'growthForecasts.revenueCagr3y' },
+          },
+        ],
+      },
+    ],
+    ...overrides,
+  });
+}
+
+function buildExactZeroDashboardPayload(overrides = {}) {
+  return buildDashboardPayload({
+    annualMetrics: [
+      {
+        fiscalYear: 2024,
+        fiscalYearEndDate: '2024-12-31',
+        earningsReleaseDate: '2025-02-15',
+        sharePrice: -0,
+        sharesOnIssue: 0,
+        marketCap: 0,
+      },
+      {
+        fiscalYear: 2025,
+        fiscalYearEndDate: '2025-12-31',
+        earningsReleaseDate: '2026-02-15',
+        sharePrice: 100.25,
+        sharesOnIssue: 990000000,
+        marketCap: 1300000000,
+      },
+    ],
+    ...overrides,
+  });
+}
+
+function buildExactZeroMetricsPayload(overrides = {}) {
+  return buildExactZeroDashboardPayload({
+    metricsColumns: [
+      {
+        key: 'annual-2024',
+        kind: 'annual',
+        label: 'FY 2024',
+        shortLabel: '2024',
+        fiscalYear: 2024,
+        fiscalYearEndDate: '2024-12-31',
+      },
+      {
+        key: 'annual-2025',
+        kind: 'annual',
+        label: 'FY 2025',
+        shortLabel: '2025',
+        fiscalYear: 2025,
+        fiscalYearEndDate: '2025-12-31',
+      },
+    ],
+    metricsRows: [
+      {
+        rowKey: '710::annualData[].forecastData.fy1.ebit',
+        fieldPath: 'annualData[].forecastData.fy1.ebit',
+        label: 'EBIT FY+1',
+        shortLabel: 'EBIT FY+1',
+        section: 'Income Statement',
+        shortSection: 'Income',
+        order: 710,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 0,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy1.ebit' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 100.25,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy1.ebit' },
+          },
+        ],
+      },
+      {
+        rowKey: '720::annualData[].base.customerCount',
+        fieldPath: 'annualData[].base.customerCount',
+        label: 'Customer count',
+        shortLabel: 'Customer count',
+        section: 'Operating',
+        shortSection: 'Ops',
+        order: 720,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: -0,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'base.customerCount' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 99.75,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'base.customerCount' },
+          },
+        ],
+      },
+      {
+        rowKey: '730::annualData[].base.evEbit',
+        fieldPath: 'annualData[].base.evEbit',
+        label: 'EV / EBIT',
+        shortLabel: 'EV / EBIT',
+        section: 'Valuation',
+        shortSection: 'Value',
+        order: 730,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 0,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'base.evEbit' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: -123.45,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'base.evEbit' },
+          },
+        ],
+      },
+      {
+        rowKey: '740::annualData[].growthForecasts.revenueCagr3y',
+        fieldPath: 'annualData[].growthForecasts.revenueCagr3y',
+        label: 'Revenue CAGR 3Y',
+        shortLabel: 'Revenue CAGR 3Y',
+        section: 'Growth',
+        shortSection: 'Growth',
+        order: 740,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 0,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'growthForecasts.revenueCagr3y' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 12.34,
             sourceOfTruth: 'system',
             isOverridden: false,
             isOverrideable: true,
@@ -986,6 +2000,8 @@ function installDashboardBrowserShims() {
   originalCancelAnimationFrame = window.cancelAnimationFrame;
   originalMatchMedia = window.matchMedia;
   originalResizeObserver = global.ResizeObserver;
+  originalInnerWidth = window.innerWidth;
+  originalInnerHeight = window.innerHeight;
   activeResizeObservers = [];
   matchMediaListenerRegistry = new Map();
 
@@ -1116,6 +2132,10 @@ function restoreDashboardBrowserShims() {
   window.matchMedia = originalMatchMedia;
   global.ResizeObserver = originalResizeObserver;
   window.ResizeObserver = originalResizeObserver;
+  setWindowViewportSize({
+    width: originalInnerWidth,
+    height: originalInnerHeight,
+  });
   globalThis.requestAnimationFrame = originalRequestAnimationFrame;
   globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
   vi.restoreAllMocks();
@@ -1266,6 +2286,12 @@ function getMainTableRow(rowLabel) {
   return screen.getByText(rowLabel).parentElement?.parentElement;
 }
 
+function getMainTableRowLeftRail(rowKey = 'main::annualData[].base.sharePrice') {
+  return screen.getAllByTestId('share-price-dashboard-main-table-row-left-rail').find((rowNode) => {
+    return rowNode.getAttribute('data-row-key') === rowKey;
+  });
+}
+
 function getMainTableCell({
   rowKey,
   columnKey,
@@ -1284,6 +2310,29 @@ function getMetricRowLeftRail(rowKey = '710::annualData[].forecastData.fy1.ebit'
   return screen.getAllByTestId('share-price-dashboard-metric-row-left-rail').find((rowNode) => {
     return rowNode.getAttribute('data-row-key') === rowKey;
   });
+}
+
+function getMetricRowValuesSurface(rowKey = '710::annualData[].forecastData.fy1.ebit') {
+  return screen.getAllByTestId('share-price-dashboard-metric-row-values').find((rowNode) => {
+    return rowNode.getAttribute('data-row-key') === rowKey;
+  });
+}
+
+// Section-boundary regressions are easiest to reason about by row key instead
+// of DOM order. This helper collects the visible section starts the user can
+// actually see, then lets each test assert the full-width divider contract.
+function getVisibleSectionStartContracts() {
+  return screen.getAllByTestId('share-price-dashboard-metric-row')
+    .filter((rowNode) => rowNode.getAttribute('data-section-start') === 'true')
+    .map((rowNode) => {
+      const rowKey = rowNode.getAttribute('data-row-key');
+
+      return {
+        rowKey,
+        leftRail: getMetricRowLeftRail(rowKey),
+        valuesSurface: getMetricRowValuesSurface(rowKey),
+      };
+    });
 }
 
 function getActWarningCalls(consoleErrorSpy) {
@@ -1562,13 +2611,13 @@ describe('SharePriceDashboard preset scrolling', () => {
     const sharePriceRow = getMainTableRow('Share price');
 
     expect(sharePriceRow).toBeTruthy();
-    expect(within(sharePriceRow).getByText('$99.75')).toBeTruthy();
-    expect(within(sharePriceRow).getByText('$100')).toBeTruthy();
-    expect(within(sharePriceRow).queryByText('$100.25')).toBeNull();
+    expect(within(sharePriceRow).getByText('99.75')).toBeTruthy();
+    expect(within(sharePriceRow).getByText('100')).toBeTruthy();
+    expect(within(sharePriceRow).queryByText('100.25')).toBeNull();
 
     const renderedLabelTexts = screen.getAllByTestId('share-price-dashboard-y-axis-label').map((labelNode) => labelNode.textContent);
     const renderedLabelsAtOrAboveHundred = renderedLabelTexts.filter((labelText) => {
-      const numericPortion = Number(String(labelText).replace(/[$,]/g, ''));
+      const numericPortion = Number(String(labelText).replace(/,/g, ''));
       return Number.isFinite(numericPortion) && numericPortion >= 100;
     });
 
@@ -1597,7 +2646,7 @@ describe('SharePriceDashboard preset scrolling', () => {
     });
     await flushDashboardWork();
 
-    expect(within(svg).getByText('$99.75')).toBeTruthy();
+    expect(within(svg).getByText('99.75')).toBeTruthy();
 
     await act(async () => {
       fireEvent.mouseMove(svg, {
@@ -1607,8 +2656,77 @@ describe('SharePriceDashboard preset scrolling', () => {
     });
     await flushDashboardWork();
 
-    expect(within(svg).getByText('$100')).toBeTruthy();
-    expect(within(svg).queryByText('$100.25')).toBeNull();
+    expect(within(svg).getByText('100')).toBeTruthy();
+    expect(within(svg).queryByText('100.25')).toBeNull();
+  });
+
+  it('keeps the shared hover tooltip fully inside the stock chart near both x-axis edges', async () => {
+    const payload = buildPlainValueBoundaryDashboardPayload();
+    const { scrollRegion } = await renderDashboard({ payload });
+    const svg = scrollRegion.querySelector('svg');
+    const contentWidth = Number(scrollRegion.getAttribute('data-content-width'));
+    const plotWidth = Number(scrollRegion.getAttribute('data-plot-width'));
+
+    expect(svg).toBeTruthy();
+
+    Object.defineProperty(svg, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        left: 0,
+        top: 0,
+        width: contentWidth,
+        height: 280,
+        right: contentWidth,
+        bottom: 280,
+      }),
+    });
+
+    // This protects the clipping regression specifically. The hover still needs
+    // to show the right data, but the box and both text lines now have to stay
+    // inside the visible chart when the pointer hugs either edge.
+    await act(async () => {
+      fireEvent.mouseMove(svg, { clientX: 1, clientY: 140 });
+    });
+    await flushDashboardWork();
+
+    const leftHoverBox = within(svg).getByTestId('time-series-chart-hover-box');
+    const leftHoverLabel = within(svg).getByTestId('time-series-chart-hover-label');
+    const leftHoverValue = within(svg).getByTestId('time-series-chart-hover-value');
+    const leftBoxX = Number(leftHoverBox.getAttribute('x'));
+    const leftBoxWidth = Number(leftHoverBox.getAttribute('width'));
+    const leftLabelX = Number(leftHoverLabel.getAttribute('x'));
+    const leftValueX = Number(leftHoverValue.getAttribute('x'));
+
+    expect(leftHoverValue.textContent).toBe('99.75');
+    expect(leftHoverLabel.textContent).toBeTruthy();
+    expect(leftBoxX).toBeGreaterThanOrEqual(0);
+    expect(leftBoxX + leftBoxWidth).toBeLessThanOrEqual(plotWidth);
+    expect(leftLabelX).toBeGreaterThanOrEqual(leftBoxX);
+    expect(leftLabelX).toBeLessThanOrEqual(leftBoxX + leftBoxWidth);
+    expect(leftValueX).toBeGreaterThanOrEqual(leftBoxX);
+    expect(leftValueX).toBeLessThanOrEqual(leftBoxX + leftBoxWidth);
+
+    await act(async () => {
+      fireEvent.mouseMove(svg, { clientX: plotWidth - 1, clientY: 140 });
+    });
+    await flushDashboardWork();
+
+    const rightHoverBox = within(svg).getByTestId('time-series-chart-hover-box');
+    const rightHoverLabel = within(svg).getByTestId('time-series-chart-hover-label');
+    const rightHoverValue = within(svg).getByTestId('time-series-chart-hover-value');
+    const rightBoxX = Number(rightHoverBox.getAttribute('x'));
+    const rightBoxWidth = Number(rightHoverBox.getAttribute('width'));
+    const rightLabelX = Number(rightHoverLabel.getAttribute('x'));
+    const rightValueX = Number(rightHoverValue.getAttribute('x'));
+
+    expect(rightHoverValue.textContent).toBe('101');
+    expect(rightHoverLabel.textContent).toBeTruthy();
+    expect(rightBoxX).toBeGreaterThanOrEqual(0);
+    expect(rightBoxX + rightBoxWidth).toBeLessThanOrEqual(plotWidth);
+    expect(rightLabelX).toBeGreaterThanOrEqual(rightBoxX);
+    expect(rightLabelX).toBeLessThanOrEqual(rightBoxX + rightBoxWidth);
+    expect(rightValueX).toBeGreaterThanOrEqual(rightBoxX);
+    expect(rightValueX).toBeLessThanOrEqual(rightBoxX + rightBoxWidth);
   });
 
   it('uses full sticky rail labels on wider screens', async () => {
@@ -2524,7 +3642,9 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(fetchDashboardData).not.toHaveBeenCalled();
     expect(screen.queryByText('DETAIL METRICS')).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    });
     await flushDashboardWork();
 
     expect(fetchDashboardMetricsView).toHaveBeenCalledTimes(1);
@@ -2532,7 +3652,7 @@ describe('SharePriceDashboard metrics mode', () => {
 
     await user.click(screen.getByRole('button', { name: 'HIDE METRICS' }));
     await flushDashboardWork();
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await userEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
     await flushDashboardWork();
 
     expect(fetchDashboardMetricsView).toHaveBeenCalledTimes(1);
@@ -2545,7 +3665,7 @@ describe('SharePriceDashboard metrics mode', () => {
 
     expect(screen.queryByText('DETAIL METRICS')).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await userEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
     await flushDashboardWork();
 
     expect(screen.getByText('DETAIL METRICS')).not.toBeNull();
@@ -2561,9 +3681,9 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(screen.getByText('Revenue FY+1')).not.toBeNull();
     expect(screen.getByText('Cash FY+1')).not.toBeNull();
     expect(screen.queryAllByTestId('share-price-dashboard-metric-row-hide-button')).toHaveLength(0);
-    expect(screen.getByText('$12.00')).not.toBeNull();
-    expect(screen.getByText('$18.00')).not.toBeNull();
-    expect(screen.getByText('$24.00')).not.toBeNull();
+    expect(screen.getByText('12.00')).not.toBeNull();
+    expect(screen.getByText('18.00')).not.toBeNull();
+    expect(screen.getByText('24.00')).not.toBeNull();
     expect(screen.queryByText('Revenue forecast CAGR 3Y')).toBeNull();
 
     // Completely empty rows should stay out of the main metrics table by default,
@@ -2716,23 +3836,23 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(within(sharesOnIssueRow).getByText('44.2M')).toBeTruthy();
     expect(within(sharesOnIssueRow).getByText('508M')).toBeTruthy();
     expect(within(sharesOnIssueRow).getByText('-508M')).toBeTruthy();
-    expect(within(marketCapRow).getByText('$1.2B')).toBeTruthy();
-    expect(within(marketCapRow).getByText('$114M')).toBeTruthy();
-    expect(within(marketCapRow).getByText('-$115B')).toBeTruthy();
+    expect(within(marketCapRow).getByText('1.2B')).toBeTruthy();
+    expect(within(marketCapRow).getByText('114M')).toBeTruthy();
+    expect(within(marketCapRow).getByText('-115B')).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await userEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
     await flushDashboardWork();
 
-    expect(screen.getAllByText('$1.2B').length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText('$115M')).not.toBeNull();
-    expect(screen.getByText('$3.8K')).not.toBeNull();
+    expect(screen.getAllByText('1.2B').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('115M')).not.toBeNull();
+    expect(screen.getByText('3.8K')).not.toBeNull();
     expect(screen.getAllByText('44.2M').length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText('508M').length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText('-508M').length).toBeGreaterThanOrEqual(2);
-    expect(screen.queryByText('$1,200,000,000.99')).toBeNull();
-    expect(screen.queryByText('$114,600,000.99')).toBeNull();
-    expect(screen.queryByText('$1B')).toBeNull();
-    expect(screen.queryByText('$114.6M')).toBeNull();
+    expect(screen.queryByText('1,200,000,000.99')).toBeNull();
+    expect(screen.queryByText('114,600,000.99')).toBeNull();
+    expect(screen.queryByText('1B')).toBeNull();
+    expect(screen.queryByText('114.6M')).toBeNull();
   });
 
   it('keeps compact decimals below 100 while rounding compact 100+ values', async () => {
@@ -2817,14 +3937,14 @@ describe('SharePriceDashboard metrics mode', () => {
     // 100 keep one decimal, while compact 100+ values round to whole units.
     expect(within(sharesOnIssueRow).getByText('44.2M')).toBeTruthy();
     expect(within(sharesOnIssueRow).getByText('507M')).toBeTruthy();
-    expect(within(marketCapRow).getByText('$1.2B')).toBeTruthy();
+    expect(within(marketCapRow).getByText('1.2B')).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await userEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
     await flushDashboardWork();
 
     expect(screen.getAllByText('44.2M').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('507M').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText('$1.2B').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('1.2B').length).toBeGreaterThanOrEqual(2);
   });
 
   it('drops decimals from 3-digit plain detail metrics while preserving smaller values and compact rules', async () => {
@@ -2838,11 +3958,11 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(getDashboardTableCell({
       rowKey: '710::annualData[].forecastData.fy1.ebit',
       columnKey: 'annual-2024',
-    })?.textContent).toContain('$99.75');
+    })?.textContent).toContain('99.75');
     expect(getDashboardTableCell({
       rowKey: '710::annualData[].forecastData.fy1.ebit',
       columnKey: 'annual-2025',
-    })?.textContent).toContain('$100');
+    })?.textContent).toContain('100');
 
     expect(getDashboardTableCell({
       rowKey: '720::annualData[].base.customerCount',
@@ -2874,6 +3994,96 @@ describe('SharePriceDashboard metrics mode', () => {
       rowKey: '740::annualData[].growthForecasts.revenueCagr3y',
       columnKey: 'annual-2025',
     })?.textContent).toContain('123%');
+  });
+
+  it('renders exact zero table values without redundant decimals across main-table and detail rows', async () => {
+    const { user } = await renderDashboard({
+      payload: buildExactZeroMetricsPayload(),
+    });
+
+    const sharePriceRow = getMainTableRow('Share price');
+    const sharesOnIssueRow = getMainTableRow('Shares on issue');
+    const marketCapRow = getMainTableRow('Market cap');
+    const sharePriceZeroCell = getMainTableCell({
+      rowKey: 'annualData[].base.sharePrice',
+      columnKey: 'annual-2024',
+    });
+    const sharePriceNonZeroCell = getMainTableCell({
+      rowKey: 'annualData[].base.sharePrice',
+      columnKey: 'annual-2025',
+    });
+    const sharesOnIssueZeroCell = getMainTableCell({
+      rowKey: 'annualData[].base.sharesOnIssue',
+      columnKey: 'annual-2024',
+    });
+    const marketCapZeroCell = getMainTableCell({
+      rowKey: 'annualData[].base.marketCap',
+      columnKey: 'annual-2024',
+    });
+
+    expect(sharePriceRow).toBeTruthy();
+    expect(sharesOnIssueRow).toBeTruthy();
+    expect(marketCapRow).toBeTruthy();
+    expect(sharePriceZeroCell).toBeTruthy();
+    expect(sharePriceNonZeroCell).toBeTruthy();
+    expect(sharesOnIssueZeroCell).toBeTruthy();
+    expect(marketCapZeroCell).toBeTruthy();
+
+    // Zero is a readability exception. These assertions keep the old non-zero
+    // rounding rules intact while proving we no longer show noisy `0.00` text.
+    expect(sharePriceZeroCell.textContent).toContain('0');
+    expect(sharePriceZeroCell.textContent).not.toContain('0.00');
+    expect(sharePriceZeroCell.textContent).not.toContain('-0.00');
+    expect(sharesOnIssueZeroCell.textContent).toContain('0');
+    expect(sharesOnIssueZeroCell.textContent).not.toContain('0.0');
+    expect(marketCapZeroCell.textContent).toContain('0');
+    expect(marketCapZeroCell.textContent).not.toContain('0.0');
+    expect(sharePriceNonZeroCell.textContent).toContain('100');
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    expect(getDashboardTableCell({
+      rowKey: '710::annualData[].forecastData.fy1.ebit',
+      columnKey: 'annual-2024',
+    })?.textContent).toContain('0');
+    expect(getDashboardTableCell({
+      rowKey: '710::annualData[].forecastData.fy1.ebit',
+      columnKey: 'annual-2024',
+    })?.textContent).not.toContain('0.00');
+    expect(getDashboardTableCell({
+      rowKey: '720::annualData[].base.customerCount',
+      columnKey: 'annual-2024',
+    })?.textContent).toContain('0');
+    expect(getDashboardTableCell({
+      rowKey: '720::annualData[].base.customerCount',
+      columnKey: 'annual-2024',
+    })?.textContent).not.toContain('-0.00');
+    expect(getDashboardTableCell({
+      rowKey: '730::annualData[].base.evEbit',
+      columnKey: 'annual-2024',
+    })?.textContent).toContain('0');
+    expect(getDashboardTableCell({
+      rowKey: '740::annualData[].growthForecasts.revenueCagr3y',
+      columnKey: 'annual-2024',
+    })?.textContent).toContain('0%');
+    expect(getDashboardTableCell({
+      rowKey: '740::annualData[].growthForecasts.revenueCagr3y',
+      columnKey: 'annual-2024',
+    })?.textContent).not.toContain('0.0%');
+
+    expect(getDashboardTableCell({
+      rowKey: '710::annualData[].forecastData.fy1.ebit',
+      columnKey: 'annual-2025',
+    })?.textContent).toContain('100');
+    expect(getDashboardTableCell({
+      rowKey: '720::annualData[].base.customerCount',
+      columnKey: 'annual-2025',
+    })?.textContent).toContain('99.75');
+    expect(getDashboardTableCell({
+      rowKey: '740::annualData[].growthForecasts.revenueCagr3y',
+      columnKey: 'annual-2025',
+    })?.textContent).toContain('12.3%');
   });
 
   it('opens the left-rail row action menu and hides a row from that menu', async () => {
@@ -2916,6 +4126,8 @@ describe('SharePriceDashboard metrics mode', () => {
     const rowActionMenu = screen.getByTestId('share-price-dashboard-metric-row-action-menu');
     expect(rowActionMenu).toBeTruthy();
     expect(within(rowActionMenu).getByText('EBIT FY+1')).not.toBeNull();
+    expect(within(rowActionMenu).getByRole('button', { name: 'HIDE ROW' })).not.toBeNull();
+    expect(within(rowActionMenu).getByRole('button', { name: 'BOLD' })).not.toBeNull();
 
     await user.click(screen.getByTestId('share-price-dashboard-metric-row-hide-action'));
     await flushDashboardWork();
@@ -2923,7 +4135,7 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(updateDashboardRowPreference).toHaveBeenCalledWith(
       'AAPL',
       '710::annualData[].forecastData.fy1.ebit',
-      false,
+      { isEnabled: false },
     );
     expect(screen.queryByTestId('share-price-dashboard-metric-row-action-menu')).toBeNull();
 
@@ -2966,11 +4178,458 @@ describe('SharePriceDashboard metrics mode', () => {
       });
     });
 
-    expect(screen.getByTestId('share-price-dashboard-metric-row-action-menu')).toBeTruthy();
+    const rowActionMenu = screen.getByTestId('share-price-dashboard-metric-row-action-menu');
+    expect(rowActionMenu).toBeTruthy();
+    expect(within(rowActionMenu).getByRole('button', { name: 'HIDE ROW' })).not.toBeNull();
+    expect(within(rowActionMenu).getByRole('button', { name: 'BOLD' })).not.toBeNull();
 
     await act(async () => {
       fireEvent.touchEnd(metricRowLeftRail, { touches: [] });
     });
+  });
+
+  it('bolds a detailed metrics row from the left-rail action menu', async () => {
+    const initialPayload = buildMetricsModePayload();
+    const boldedPayload = buildMetricsModePayload();
+    boldedPayload.metricsRows = boldedPayload.metricsRows.map((row) => {
+      return row.rowKey === '710::annualData[].forecastData.fy1.ebit'
+        ? { ...row, isBold: true }
+        : row;
+    });
+    updateDashboardRowPreference.mockResolvedValue({
+      metricsColumns: boldedPayload.metricsColumns,
+      metricsRows: boldedPayload.metricsRows,
+      mainTableRowPreferences: [],
+    });
+
+    const { user } = await renderDashboard({ payload: initialPayload });
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    const metricRowLeftRail = getMetricRowLeftRail();
+    expect(metricRowLeftRail).toBeTruthy();
+
+    // This locks the user-visible rule we care about: bolding a row should
+    // style both the frozen left rail and the row's visible value cells.
+    await act(async () => {
+      fireEvent.contextMenu(metricRowLeftRail);
+    });
+
+    await user.click(screen.getByRole('button', { name: 'BOLD' }));
+    await flushDashboardWork();
+
+    expect(updateDashboardRowPreference).toHaveBeenCalledWith(
+      'AAPL',
+      '710::annualData[].forecastData.fy1.ebit',
+      { isBold: true },
+    );
+    expect(getMetricRowLeftRail()?.getAttribute('data-is-bold')).toBe('true');
+    expect(getDashboardTableCell({
+      rowKey: '710::annualData[].forecastData.fy1.ebit',
+      columnKey: 'annual-2025',
+    })?.getAttribute('data-is-bold')).toBe('true');
+  });
+
+  it('shows UNBOLD for an already-bold detailed metrics row and removes that bold state', async () => {
+    const initialPayload = buildMetricsModePayload();
+    initialPayload.metricsRows = initialPayload.metricsRows.map((row) => {
+      return row.rowKey === '710::annualData[].forecastData.fy1.ebit'
+        ? { ...row, isBold: true }
+        : row;
+    });
+    const unboldedPayload = buildMetricsModePayload();
+    updateDashboardRowPreference.mockResolvedValue({
+      metricsColumns: unboldedPayload.metricsColumns,
+      metricsRows: unboldedPayload.metricsRows,
+      mainTableRowPreferences: [],
+    });
+
+    const { user } = await renderDashboard({ payload: initialPayload });
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    await act(async () => {
+      fireEvent.contextMenu(getMetricRowLeftRail());
+    });
+
+    expect(screen.getByRole('button', { name: 'UNBOLD' })).not.toBeNull();
+    await user.click(screen.getByRole('button', { name: 'UNBOLD' }));
+    await flushDashboardWork();
+
+    expect(updateDashboardRowPreference).toHaveBeenCalledWith(
+      'AAPL',
+      '710::annualData[].forecastData.fy1.ebit',
+      { isBold: false },
+    );
+    expect(getMetricRowLeftRail()?.getAttribute('data-is-bold')).toBe('false');
+  });
+
+  it('opens the main-table row action menu on right click and only offers BOLD or UNBOLD', async () => {
+    await renderDashboard();
+
+    const mainTableLeftRail = getMainTableRowLeftRail('main::annualData[].base.sharesOnIssue');
+    expect(mainTableLeftRail).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.contextMenu(mainTableLeftRail);
+    });
+
+    const rowActionMenu = screen.getByTestId('share-price-dashboard-metric-row-action-menu');
+    expect(rowActionMenu).toBeTruthy();
+    expect(within(rowActionMenu).getByRole('button', { name: 'BOLD' })).not.toBeNull();
+    expect(within(rowActionMenu).queryByRole('button', { name: 'HIDE ROW' })).toBeNull();
+  });
+
+  it('opens the main-table row action menu from a long press', async () => {
+    await renderDashboard();
+
+    const mainTableLeftRail = getMainTableRowLeftRail('main::annualData[].base.sharesOnIssue');
+    expect(mainTableLeftRail).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.touchStart(mainTableLeftRail, {
+        touches: [{ clientX: 18, clientY: 18 }],
+      });
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 700);
+      });
+    });
+
+    const rowActionMenu = screen.getByTestId('share-price-dashboard-metric-row-action-menu');
+    expect(rowActionMenu).toBeTruthy();
+    expect(within(rowActionMenu).getByRole('button', { name: 'BOLD' })).not.toBeNull();
+    expect(within(rowActionMenu).queryByRole('button', { name: 'HIDE ROW' })).toBeNull();
+
+    await act(async () => {
+      fireEvent.touchEnd(mainTableLeftRail, { touches: [] });
+    });
+  });
+
+  it('keeps the row action menu fully inside a narrow desktop viewport near the right edge', async () => {
+    await renderDashboard();
+    setWindowViewportSize({ width: 280, height: 620 });
+
+    const mainTableLeftRail = getMainTableRowLeftRail('main::annualData[].base.sharesOnIssue');
+    expect(mainTableLeftRail).toBeTruthy();
+    Object.defineProperty(mainTableLeftRail, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        left: 236,
+        right: 300,
+        top: 90,
+        bottom: 122,
+        width: 64,
+        height: 32,
+      }),
+    });
+
+    // This regression is about zoom-like narrow desktop viewports, not just
+    // whether the menu opens. The panel should clamp inward and stay readable.
+    await act(async () => {
+      fireEvent.contextMenu(mainTableLeftRail);
+    });
+
+    const rowActionMenu = screen.getByTestId('share-price-dashboard-metric-row-action-menu');
+    const overlayLeft = Number(rowActionMenu.getAttribute('data-overlay-left'));
+    const overlayWidth = Number(rowActionMenu.getAttribute('data-overlay-width'));
+
+    expect(rowActionMenu.getAttribute('data-overlay-mode')).toBe('desktop');
+    expect(overlayLeft).toBeGreaterThanOrEqual(12);
+    expect(overlayLeft + overlayWidth).toBeLessThanOrEqual(268);
+    expect(within(rowActionMenu).getByRole('button', { name: 'BOLD' })).not.toBeNull();
+  });
+
+  it('keeps the long-press row action menu fully inside a narrow desktop viewport near the right edge', async () => {
+    await renderDashboard();
+    setWindowViewportSize({ width: 280, height: 620 });
+
+    const mainTableLeftRail = getMainTableRowLeftRail('main::annualData[].base.sharesOnIssue');
+    expect(mainTableLeftRail).toBeTruthy();
+    Object.defineProperty(mainTableLeftRail, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        left: 240,
+        right: 304,
+        top: 88,
+        bottom: 120,
+        width: 64,
+        height: 32,
+      }),
+    });
+
+    await act(async () => {
+      fireEvent.touchStart(mainTableLeftRail, {
+        touches: [{ clientX: 250, clientY: 100 }],
+      });
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 700);
+      });
+    });
+
+    const rowActionMenu = screen.getByTestId('share-price-dashboard-metric-row-action-menu');
+    const overlayLeft = Number(rowActionMenu.getAttribute('data-overlay-left'));
+    const overlayWidth = Number(rowActionMenu.getAttribute('data-overlay-width'));
+
+    expect(rowActionMenu.getAttribute('data-overlay-mode')).toBe('desktop');
+    expect(overlayLeft).toBeGreaterThanOrEqual(12);
+    expect(overlayLeft + overlayWidth).toBeLessThanOrEqual(268);
+    expect(within(rowActionMenu).getByRole('button', { name: 'BOLD' })).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.touchEnd(mainTableLeftRail, { touches: [] });
+    });
+  });
+
+  it('shows UNBOLD for a main-table row that is already bold', async () => {
+    await renderDashboard();
+
+    await act(async () => {
+      fireEvent.contextMenu(getMainTableRowLeftRail('main::annualData[].base.sharePrice'));
+    });
+
+    const rowActionMenu = screen.getByTestId('share-price-dashboard-metric-row-action-menu');
+    expect(within(rowActionMenu).getByRole('button', { name: 'UNBOLD' })).not.toBeNull();
+    expect(within(rowActionMenu).queryByRole('button', { name: 'HIDE ROW' })).toBeNull();
+  });
+
+  it('bolds a main-table row from the left rail and applies that style to the whole row', async () => {
+    const initialPayload = buildDashboardPayload();
+    updateDashboardRowPreference.mockResolvedValue({
+      metricsColumns: [],
+      metricsRows: [],
+      mainTableRowPreferences: [
+        {
+          rowKey: 'main::annualData[].base.sharesOnIssue',
+          fieldPath: 'annualData[].base.sharesOnIssue',
+          label: 'Shares on issue',
+          isBold: true,
+        },
+      ],
+    });
+
+    const { user } = await renderDashboard({ payload: initialPayload });
+    const mainTableLeftRail = getMainTableRowLeftRail('main::annualData[].base.sharesOnIssue');
+    expect(mainTableLeftRail).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.contextMenu(mainTableLeftRail);
+    });
+
+    await user.click(screen.getByRole('button', { name: 'BOLD' }));
+    await flushDashboardWork();
+
+    expect(updateDashboardRowPreference).toHaveBeenCalledWith(
+      'AAPL',
+      'main::annualData[].base.sharesOnIssue',
+      { isBold: true },
+    );
+    expect(getMainTableRowLeftRail('main::annualData[].base.sharesOnIssue')?.getAttribute('data-is-bold')).toBe('true');
+    expect(getMainTableCell({
+      rowKey: 'annualData[].base.sharesOnIssue',
+      columnKey: 'annual-2025',
+    })?.getAttribute('data-is-bold')).toBe('true');
+  });
+
+  it('renders the requested default-bold pricing, valuation, and dividend rows on the stock card before the user changes them', async () => {
+    const { user } = await renderDashboard({ payload: buildDefaultBoldValuationMetricsPayload() });
+
+    // These rows start bold across existing and future stocks so the user sees
+    // the requested pricing, valuation, and dividend rows highlighted
+    // immediately before any per-stock preference is saved.
+    expect(getMainTableRowLeftRail('main::annualData[].base.sharePrice')?.getAttribute('data-is-bold')).toBe('true');
+    expect(getMainTableRowLeftRail('main::annualData[].base.marketCap')?.getAttribute('data-is-bold')).toBe('true');
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    [
+      '670::annualData[].forecastData.fy1.marketCap',
+      '680::annualData[].forecastData.fy2.marketCap',
+      '690::annualData[].forecastData.fy3.marketCap',
+      '810::annualData[].valuationMultiples.evSalesTrailing',
+      '820::annualData[].forecastData.fy1.evSales',
+      '830::annualData[].forecastData.fy2.evSales',
+      '940::annualData[].valuationMultiples.evEbitTrailing',
+      '950::annualData[].forecastData.fy1.evEbit',
+      '960::annualData[].forecastData.fy2.evEbit',
+      '970::annualData[].forecastData.fy3.evEbit',
+      '980::annualData[].valuationMultiples.peTrailing',
+      '990::annualData[].forecastData.fy1.pe',
+      '1000::annualData[].forecastData.fy2.pe',
+      '1010::annualData[].forecastData.fy3.pe',
+      '1410::annualData[].epsAndDividends.epsTrailing',
+      '1420::annualData[].forecastData.fy1.eps',
+      '1430::annualData[].forecastData.fy2.eps',
+      '1440::annualData[].forecastData.fy3.eps',
+      '1450::annualData[].epsAndDividends.dyTrailing',
+      '1460::annualData[].forecastData.fy1.dy',
+      '1470::annualData[].forecastData.fy2.dy',
+      '1480::annualData[].forecastData.fy3.dy',
+      '1490::annualData[].epsAndDividends.dpsTrailing',
+      '1500::annualData[].forecastData.fy1.dps',
+      '1510::annualData[].forecastData.fy2.dps',
+      '1520::annualData[].forecastData.fy3.dps',
+    ].forEach((rowKey) => {
+      expect(getMetricRowLeftRail(rowKey)?.getAttribute('data-is-bold')).toBe('true');
+    });
+  });
+
+  it('lets the user unbold one of the default bold rows and keeps that saved change', async () => {
+    const initialPayload = buildDefaultBoldValuationMetricsPayload();
+    const unboldedPayload = buildDefaultBoldValuationMetricsPayload({
+      metricsRows: buildDefaultBoldValuationMetricsPayload().metricsRows.map((row) => {
+        return row.rowKey === '1490::annualData[].epsAndDividends.dpsTrailing'
+          ? { ...row, isBold: false }
+          : row;
+      }),
+    });
+    updateDashboardRowPreference.mockResolvedValue({
+      metricsColumns: unboldedPayload.metricsColumns,
+      metricsRows: unboldedPayload.metricsRows,
+      mainTableRowPreferences: [],
+    });
+
+    const { user } = await renderDashboard({ payload: initialPayload });
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    await act(async () => {
+      fireEvent.contextMenu(getMetricRowLeftRail('1490::annualData[].epsAndDividends.dpsTrailing'));
+    });
+
+    expect(screen.getByRole('button', { name: 'UNBOLD' })).not.toBeNull();
+    await user.click(screen.getByRole('button', { name: 'UNBOLD' }));
+    await flushDashboardWork();
+
+    expect(updateDashboardRowPreference).toHaveBeenCalledWith(
+      'AAPL',
+      '1490::annualData[].epsAndDividends.dpsTrailing',
+      { isBold: false },
+    );
+    expect(getMetricRowLeftRail('1490::annualData[].epsAndDividends.dpsTrailing')?.getAttribute('data-is-bold')).toBe('false');
+  });
+
+  it('applies the full-width section-start divider to every visible section start in normal metrics mode', async () => {
+    const { user } = await renderDashboard({
+      payload: buildMetricsModePayloadWithHiddenSectionLeader(),
+    });
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    const visibleSectionStarts = getVisibleSectionStartContracts();
+
+    // Hiding the first EBIT row turns the next visible EBIT row into the true
+    // section start the user sees. Every visible section start must still get
+    // the shared full-width divider on both surfaces.
+    expect(visibleSectionStarts.map((sectionStart) => sectionStart.rowKey)).toEqual([
+      '715::annualData[].forecastData.fy1.revenue',
+      '810::annualData[].forecastData.fy1.cash',
+    ]);
+
+    visibleSectionStarts.forEach((sectionStart) => {
+      expect(sectionStart.leftRail).toBeTruthy();
+      expect(sectionStart.valuesSurface).toBeTruthy();
+      expect(sectionStart.leftRail.getAttribute('data-row-top-divider')).toBe('full-width');
+      expect(sectionStart.valuesSurface.getAttribute('data-row-top-divider')).toBe('full-width');
+    });
+  });
+
+  it('applies the same full-width section-start divider inside the focused metrics viewport', async () => {
+    const { user } = await renderDashboard({
+      payload: buildMetricsModePayloadWithHiddenSectionLeader(),
+      dashboardProps: {
+        isFocusedMetricsMode: true,
+      },
+    });
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    const visibleSectionStarts = getVisibleSectionStartContracts();
+    const internalSectionStarts = visibleSectionStarts.filter((sectionStart) => {
+      return sectionStart.rowKey !== '715::annualData[].forecastData.fy1.revenue';
+    });
+
+    expect(visibleSectionStarts.map((sectionStart) => sectionStart.rowKey)).toEqual([
+      '715::annualData[].forecastData.fy1.revenue',
+      '810::annualData[].forecastData.fy1.cash',
+    ]);
+
+    // Focused mode already has a sticky header divider above the first visible row,
+    // so this suite checks the repeated internal section boundaries inside the viewport.
+    expect(internalSectionStarts.map((sectionStart) => sectionStart.rowKey)).toEqual([
+      '810::annualData[].forecastData.fy1.cash',
+    ]);
+
+    internalSectionStarts.forEach((sectionStart) => {
+      expect(sectionStart.leftRail).toBeTruthy();
+      expect(sectionStart.valuesSurface).toBeTruthy();
+      expect(sectionStart.leftRail.getAttribute('data-row-top-divider')).toBe('full-width');
+      expect(sectionStart.valuesSurface.getAttribute('data-row-top-divider')).toBe('full-width');
+    });
+  });
+
+  it('keeps non-section detail rows free of the section-start divider styling', async () => {
+    const { user } = await renderDashboard({ payload: buildMetricsModePayload() });
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    const nonSectionLeftRail = getMetricRowLeftRail('715::annualData[].forecastData.fy1.revenue');
+    const nonSectionValuesSurface = getMetricRowValuesSurface('715::annualData[].forecastData.fy1.revenue');
+
+    expect(nonSectionLeftRail).toBeTruthy();
+    expect(nonSectionValuesSurface).toBeTruthy();
+    // This negative check makes sure the fix does not turn every row into a
+    // section boundary. Only real visible section starts should get the heavy line.
+    expect(nonSectionLeftRail.getAttribute('data-row-top-divider')).toBe('none');
+    expect(nonSectionValuesSurface.getAttribute('data-row-top-divider')).toBe('none');
+  });
+
+  it('preserves bold state when a hidden detailed row is shown again', async () => {
+    const hiddenBoldPayload = buildMetricsModePayload();
+    hiddenBoldPayload.metricsRows = hiddenBoldPayload.metricsRows.map((row) => {
+      return row.rowKey === '710::annualData[].forecastData.fy1.ebit'
+        ? { ...row, isEnabled: false, isBold: true }
+        : row;
+    });
+    const shownBoldPayload = buildMetricsModePayload();
+    shownBoldPayload.metricsRows = shownBoldPayload.metricsRows.map((row) => {
+      return row.rowKey === '710::annualData[].forecastData.fy1.ebit'
+        ? { ...row, isEnabled: true, isBold: true }
+        : row;
+    });
+    updateDashboardRowPreference.mockResolvedValue({
+      metricsColumns: shownBoldPayload.metricsColumns,
+      metricsRows: shownBoldPayload.metricsRows,
+      mainTableRowPreferences: [],
+    });
+
+    const { user } = await renderDashboard({ payload: hiddenBoldPayload });
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    const hiddenRowsToggle = screen.getAllByRole('button').find((buttonNode) => {
+      return /HIDDEN ROWS/.test(buttonNode.textContent || '');
+    });
+    expect(hiddenRowsToggle).toBeTruthy();
+    await user.click(hiddenRowsToggle);
+
+    const hiddenRowsPanel = screen.getByTestId('share-price-dashboard-hidden-rows');
+    await user.click(within(hiddenRowsPanel).getAllByRole('button', { name: 'SHOW ROW' })[0]);
+    await flushDashboardWork();
+
+    expect(updateDashboardRowPreference).toHaveBeenCalledWith(
+      'AAPL',
+      '710::annualData[].forecastData.fy1.ebit',
+      { isEnabled: true },
+    );
+    expect(getMetricRowLeftRail()?.getAttribute('data-is-bold')).toBe('true');
   });
 
   it('drops the overridden flag after CLEAR OVERRIDE reloads a non-overridden payload', async () => {
@@ -3057,29 +4716,76 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(screen.getByTestId('share-price-dashboard-metric-editor')).toBeTruthy();
   });
 
-  it('opens the shared override editor from a main-table long press', async () => {
+  it('keeps the shared override editor fully inside a narrow desktop viewport near the right edge', async () => {
     await renderDashboard();
+    setWindowViewportSize({ width: 300, height: 620 });
 
-    const sharesOnIssueCell = getMainTableCell({
-      rowKey: 'annualData[].base.sharesOnIssue',
+    const sharePriceCell = getMainTableCell({
+      rowKey: 'annualData[].base.sharePrice',
       columnKey: 'annual-2025',
     });
-    expect(sharesOnIssueCell).toBeTruthy();
-
-    await act(async () => {
-      fireEvent.touchStart(sharesOnIssueCell, {
-        touches: [{ clientX: 20, clientY: 20 }],
-      });
-      await new Promise((resolve) => {
-        window.setTimeout(resolve, 800);
-      });
+    expect(sharePriceCell).toBeTruthy();
+    Object.defineProperty(sharePriceCell, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        left: 262,
+        right: 320,
+        top: 112,
+        bottom: 144,
+        width: 58,
+        height: 32,
+      }),
     });
 
-    expect(screen.getByTestId('share-price-dashboard-metric-editor')).toBeTruthy();
+    // The editor uses the same shared overlay helper as the row menu, so this
+    // regression locks the right-edge fix down for both stock-card overlays.
+    await act(async () => {
+      fireEvent.contextMenu(sharePriceCell);
+    });
+
+    const metricEditor = screen.getByTestId('share-price-dashboard-metric-editor');
+    const overlayLeft = Number(metricEditor.getAttribute('data-overlay-left'));
+    const overlayWidth = Number(metricEditor.getAttribute('data-overlay-width'));
+
+    expect(metricEditor.getAttribute('data-overlay-mode')).toBe('desktop');
+    expect(overlayLeft).toBeGreaterThanOrEqual(12);
+    expect(overlayLeft + overlayWidth).toBeLessThanOrEqual(288);
+    expect(screen.getByLabelText('Override value')).toBeTruthy();
+  });
+
+  it('marks the stock dashboard scroll regions with the shared enhanced scrollbar contract', async () => {
+    // These checks protect the shared scrollbar styling rule without depending
+    // on JSDOM to visually paint native scrollbars.
+    await renderDashboard();
+
+    const horizontalScrollRegion = await screen.findByTestId('share-price-dashboard-scroll-region');
+    expect(horizontalScrollRegion.getAttribute('data-scrollbar-style')).toBe('enhanced');
+    expect(
+      enhancedInternalScrollbarSx['@supports selector(::-webkit-scrollbar)']['&::-webkit-scrollbar'].width,
+    ).toBe(ENHANCED_INTERNAL_SCROLLBAR_SIZE);
+  });
+
+  it('marks the focused metrics viewport with the shared enhanced scrollbar contract', async () => {
+    // Focused metrics uses a second scroll surface, so it gets its own shared
+    // scrollbar assertion instead of pretending the inline metrics mode renders
+    // the viewport container.
+    await renderDashboard({
+      payload: buildMetricsModePayload(),
+      dashboardProps: {
+        isFocusedMetricsMode: true,
+      },
+    });
 
     await act(async () => {
-      fireEvent.touchEnd(sharesOnIssueCell, { touches: [] });
+      fireEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
     });
+    await flushDashboardWork();
+
+    const metricsViewport = await screen.findByTestId('share-price-dashboard-metrics-viewport');
+    expect(metricsViewport.getAttribute('data-scrollbar-style')).toBe('enhanced');
+    expect(
+      enhancedInternalScrollbarSx['@supports selector(::-webkit-scrollbar)']['&::-webkit-scrollbar'].height,
+    ).toBe(ENHANCED_INTERNAL_SCROLLBAR_SIZE);
   });
 
   it('keeps non-overrideable main-table cells inert', async () => {
@@ -3110,6 +4816,72 @@ describe('SharePriceDashboard metrics mode', () => {
 
     expect(contextMenuEvent.defaultPrevented).toBe(false);
     expect(screen.queryByTestId('share-price-dashboard-metric-editor')).toBeNull();
+  });
+
+  it('keeps derived main-table cells inert under the new direct-override lockout', async () => {
+    await renderDashboard();
+
+    const marketCapCell = getMainTableCell({
+      rowKey: 'annualData[].base.marketCap',
+      columnKey: 'annual-2025',
+    });
+    expect(marketCapCell).toBeTruthy();
+
+    const contextMenuEvent = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+    });
+
+    await act(async () => {
+      marketCapCell.dispatchEvent(contextMenuEvent);
+    });
+
+    // Market cap is still visible and bold by default, but it is derived from
+    // editable inputs. This regression proves the card no longer opens the
+    // shared override editor directly on that calculated cell.
+    expect(contextMenuEvent.defaultPrevented).toBe(false);
+    expect(screen.queryByTestId('share-price-dashboard-metric-editor')).toBeNull();
+  });
+
+  it('keeps derived detail-metrics cells inert while manual forecast rows still stay editable', async () => {
+    await renderDashboard({ payload: buildDefaultBoldValuationMetricsPayload() });
+    await userEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+
+    const derivedMarketCapCell = getDashboardTableCell({
+      rowKey: '670::annualData[].forecastData.fy1.marketCap',
+      columnKey: 'annual-2024',
+    });
+    const editableForecastCell = getDashboardTableCell({
+      rowKey: '950::annualData[].forecastData.fy1.evEbit',
+      columnKey: 'annual-2024',
+    });
+
+    expect(derivedMarketCapCell).toBeTruthy();
+    expect(editableForecastCell).toBeTruthy();
+
+    const derivedContextMenuEvent = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+    });
+
+    await act(async () => {
+      derivedMarketCapCell.dispatchEvent(derivedContextMenuEvent);
+    });
+
+    expect(derivedContextMenuEvent.defaultPrevented).toBe(false);
+    expect(screen.queryByTestId('share-price-dashboard-metric-editor')).toBeNull();
+
+    await act(async () => {
+      editableForecastCell.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+      }));
+    });
+
+    expect(screen.getByTestId('share-price-dashboard-metric-editor')).toBeTruthy();
   });
 
   it('saves a main-table override through the existing annual override route', async () => {

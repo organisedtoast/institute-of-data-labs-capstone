@@ -38,8 +38,10 @@ describe('sharePriceChartScale', () => {
   });
 
   it('formats Y-axis prices with only the decimals the rounded step needs', () => {
-    expect(formatYAxisPrice(12.5, [7.5, 10, 12.5, 15, 17.5])).toBe('$12.5');
-    expect(formatYAxisPrice(0.4, [0.25, 0.3, 0.35, 0.4, 0.45, 0.5])).toBe('$0.40');
-    expect(formatYAxisPrice(160, [100, 120, 140, 160, 180, 200])).toBe('$160');
+    // The stock chart keeps the same decimal rules, but it no longer assumes
+    // the visible values should always show a USD symbol.
+    expect(formatYAxisPrice(12.5, [7.5, 10, 12.5, 15, 17.5])).toBe('12.5');
+    expect(formatYAxisPrice(0.4, [0.25, 0.3, 0.35, 0.4, 0.45, 0.5])).toBe('0.40');
+    expect(formatYAxisPrice(160, [100, 120, 140, 160, 180, 200])).toBe('160');
   });
 });

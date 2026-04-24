@@ -19,6 +19,10 @@ const stockMetricsRowPreferenceSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  isBold: {
+    type: Boolean,
+    default: false,
+  },
 }, { timestamps: true });
 
 stockMetricsRowPreferenceSchema.index(

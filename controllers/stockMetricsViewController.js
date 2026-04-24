@@ -1,6 +1,6 @@
 const {
   buildStockMetricsView,
-  setStockMetricsRowEnabledState,
+  setStockMetricsRowPreference,
 } = require("../services/stockMetricsViewService");
 
 async function getStockMetricsView(req, res, next) {
@@ -15,19 +15,25 @@ async function getStockMetricsView(req, res, next) {
 async function updateStockMetricsRowPreference(req, res, next) {
   try {
     const rowKey = typeof req.body?.rowKey === "string" ? req.body.rowKey.trim() : "";
+    const hasIsEnabled = typeof req.body?.isEnabled === "boolean";
+    const hasIsBold = typeof req.body?.isBold === "boolean";
 
     if (!rowKey) {
       return res.status(400).json({ error: "rowKey is required" });
     }
 
-    if (typeof req.body?.isEnabled !== "boolean") {
-      return res.status(400).json({ error: "isEnabled must be a boolean" });
+    // The same row-preference route now saves both visibility and bolding.
+    // Accepting either field lets one preference update happen without
+    // accidentally clearing the other saved choice.
+    if (!hasIsEnabled && !hasIsBold) {
+      return res.status(400).json({ error: "isEnabled or isBold must be a boolean" });
     }
 
-    const payload = await setStockMetricsRowEnabledState({
+    const payload = await setStockMetricsRowPreference({
       tickerSymbol: req.params.ticker,
       rowKey,
-      isEnabled: req.body.isEnabled,
+      isEnabled: hasIsEnabled ? req.body.isEnabled : undefined,
+      isBold: hasIsBold ? req.body.isBold : undefined,
     });
     res.json(payload);
   } catch (error) {
