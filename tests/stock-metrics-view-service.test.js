@@ -28,10 +28,13 @@ function buildAnnualMetricField(value, overrides = {}) {
 function buildStockDocument() {
   return {
     tickerSymbol: "AAPL",
+    priceCurrency: "USD",
+    reportingCurrency: "GBP",
     annualData: [
       {
         fiscalYear: 2023,
         fiscalYearEndDate: "2023-12-31",
+        reportingCurrency: "GBP",
         base: {
           sharePrice: buildAnnualMetricField(190.5, {
             sourceOfTruth: "roic",
@@ -99,6 +102,7 @@ function buildStockDocument() {
       {
         fiscalYear: 2024,
         fiscalYearEndDate: "2024-12-31",
+        reportingCurrency: "GBP",
         base: {
           sharePrice: buildAnnualMetricField(210.4, {
             sourceOfTruth: "roic",
@@ -354,6 +358,60 @@ test("buildStockMetricsView only marks cells overridden when a user override is 
 
   // A row with a real userValue must still report itself as overridden.
   assert.equal(rowByKey.get("200::annualData[].forecastData.fy1.revenue").cells[0].isOverridden, true);
+});
+
+test("buildStockMetricsView exposes stock-card currency rows as plain read-only metadata", async () => {
+  const stockDocument = buildStockDocument();
+
+  WatchlistStock.findOne = async () => ({
+    ...stockDocument,
+    save: async () => stockDocument,
+  });
+
+  lensService.resolveVisibleFieldsForStock = async () => ({
+    detailFields: [
+      {
+        order: 105,
+        fieldPath: "reportingCurrency",
+        label: "Reporting currency",
+        shortLabel: "Reporting currency",
+        section: "DETAIL METRICS",
+        shortSection: "DETAIL METRICS",
+        surface: "detail",
+      },
+      {
+        order: 710,
+        fieldPath: "annualData[].forecastData.fy1.ebit",
+        label: "EBIT FY+1",
+        shortLabel: "EBIT FY+1",
+        section: "Income Statement",
+        shortSection: "Income",
+        surface: "detail",
+      },
+    ],
+  });
+
+  StockMetricsRowPreference.find = () => ({
+    lean: async () => ([]),
+  });
+
+  const { buildStockMetricsView } = loadServiceUnderTest();
+  const metricsView = await buildStockMetricsView("aapl");
+  const reportingCurrencyRow = metricsView.rows.find((row) => row.fieldPath === "reportingCurrency");
+
+  // These rows are metadata references, not numeric metrics. The service
+  // should still repeat them across columns, but it must not advertise them as
+  // editable because there is no stock-card override flow for currencies.
+  assert.equal(metricsView.priceCurrency, "USD");
+  assert.equal(metricsView.reportingCurrency, "GBP");
+  assert.ok(reportingCurrencyRow);
+  assert.equal(reportingCurrencyRow.label, "Reporting currency");
+  assert.deepEqual(
+    reportingCurrencyRow.cells.map((cell) => cell.value),
+    ["GBP", "GBP"]
+  );
+  assert.equal(reportingCurrencyRow.cells[0].isOverrideable, false);
+  assert.equal(reportingCurrencyRow.cells[0].overrideTarget, null);
 });
 
 test("buildStockMetricsView keeps derived rows read-only and clears legacy derived overrides back to calculated values", async () => {

@@ -236,8 +236,14 @@ function getPriceCurrency(profile) {
     "priceCurrency",
     "price_currency",
     "currency",
-    "reportedCurrency",
-    "reported_currency",
+  ]));
+}
+
+function getReportingCurrency(row) {
+  return coerceScalar(pickFirstDefined(row, [
+    "reportingCurrency",
+    "reporting_currency",
+    "currency",
   ]));
 }
 
@@ -585,12 +591,14 @@ function buildAnnualEntry({
   multiplesRow,
 }) {
   const annualEntry = createEmptyAnnualEntry(fiscalYear, fiscalYearEndDate);
+  const reportingCurrency = getReportingCurrency(incomeRow);
   const earningsReleaseDate = selectEarningsReleaseDate({
     fiscalYear,
     fiscalYearEndDate,
     normalizedCalls,
   });
 
+  annualEntry.reportingCurrency = reportingCurrency;
   annualEntry.earningsReleaseDate = createMetricField(
     earningsReleaseDate.date,
     earningsReleaseDate.date ? earningsReleaseDate.sourceOfTruth : "system"
@@ -628,6 +636,51 @@ function buildAnnualEntry({
   setMetric(annualEntry, "epsAndDividends.dpsTrailing", getDpsTrailing(perShareRow), "roic");
 
   return annualEntry;
+}
+
+function buildReportingCurrencyDiagnostics({ fiscalYears, incomeByYear, balanceSheetByYear, canonicalReportingCurrency }) {
+  const balanceSheetMismatches = [];
+  const annualRowMismatches = [];
+
+  fiscalYears.forEach((fiscalYear) => {
+    const incomeCurrency = getReportingCurrency(incomeByYear.get(fiscalYear));
+    const balanceSheetCurrency = getReportingCurrency(balanceSheetByYear.get(fiscalYear));
+
+    // Income statement is the canonical source, but we still compare the same
+    // fiscal year across statements so refreshes can surface unexpected ROIC
+    // disagreements instead of silently hiding them.
+    if (
+      typeof incomeCurrency === "string"
+      && typeof balanceSheetCurrency === "string"
+      && incomeCurrency !== balanceSheetCurrency
+    ) {
+      balanceSheetMismatches.push({
+        fiscalYear,
+        incomeStatementCurrency: incomeCurrency,
+        balanceSheetCurrency,
+      });
+    }
+
+    // We also keep a simple stock-level comparison so later reads can tell if
+    // one historical year drifted away from the chosen canonical currency.
+    if (
+      typeof canonicalReportingCurrency === "string"
+      && typeof incomeCurrency === "string"
+      && canonicalReportingCurrency !== incomeCurrency
+    ) {
+      annualRowMismatches.push({
+        fiscalYear,
+        canonicalReportingCurrency,
+        annualReportingCurrency: incomeCurrency,
+      });
+    }
+  });
+
+  return {
+    reportingCurrencySource: "incomeStatement",
+    balanceSheetMismatches,
+    annualRowMismatches,
+  };
 }
 
 // Main entry point for this file.
@@ -709,17 +762,31 @@ function buildStockDocument({
     });
   });
 
+  const canonicalReportingCurrency = fiscalYears
+    .map((fiscalYear) => getReportingCurrency(incomeByYear.get(fiscalYear)))
+    .find((currency) => typeof currency === "string" && currency.trim());
+  const currencyDiagnostics = buildReportingCurrencyDiagnostics({
+    fiscalYears,
+    incomeByYear,
+    balanceSheetByYear,
+    canonicalReportingCurrency: canonicalReportingCurrency || null,
+  });
+
   const stockDocument = {
     tickerSymbol: normalizedTicker,
     companyName: createMetricField(getCompanyName(profile), "roic"),
     investmentCategory,
     priceCurrency: getPriceCurrency(profile) || "USD",
+    // Trading currency comes from company profile, while reporting currency is
+    // the annual statement currency used by the imported fundamentals.
+    reportingCurrency: canonicalReportingCurrency || null,
     sourceMeta: {
       lastImportedAt: new Date(),
       importRangeYears: normalizedYearLimit,
       importRangeYearsExplicit: Boolean(importRangeYearsExplicit),
       annualHistoryFetchVersion: ANNUAL_HISTORY_FETCH_VERSION,
       roicEndpointsUsed: ROIC_ENDPOINTS_USED,
+      currencyDiagnostics,
     },
     annualData,
     forecastData: {

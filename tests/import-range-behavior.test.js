@@ -42,13 +42,21 @@ function buildAnnualRows(startYear, endYear) {
 function buildStockDocumentFixture(overrides = {}) {
   return buildStockDocument({
     tickerSymbol: "AAPL",
-    profile: { companyName: "Apple Inc.", priceCurrency: "USD" },
+    profile: { companyName: "Apple Inc.", currency: "USD" },
     perShare: buildAnnualRows(2010, 2025),
     profitability: [],
     prices: [],
     earnings: [],
-    incomeStatement: [],
-    balanceSheet: [],
+    incomeStatement: buildAnnualRows(2010, 2025).map((row) => ({
+      fiscalYear: row.fiscalYear,
+      fiscalYearEndDate: row.fiscalYearEndDate,
+      currency: "GBP",
+    })),
+    balanceSheet: buildAnnualRows(2010, 2025).map((row) => ({
+      fiscalYear: row.fiscalYear,
+      fiscalYearEndDate: row.fiscalYearEndDate,
+      currency: "GBP",
+    })),
     cashFlow: [],
     creditRatios: [],
     enterpriseValue: [],
@@ -125,6 +133,39 @@ test("buildStockDocument limits annual rows when an explicit cap is provided", (
   assert.equal(stockDocument.annualData.length, 5);
   assert.equal(stockDocument.annualData[0].fiscalYear, 2025);
   assert.equal(stockDocument.annualData.at(-1).fiscalYear, 2021);
+});
+
+test("buildStockDocument keeps ticker price currency separate from reporting currency and stores annual reporting currency", () => {
+  const stockDocument = buildStockDocumentFixture();
+
+  // Trading currency comes from the company profile, while reporting currency
+  // comes from the statement rows. Keeping them separate avoids assuming every
+  // stock reports in the same currency that it trades in.
+  assert.equal(stockDocument.priceCurrency, "USD");
+  assert.equal(stockDocument.reportingCurrency, "GBP");
+  assert.equal(stockDocument.annualData[0].reportingCurrency, "GBP");
+  assert.equal(stockDocument.annualData.at(-1).reportingCurrency, "GBP");
+});
+
+test("buildStockDocument records balance-sheet reporting-currency mismatches without changing the canonical value", () => {
+  const stockDocument = buildStockDocumentFixture({
+    balanceSheet: buildAnnualRows(2010, 2025).map((row) => ({
+      fiscalYear: row.fiscalYear,
+      fiscalYearEndDate: row.fiscalYearEndDate,
+      currency: row.fiscalYear === 2025 ? "EUR" : "GBP",
+    })),
+  });
+
+  // Income statement is the canonical writer. Balance sheet still gets checked
+  // so import diagnostics can show a mismatch instead of silently hiding it.
+  assert.equal(stockDocument.reportingCurrency, "GBP");
+  assert.equal(stockDocument.sourceMeta.currencyDiagnostics.reportingCurrencySource, "incomeStatement");
+  assert.equal(stockDocument.sourceMeta.currencyDiagnostics.balanceSheetMismatches.length, 1);
+  assert.deepEqual(stockDocument.sourceMeta.currencyDiagnostics.balanceSheetMismatches[0], {
+    fiscalYear: 2025,
+    incomeStatementCurrency: "GBP",
+    balanceSheetCurrency: "EUR",
+  });
 });
 
 test("selectEarningsReleaseDate uses a same-fiscal-year ROIC call after year-end", () => {

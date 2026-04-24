@@ -81,6 +81,7 @@ const MAIN_TABLE_FIELD_KEYS = [
   'fiscalYearEndDate',
   'fiscalYear',
   'earningsReleaseDate',
+  'priceCurrency',
   'sharePrice',
   'sharesOnIssue',
   'marketCap',
@@ -101,20 +102,25 @@ const MAIN_TABLE_FIELD_CONFIG = {
     payloadPath: null,
     resolveField: (annualRow) => annualRow?.earningsReleaseDate ?? null,
   },
+  priceCurrency: {
+    rowKey: 'main::priceCurrency',
+    payloadPath: null,
+    resolveField: (stockDocument) => stockDocument?.priceCurrency || null,
+  },
   sharePrice: {
     rowKey: 'main::annualData[].base.sharePrice',
     payloadPath: 'base.sharePrice',
-    resolveField: (annualRow) => annualRow?.base?.sharePrice ?? null,
+    resolveField: (_stockDocument, annualRow) => annualRow?.base?.sharePrice ?? null,
   },
   sharesOnIssue: {
     rowKey: 'main::annualData[].base.sharesOnIssue',
     payloadPath: 'base.sharesOnIssue',
-    resolveField: (annualRow) => annualRow?.base?.sharesOnIssue ?? null,
+    resolveField: (_stockDocument, annualRow) => annualRow?.base?.sharesOnIssue ?? null,
   },
   marketCap: {
     rowKey: 'main::annualData[].base.marketCap',
     payloadPath: 'base.marketCap',
-    resolveField: (annualRow) => annualRow?.base?.marketCap ?? null,
+    resolveField: (_stockDocument, annualRow) => annualRow?.base?.marketCap ?? null,
   },
 };
 
@@ -179,9 +185,9 @@ function normalizeAnnualMainTableRowsPayload(rawRows) {
     : [];
 }
 
-function createAnnualMainTableCellFromStockDocument(fieldKey, annualRow, fiscalYear) {
+function createAnnualMainTableCellFromStockDocument(fieldKey, annualRow, fiscalYear, stockDocument = null) {
   const fieldConfig = MAIN_TABLE_FIELD_CONFIG[fieldKey];
-  const rawField = fieldConfig?.resolveField?.(annualRow);
+  const rawField = fieldConfig?.resolveField?.(stockDocument, annualRow);
   const hasMetricMetadata = rawField && typeof rawField === 'object' && 'sourceOfTruth' in rawField;
   const normalizedRowKey = fieldConfig?.rowKey || '';
   const isDirectlyOverrideable =
@@ -224,7 +230,7 @@ function normalizeAnnualMainTableRows(stockDocument) {
         cells: Object.fromEntries(
           MAIN_TABLE_FIELD_KEYS.map((fieldKey) => [
             fieldKey,
-            createAnnualMainTableCellFromStockDocument(fieldKey, annualRow, normalizedFiscalYear),
+            createAnnualMainTableCellFromStockDocument(fieldKey, annualRow, normalizedFiscalYear, stockDocument),
           ]),
         ),
       };
@@ -418,6 +424,7 @@ export function buildDashboardPayload(
         ? stockDocument.investmentCategory.trim()
         : '',
     priceCurrency: stockDocument?.priceCurrency || 'USD',
+    reportingCurrency: stockDocument?.reportingCurrency || null,
     prices: normalizePriceRows(pricePayload),
     annualMetrics: normalizeAnnualMetrics(stockDocument),
     annualMainTableRows: applyMainTableRowPreferences(annualMainTableRows, mainTableRowPreferences),
@@ -445,6 +452,7 @@ function normalizeDashboardBootstrapPayload(rawPayload) {
         ? rawPayload.investmentCategory.trim()
         : '',
     priceCurrency: rawPayload?.priceCurrency || 'USD',
+    reportingCurrency: rawPayload?.reportingCurrency || null,
     prices: normalizePriceRows(rawPayload),
     annualMetrics: Array.isArray(rawPayload?.annualMetrics)
       ? rawPayload.annualMetrics

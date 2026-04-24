@@ -19,6 +19,7 @@
 | companyName | Company name override object | roic | /v2/company/profile/{identifier} | All (7) |
 | investmentCategory | User-facing investment category | system | N/A | All (7) |
 | priceCurrency | Price currency | roic | /v2/company/profile/{identifier} | All (7) |
+| reportingCurrency | Reporting currency | roic | /v2/fundamental/income-statement/{identifier} | All (7) |
 | sourceMeta.lastImportedAt | Last import timestamp | system | N/A | All (7) |
 | sourceMeta.lastRefreshAt | Last refresh timestamp | system | N/A | All (7) |
 | sourceMeta.importRangeYears | Requested yearly import range | system | N/A | All (7) |
@@ -34,6 +35,7 @@
 | --- | --- | --- | --- | --- |
 | annualData[].fiscalYear | Fiscal year | roic | Multiple annual endpoints | All (7) |
 | annualData[].fiscalYearEndDate | FY end date | roic | /v2/fundamental/per-share/{identifier} | All (7) |
+| annualData[].reportingCurrency | Annual reporting currency | roic | /v2/fundamental/income-statement/{identifier} | All (7) |
 | annualData[].earningsReleaseDate | FY release date | roic | /v2/company/earnings-calls/list/{identifier} | All (7) |
 
 ## annualData[].base
@@ -117,75 +119,75 @@
 
 | Field path | Label | Source type | ROIC endpoint | Visible in categories |
 | --- | --- | --- | --- | --- |
-| forecastData.fy1.sharesOnIssue | Shares on issue forecast FY+1 | manualOnly | N/A | All (7) |
-| forecastData.fy1.marketCap | Market cap FY+1 | derived | N/A | All (7) |
-| forecastData.fy1.enterpriseValue | Enterprise value FY+1 | derived | N/A | Unprofitable Hi Growth, Profitable Hi Growth, Mature Compounder +3 more |
-| forecastData.fy1.ebit | EBIT FY+1 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
-| forecastData.fy1.evSales | EV/Sales FY+1 | manualOnly | N/A | Unprofitable Hi Growth (1) |
-| forecastData.fy1.ebitdaMargin | EBITDA margin FY+1 | manualOnly | N/A | Unprofitable Hi Growth (1) |
-| forecastData.fy1.ebitMargin | EBIT margin FY+1 | manualOnly | N/A | Unprofitable Hi Growth, Profitable Hi Growth, Mature Compounder +2 more |
-| forecastData.fy1.npatMargin | NPAT margin FY+1 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
-| forecastData.fy1.evEbit | EV/EBIT FY+1 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
-| forecastData.fy1.pe | PE FY+1 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| forecastData.fy1.eps | EPS FY+1 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| forecastData.fy1.dy | DY FY+1 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| forecastData.fy1.dps | DPS FY+1 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| forecastData.fy2.sharesOnIssue | Shares on issue forecast FY+2 | manualOnly | N/A | All (7) |
-| forecastData.fy2.marketCap | Market cap FY+2 | derived | N/A | All (7) |
-| forecastData.fy2.enterpriseValue | Enterprise value FY+2 | derived | N/A | Unprofitable Hi Growth, Profitable Hi Growth, Mature Compounder +3 more |
-| forecastData.fy2.ebit | EBIT FY+2 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
-| forecastData.fy2.evSales | EV/Sales FY+2 | manualOnly | N/A | Unprofitable Hi Growth (1) |
-| forecastData.fy2.ebitdaMargin | EBITDA margin FY+2 | manualOnly | N/A | Unprofitable Hi Growth (1) |
-| forecastData.fy2.ebitMargin | EBIT margin FY+2 | manualOnly | N/A | Unprofitable Hi Growth, Profitable Hi Growth, Mature Compounder +2 more |
-| forecastData.fy2.npatMargin | NPAT margin FY+2 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
-| forecastData.fy2.evEbit | EV/EBIT FY+2 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
-| forecastData.fy2.pe | PE FY+2 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| forecastData.fy2.eps | EPS FY+2 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| forecastData.fy2.dy | DY FY+2 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| forecastData.fy2.dps | DPS FY+2 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| forecastData.fy3.sharesOnIssue | Shares on issue forecast FY+3 | manualOnly | N/A | All (7) |
-| forecastData.fy3.marketCap | Market cap FY+3 | derived | N/A | All (7) |
-| forecastData.fy3.enterpriseValue | Enterprise value FY+3 | derived | N/A | Unprofitable Hi Growth, Profitable Hi Growth, Mature Compounder +3 more |
-| forecastData.fy3.ebit | EBIT FY+3 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
+| forecastData.fy1.sharesOnIssue | Shares On Issue FY+1 | manualOnly | N/A | All (7) |
+| forecastData.fy1.marketCap | Market Cap FY+1 | derived | N/A | All (7) |
+| forecastData.fy1.enterpriseValue | Enterprise Value FY+1 | derived | N/A | All (7) |
+| forecastData.fy1.ebit | Ebit FY+1 | manualOnly | N/A | All (7) |
+| forecastData.fy1.evSales | Ev Sales FY+1 | manualOnly | N/A | All (7) |
+| forecastData.fy1.ebitdaMargin | Ebitda Margin FY+1 | manualOnly | N/A | All (7) |
+| forecastData.fy1.ebitMargin | Ebit Margin FY+1 | manualOnly | N/A | All (7) |
+| forecastData.fy1.npatMargin | Npat Margin FY+1 | manualOnly | N/A | All (7) |
+| forecastData.fy1.evEbit | Ev Ebit FY+1 | manualOnly | N/A | All (7) |
+| forecastData.fy1.pe | Pe FY+1 | manualOnly | N/A | All (7) |
+| forecastData.fy1.eps | Eps FY+1 | manualOnly | N/A | All (7) |
+| forecastData.fy1.dy | Dy FY+1 | manualOnly | N/A | All (7) |
+| forecastData.fy1.dps | Dps FY+1 | manualOnly | N/A | All (7) |
+| forecastData.fy2.sharesOnIssue | Shares On Issue FY+2 | manualOnly | N/A | All (7) |
+| forecastData.fy2.marketCap | Market Cap FY+2 | derived | N/A | All (7) |
+| forecastData.fy2.enterpriseValue | Enterprise Value FY+2 | derived | N/A | All (7) |
+| forecastData.fy2.ebit | Ebit FY+2 | manualOnly | N/A | All (7) |
+| forecastData.fy2.evSales | Ev Sales FY+2 | manualOnly | N/A | All (7) |
+| forecastData.fy2.ebitdaMargin | Ebitda Margin FY+2 | manualOnly | N/A | All (7) |
+| forecastData.fy2.ebitMargin | Ebit Margin FY+2 | manualOnly | N/A | All (7) |
+| forecastData.fy2.npatMargin | Npat Margin FY+2 | manualOnly | N/A | All (7) |
+| forecastData.fy2.evEbit | Ev Ebit FY+2 | manualOnly | N/A | All (7) |
+| forecastData.fy2.pe | Pe FY+2 | manualOnly | N/A | All (7) |
+| forecastData.fy2.eps | Eps FY+2 | manualOnly | N/A | All (7) |
+| forecastData.fy2.dy | Dy FY+2 | manualOnly | N/A | All (7) |
+| forecastData.fy2.dps | Dps FY+2 | manualOnly | N/A | All (7) |
+| forecastData.fy3.sharesOnIssue | Shares On Issue FY+3 | manualOnly | N/A | All (7) |
+| forecastData.fy3.marketCap | Market Cap FY+3 | derived | N/A | All (7) |
+| forecastData.fy3.enterpriseValue | Enterprise Value FY+3 | derived | N/A | All (7) |
+| forecastData.fy3.ebit | Ebit FY+3 | manualOnly | N/A | All (7) |
 | forecastData.fy3.evSales | Ev Sales FY+3 | manualOnly | N/A | All (7) |
 | forecastData.fy3.ebitdaMargin | Ebitda Margin FY+3 | manualOnly | N/A | All (7) |
 | forecastData.fy3.ebitMargin | Ebit Margin FY+3 | manualOnly | N/A | All (7) |
-| forecastData.fy3.npatMargin | NPAT margin FY+3 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
-| forecastData.fy3.evEbit | EV/EBIT FY+3 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +2 more |
-| forecastData.fy3.pe | PE FY+3 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| forecastData.fy3.eps | EPS FY+3 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| forecastData.fy3.dy | DY FY+3 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| forecastData.fy3.dps | DPS FY+3 | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
+| forecastData.fy3.npatMargin | Npat Margin FY+3 | manualOnly | N/A | All (7) |
+| forecastData.fy3.evEbit | Ev Ebit FY+3 | manualOnly | N/A | All (7) |
+| forecastData.fy3.pe | Pe FY+3 | manualOnly | N/A | All (7) |
+| forecastData.fy3.eps | Eps FY+3 | manualOnly | N/A | All (7) |
+| forecastData.fy3.dy | Dy FY+3 | manualOnly | N/A | All (7) |
+| forecastData.fy3.dps | Dps FY+3 | manualOnly | N/A | All (7) |
 
 ## growthForecasts
 
 | Field path | Label | Source type | ROIC endpoint | Visible in categories |
 | --- | --- | --- | --- | --- |
-| growthForecasts.revenueCagr3y | Revenue forecast CAGR 3Y | manualOnly | N/A | All (7) |
-| growthForecasts.revenueCagr5y | Revenue forecast CAGR 5Y | manualOnly | N/A | All (7) |
-| growthForecasts.epsCagr3y | EPS forecast CAGR 3Y | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| growthForecasts.epsCagr5y | EPS forecast CAGR 5Y | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
+| growthForecasts.revenueCagr3y | Revenue Cagr3y | manualOnly | N/A | All (7) |
+| growthForecasts.revenueCagr5y | Revenue Cagr5y | manualOnly | N/A | All (7) |
+| growthForecasts.epsCagr3y | Eps Cagr3y | manualOnly | N/A | All (7) |
+| growthForecasts.epsCagr5y | Eps Cagr5y | manualOnly | N/A | All (7) |
 
 ## analystRevisions
 
 | Field path | Label | Source type | ROIC endpoint | Visible in categories |
 | --- | --- | --- | --- | --- |
-| analystRevisions.revenueFy1Last1m | Revenue FY+1 revisions last 1M | manualOnly | N/A | All (7) |
-| analystRevisions.revenueFy1Last3m | Revenue FY+1 revisions last 3M | manualOnly | N/A | All (7) |
-| analystRevisions.revenueFy2Last1m | Revenue FY+2 revisions last 1M | manualOnly | N/A | All (7) |
-| analystRevisions.revenueFy2Last3m | Revenue FY+2 revisions last 3M | manualOnly | N/A | All (7) |
-| analystRevisions.ebitFy1Last1m | EBIT FY+1 revisions last 1M | manualOnly | N/A | All (7) |
-| analystRevisions.ebitFy1Last3m | EBIT FY+1 revisions last 3M | manualOnly | N/A | All (7) |
-| analystRevisions.ebitFy2Last1m | EBIT FY+2 revisions last 1M | manualOnly | N/A | All (7) |
-| analystRevisions.ebitFy2Last3m | EBIT FY+2 revisions last 3M | manualOnly | N/A | All (7) |
-| analystRevisions.ebitFy3Last1m | EBIT FY+3 revisions last 1M | manualOnly | N/A | All (7) |
-| analystRevisions.ebitFy3Last3m | EBIT FY+3 revisions last 3M | manualOnly | N/A | All (7) |
-| analystRevisions.epsFy1Last1m | EPS FY+1 revisions last 1M | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| analystRevisions.epsFy1Last3m | EPS FY+1 revisions last 3M | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| analystRevisions.epsFy2Last1m | EPS FY+2 revisions last 1M | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| analystRevisions.epsFy2Last3m | EPS FY+2 revisions last 3M | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| analystRevisions.epsFy3Last1m | EPS FY+3 revisions last 1M | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
-| analystRevisions.epsFy3Last3m | EPS FY+3 revisions last 3M | manualOnly | N/A | Profitable Hi Growth, Mature Compounder, Defensive Yield +3 more |
+| analystRevisions.revenueFy1Last1m | Revenue FY+1 Last1m | manualOnly | N/A | All (7) |
+| analystRevisions.revenueFy1Last3m | Revenue FY+1 Last3m | manualOnly | N/A | All (7) |
+| analystRevisions.revenueFy2Last1m | Revenue FY+2 Last1m | manualOnly | N/A | All (7) |
+| analystRevisions.revenueFy2Last3m | Revenue FY+2 Last3m | manualOnly | N/A | All (7) |
+| analystRevisions.ebitFy1Last1m | Ebit FY+1 Last1m | manualOnly | N/A | All (7) |
+| analystRevisions.ebitFy1Last3m | Ebit FY+1 Last3m | manualOnly | N/A | All (7) |
+| analystRevisions.ebitFy2Last1m | Ebit FY+2 Last1m | manualOnly | N/A | All (7) |
+| analystRevisions.ebitFy2Last3m | Ebit FY+2 Last3m | manualOnly | N/A | All (7) |
+| analystRevisions.ebitFy3Last1m | Ebit FY+3 Last1m | manualOnly | N/A | All (7) |
+| analystRevisions.ebitFy3Last3m | Ebit FY+3 Last3m | manualOnly | N/A | All (7) |
+| analystRevisions.epsFy1Last1m | Eps FY+1 Last1m | manualOnly | N/A | All (7) |
+| analystRevisions.epsFy1Last3m | Eps FY+1 Last3m | manualOnly | N/A | All (7) |
+| analystRevisions.epsFy2Last1m | Eps FY+2 Last1m | manualOnly | N/A | All (7) |
+| analystRevisions.epsFy2Last3m | Eps FY+2 Last3m | manualOnly | N/A | All (7) |
+| analystRevisions.epsFy3Last1m | Eps FY+3 Last1m | manualOnly | N/A | All (7) |
+| analystRevisions.epsFy3Last3m | Eps FY+3 Last3m | manualOnly | N/A | All (7) |
 
 ## Lens Summary
 
@@ -193,10 +195,10 @@ This appendix stays compact on purpose. It tells a developer how broad each cate
 
 | Investment category | Card fields | Detail fields | Sample field paths |
 | --- | --- | --- | --- |
-| Unprofitable Hi Growth | 5 | 44 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
-| Profitable Hi Growth | 5 | 78 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
-| Mature Compounder | 5 | 78 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
-| Defensive Yield | 5 | 74 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
-| Cyclical | 5 | 79 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
-| Lender | 5 | 49 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
-| Firm Specific Turnaround | 5 | 79 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Unprofitable Hi Growth | 6 | 45 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Profitable Hi Growth | 6 | 79 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Mature Compounder | 6 | 79 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Defensive Yield | 6 | 75 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Cyclical | 6 | 80 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Lender | 6 | 50 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |
+| Firm Specific Turnaround | 6 | 80 | annualData[].fiscalYearEndDate, annualData[].earningsReleaseDate, annualData[].base.sharePrice |

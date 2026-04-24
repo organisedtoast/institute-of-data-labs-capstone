@@ -84,10 +84,12 @@ async function refreshStock(req, res, next) {
     }
 
     stock.priceCurrency = freshData.priceCurrency;
+    stock.reportingCurrency = freshData.reportingCurrency;
     stock.sourceMeta.importRangeYears = freshData.sourceMeta.importRangeYears;
     stock.sourceMeta.importRangeYearsExplicit = freshData.sourceMeta.importRangeYearsExplicit;
     stock.sourceMeta.annualHistoryFetchVersion = freshData.sourceMeta.annualHistoryFetchVersion;
     stock.sourceMeta.roicEndpointsUsed = freshData.sourceMeta.roicEndpointsUsed;
+    stock.sourceMeta.currencyDiagnostics = freshData.sourceMeta.currencyDiagnostics;
 
     for (const freshYear of freshData.annualData) {
       const existingYear = stock.annualData.find((row) => row.fiscalYear === freshYear.fiscalYear);

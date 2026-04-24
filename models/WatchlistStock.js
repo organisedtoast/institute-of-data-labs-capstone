@@ -59,6 +59,10 @@ const analystRevisionsSchema = buildMetricGroupSchema(ANALYST_REVISION_FIELDS);
 const annualDataSchema = new mongoose.Schema({
   fiscalYear: { type: Number, required: true },
   fiscalYearEndDate: { type: String, default: null },
+  // Reporting currency belongs to each fiscal year too, so the import can keep
+  // the original statement metadata even if a company ever reports in a
+  // different currency across historical periods.
+  reportingCurrency: { type: String, default: null },
   earningsReleaseDate: metricFieldDefinition(),
   base: {
     type: buildMetricGroupSchema(ANNUAL_GROUP_FIELDS.base),
@@ -125,6 +129,9 @@ const watchlistStockSchema = new mongoose.Schema({
     trim: true,
   },
   priceCurrency: { type: String, default: "USD" },
+  // Price currency and reporting currency can differ for cross-listed stocks,
+  // so we keep both references on the document instead of overloading one field.
+  reportingCurrency: { type: String, default: null },
   sourceMeta: {
     lastImportedAt: { type: Date },
     lastRefreshAt: { type: Date },
@@ -132,6 +139,7 @@ const watchlistStockSchema = new mongoose.Schema({
     importRangeYearsExplicit: { type: Boolean, default: false },
     annualHistoryFetchVersion: { type: Number, default: null },
     roicEndpointsUsed: [String],
+    currencyDiagnostics: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   annualData: [annualDataSchema],
   forecastData: {

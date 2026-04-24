@@ -159,6 +159,7 @@ const TOP_LEVEL_OVERRIDE_GROUP_FIELDS = {
 };
 
 const ANNUAL_RELATIVE_METRIC_PATHS = [
+  "reportingCurrency",
   "earningsReleaseDate",
   ...Object.entries(ANNUAL_GROUP_FIELDS).flatMap(([groupName, fieldNames]) =>
     fieldNames.map((fieldName) => `${groupName}.${fieldName}`)
@@ -175,6 +176,7 @@ const TOP_LEVEL_METRIC_PATHS = Object.entries(TOP_LEVEL_OVERRIDE_GROUP_FIELDS).f
 // code whether the field comes from ROIC, is derived by backend formulas, or
 // is a manual/system placeholder waiting for user input.
 const ANNUAL_FIELD_SOURCE_META = {
+  reportingCurrency: { sourceType: "roic", roicEndpoint: ROIC_ENDPOINTS.INCOME_STATEMENT },
   earningsReleaseDate: { sourceType: "roic", roicEndpoint: ROIC_ENDPOINTS.EARNINGS_CALLS },
   "base.sharePrice": { sourceType: "roic", roicEndpoint: ROIC_ENDPOINTS.STOCK_PRICES },
   "base.sharesOnIssue": { sourceType: "roic", roicEndpoint: ROIC_ENDPOINTS.PER_SHARE },
@@ -378,9 +380,11 @@ const DISPLAY_FIELD_DEFINITIONS = [
   displayField("annualData[].fiscalYearEndDate", "FY end date", "BASE", "card", CATEGORY_SET.all, 10),
   displayField("annualData[].earningsReleaseDate", "FY release date", "BASE", "card", CATEGORY_SET.all, 20),
   displayField("annualData[].base.sharePrice", "Share price", "BASE", "card", CATEGORY_SET.all, 30),
+  displayField("priceCurrency", "SP currency", "BASE", "card", CATEGORY_SET.all, 35),
   displayField("annualData[].base.sharesOnIssue", "Shares on issue", "BASE", "card", CATEGORY_SET.all, 40),
   displayField("annualData[].base.marketCap", "Market cap", "BASE", "card", CATEGORY_SET.all, 50),
 
+  displayField("reportingCurrency", "Reporting currency", "DETAIL METRICS", "detail", CATEGORY_SET.all, 105),
   displayField("annualData[].balanceSheet.cash", "Cash", "Balance Sheet", "detail", CATEGORY_SET.allButLenders, 110),
   displayField("annualData[].balanceSheet.nonCashInvestments", "Non-cash investments", "Balance Sheet", "detail", CATEGORY_SET.allButLenders, 120),
   displayField("annualData[].balanceSheet.debt", "Debt", "Balance Sheet", "detail", CATEGORY_SET.allButLenders, 130),

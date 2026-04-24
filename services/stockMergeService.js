@@ -15,6 +15,7 @@ function mergeMetricField(existingField, freshField) {
 // formulas recalculate from the effective values.
 function mergeAnnualEntry(existingEntry, freshEntry) {
   existingEntry.fiscalYearEndDate = freshEntry.fiscalYearEndDate;
+  existingEntry.reportingCurrency = freshEntry.reportingCurrency ?? null;
 
   for (const relativePath of ANNUAL_RELATIVE_METRIC_PATHS) {
     const existingField = getNestedValue(existingEntry, relativePath);

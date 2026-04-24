@@ -38,6 +38,11 @@ const MAIN_TABLE_ROW_CONFIG = [
     label: "Share price",
   },
   {
+    fieldPath: "priceCurrency",
+    rowKey: buildMainTableRowKey("priceCurrency"),
+    label: "SP currency",
+  },
+  {
     fieldPath: "annualData[].base.sharesOnIssue",
     rowKey: buildMainTableRowKey("annualData[].base.sharesOnIssue"),
     label: "Shares on issue",
@@ -124,6 +129,20 @@ function buildAnnualCells(stockDocument, fieldPath, columns) {
 }
 
 function buildCellsForField(stockDocument, fieldPath, columns) {
+  if (fieldPath === "reportingCurrency") {
+    // The metrics row repeats the canonical reporting currency across columns,
+    // while the annual rows still retain their own statement-level metadata in
+    // the document for diagnostics and future historical use.
+    return columns.map((column) => ({
+      columnKey: column.key,
+      value: stockDocument?.reportingCurrency || null,
+      sourceOfTruth: "roic",
+      isOverridden: false,
+      isOverrideable: false,
+      overrideTarget: null,
+    }));
+  }
+
   // Metrics mode now treats every detail row as part of the annual table so
   // each fiscal-year column can hold both trailing data and yearly placeholders.
   return buildAnnualCells(stockDocument, fieldPath, columns);
@@ -202,6 +221,8 @@ async function buildStockMetricsView(tickerSymbol) {
 
   return {
     tickerSymbol: normalizedTicker,
+    priceCurrency: stockDocument?.priceCurrency || "USD",
+    reportingCurrency: stockDocument?.reportingCurrency || null,
     columns,
     mainTableRowPreferences: buildMainTableRowPreferences(preferenceByRowKey),
     rows,

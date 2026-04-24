@@ -60,9 +60,9 @@ function buildProfitabilityRows() {
 
 function buildBalanceSheetRows() {
   return [
-    { fiscalYear: 2024, bs_c_and_ce_and_sti_detailed: 100, short_and_long_term_debt: 300, bs_tot_asset: 1200, bs_tot_liab: 400, bs_total_equity: 800 },
-    { fiscalYear: 2023, bs_c_and_ce_and_sti_detailed: 90, short_and_long_term_debt: 260, bs_tot_asset: 1100, bs_tot_liab: 380, bs_total_equity: 720 },
-    { fiscalYear: 2022, bs_c_and_ce_and_sti_detailed: 80, short_and_long_term_debt: 220, bs_tot_asset: 1000, bs_tot_liab: 360, bs_total_equity: 640 },
+    { fiscalYear: 2024, currency: "GBP", bs_c_and_ce_and_sti_detailed: 100, short_and_long_term_debt: 300, bs_tot_asset: 1200, bs_tot_liab: 400, bs_total_equity: 800 },
+    { fiscalYear: 2023, currency: "GBP", bs_c_and_ce_and_sti_detailed: 90, short_and_long_term_debt: 260, bs_tot_asset: 1100, bs_tot_liab: 380, bs_total_equity: 720 },
+    { fiscalYear: 2022, currency: "GBP", bs_c_and_ce_and_sti_detailed: 80, short_and_long_term_debt: 220, bs_tot_asset: 1000, bs_tot_liab: 360, bs_total_equity: 640 },
   ];
 }
 
@@ -70,6 +70,7 @@ function buildIncomeStatementRows() {
   return [
     {
       fiscalYear: 2024,
+      currency: "GBP",
       is_sales_revenue_turnover: 1000,
       is_gross_profit: 250,
       ebitda: 300,
@@ -82,6 +83,7 @@ function buildIncomeStatementRows() {
     },
     {
       fiscalYear: 2023,
+      currency: "GBP",
       is_sales_revenue_turnover: 900,
       is_gross_profit: 220,
       ebitda: 260,
@@ -94,6 +96,7 @@ function buildIncomeStatementRows() {
     },
     {
       fiscalYear: 2022,
+      currency: "GBP",
       is_sales_revenue_turnover: 800,
       is_gross_profit: 200,
       ebitda: 220,
@@ -146,7 +149,7 @@ const stubbedRoicService = {
   async fetchCompanyProfile() {
     return {
       companyName: "Stubbed Test Company",
-      priceCurrency: "USD",
+      currency: "USD",
     };
   },
   async fetchAnnualPerShare(ticker, options) {
@@ -275,7 +278,11 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     });
     assert.equal(importedDoc.companyName.roicValue, "Stubbed Test Company");
     assert.equal(importedDoc.priceCurrency, "USD");
+    assert.equal(importedDoc.reportingCurrency, "GBP");
     assert.equal(importedDoc.annualData.length, TEST_YEARS);
+    assert.equal(importedDoc.annualData[0].reportingCurrency, "GBP");
+    assert.equal(importedDoc.sourceMeta.currencyDiagnostics.reportingCurrencySource, "incomeStatement");
+    assert.deepEqual(importedDoc.sourceMeta.currencyDiagnostics.balanceSheetMismatches, []);
 
     // Then inspect one annual row in detail.
     // These assertions prove the grouped schema and derived calculations were populated.

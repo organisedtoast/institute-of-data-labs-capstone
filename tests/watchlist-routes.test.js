@@ -98,6 +98,7 @@ test.beforeEach(async () => {
       tickerSymbol: "AAPL",
       investmentCategory: "Profitable Hi Growth",
       priceCurrency: "USD",
+      reportingCurrency: "GBP",
       companyName: buildCompanyNameMetric("Apple Inc."),
       sourceMeta: {
         importRangeYears: null,
@@ -108,6 +109,7 @@ test.beforeEach(async () => {
         {
           fiscalYear: 2024,
           fiscalYearEndDate: "2024-12-31",
+          reportingCurrency: "GBP",
           valuationMultiples: {
             evSalesTrailing: {
               roicValue: null,
@@ -361,6 +363,7 @@ test.beforeEach(async () => {
       tickerSymbol: "MSFT",
       investmentCategory: "Mature Compounder",
       priceCurrency: "USD",
+      reportingCurrency: "USD",
       companyName: buildCompanyNameMetric("Microsoft Corporation"),
       sourceMeta: {
         importRangeYears: null,
@@ -370,6 +373,7 @@ test.beforeEach(async () => {
       annualData: Array.from({ length: 10 }, (_, index) => ({
         fiscalYear: 2025 - index,
         fiscalYearEndDate: `${2025 - index}-12-31`,
+        reportingCurrency: "USD",
         base: {
           sharePrice: {
             roicValue: 100 + index,
@@ -455,7 +459,18 @@ test("GET /api/watchlist/dashboards returns batched bootstrap payloads in the re
   assert.equal(response.body.dashboards[0].metricsColumns.length, 0);
   assert.equal(response.body.dashboards[0].metricsRows.length, 0);
   assert.equal(response.body.dashboards[0].annualMetrics.length, 10);
+  assert.equal(response.body.dashboards[1].reportingCurrency, "GBP");
   assert.equal(response.body.dashboards[1].annualMainTableRows.length, 1);
+  assert.deepEqual(response.body.dashboards[1].annualMainTableRows[0].cells.priceCurrency, {
+    columnKey: "annual-2024",
+    rowKey: "main::priceCurrency",
+    value: "USD",
+    sourceOfTruth: "system",
+    isOverridden: false,
+    isBold: false,
+    isOverrideable: false,
+    overrideTarget: null,
+  });
   assert.deepEqual(response.body.dashboards[1].annualMainTableRows[0].cells.sharePrice, {
     columnKey: "annual-2024",
     rowKey: "main::annualData[].base.sharePrice",
@@ -562,6 +577,10 @@ test("GET /api/watchlist/:ticker/metrics-view defaults the requested pricing, va
 
   assert.equal(response.status, 200);
   assert.equal(
+    response.body.mainTableRowPreferences.find((row) => row.rowKey === "main::priceCurrency")?.isBold,
+    false
+  );
+  assert.equal(
     response.body.mainTableRowPreferences.find((row) => row.rowKey === "main::annualData[].base.sharePrice")?.isBold,
     true
   );
@@ -661,6 +680,12 @@ test("GET /api/watchlist/:ticker/metrics-view defaults the requested pricing, va
     response.body.rows.find((row) => row.rowKey === "690::annualData[].forecastData.fy3.marketCap")?.isBold,
     true
   );
+  const reportingCurrencyRow = response.body.rows.find((row) => row.fieldPath === "reportingCurrency");
+  assert.ok(reportingCurrencyRow);
+  assert.equal(reportingCurrencyRow.label, "Reporting currency");
+  assert.equal(reportingCurrencyRow.cells[0].value, "GBP");
+  assert.equal(reportingCurrencyRow.cells[0].isOverrideable, false);
+  assert.equal(reportingCurrencyRow.cells[0].overrideTarget, null);
 });
 
 test("PATCH override routes reject direct edits to derived fields but still recalculate them from editable inputs", async () => {

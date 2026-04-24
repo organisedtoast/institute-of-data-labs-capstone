@@ -366,6 +366,7 @@ function buildWatchlistStock(overrides = {}) {
       effectiveValue: 'Apple Inc.',
     },
     priceCurrency: 'USD',
+    reportingCurrency: 'GBP',
     sourceMeta: {
       importRangeYears: null,
       importRangeYearsExplicit: false,
@@ -375,6 +376,7 @@ function buildWatchlistStock(overrides = {}) {
       {
         fiscalYear: 2024,
         fiscalYearEndDate: '2024-12-31',
+        reportingCurrency: 'GBP',
         base: {
           sharePrice: { effectiveValue: 210.4, sourceOfTruth: 'roic' },
           sharesOnIssue: { effectiveValue: 15500000000, sourceOfTruth: 'roic' },
@@ -384,6 +386,7 @@ function buildWatchlistStock(overrides = {}) {
       {
         fiscalYear: 2023,
         fiscalYearEndDate: '2023-12-31',
+        reportingCurrency: 'GBP',
         base: {
           sharePrice: { effectiveValue: 189.6, sourceOfTruth: 'user' },
           sharesOnIssue: { effectiveValue: 15700000000, sourceOfTruth: 'roic' },
@@ -398,6 +401,12 @@ function buildWatchlistStock(overrides = {}) {
 function buildMetricsViewPayload() {
   return {
     mainTableRowPreferences: [
+      {
+        rowKey: 'main::priceCurrency',
+        fieldPath: 'priceCurrency',
+        label: 'SP currency',
+        isBold: false,
+      },
       {
         rowKey: 'main::annualData[].base.sharePrice',
         fieldPath: 'annualData[].base.sharePrice',
@@ -430,6 +439,36 @@ function buildMetricsViewPayload() {
       },
     ],
     rows: [
+      {
+        rowKey: '105::reportingCurrency',
+        fieldPath: 'reportingCurrency',
+        label: 'Reporting currency',
+        shortLabel: 'Reporting currency',
+        section: 'DETAIL METRICS',
+        shortSection: 'DETAIL METRICS',
+        order: 105,
+        surface: 'detail',
+        isEnabled: true,
+        isBold: false,
+        cells: [
+          {
+            columnKey: 'annual-2023',
+            value: 'GBP',
+            sourceOfTruth: 'roic',
+            isOverridden: false,
+            isOverrideable: false,
+            overrideTarget: null,
+          },
+          {
+            columnKey: 'annual-2024',
+            value: 'GBP',
+            sourceOfTruth: 'roic',
+            isOverridden: false,
+            isOverrideable: false,
+            overrideTarget: null,
+          },
+        ],
+      },
       {
         rowKey: '710::annualData[].forecastData.fy1.ebit',
         fieldPath: 'annualData[].forecastData.fy1.ebit',
@@ -499,6 +538,7 @@ describe('watchlistDashboardApi', () => {
     expect(payload.companyName).toBe('Apple Inc.');
     expect(payload.investmentCategory).toBe('Profitable Hi Growth');
     expect(payload.priceCurrency).toBe('USD');
+    expect(payload.reportingCurrency).toBe('GBP');
     expect(payload.prices).toEqual([
       { date: '2024-01-02', close: 185.64 },
       { date: '2024-01-03', close: 184.25 },
@@ -535,6 +575,17 @@ describe('watchlistDashboardApi', () => {
         payloadPath: 'base.sharePrice',
       },
       fieldKey: 'sharePrice',
+    });
+    expect(payload.annualMainTableRows[0].cells.priceCurrency).toEqual({
+      columnKey: 'annual-2023',
+      rowKey: 'main::priceCurrency',
+      value: 'USD',
+      sourceOfTruth: 'system',
+      isOverridden: false,
+      isBold: false,
+      isOverrideable: false,
+      overrideTarget: null,
+      fieldKey: 'priceCurrency',
     });
     expect(payload.annualMainTableRows[1].cells.sharesOnIssue).toEqual({
       columnKey: 'annual-2024',
@@ -590,8 +641,11 @@ describe('watchlistDashboardApi', () => {
         bucket: null,
       },
     ]);
-    expect(payload.metricsRows[0].fieldPath).toBe('annualData[].forecastData.fy1.ebit');
-    expect(payload.metricsRows[0].cells[1]).toEqual({
+    expect(payload.metricsRows[0].fieldPath).toBe('reportingCurrency');
+    expect(payload.metricsRows[0].cells[0].value).toBe('GBP');
+    expect(payload.metricsRows[0].cells[0].isOverrideable).toBe(false);
+    expect(payload.metricsRows[1].fieldPath).toBe('annualData[].forecastData.fy1.ebit');
+    expect(payload.metricsRows[1].cells[1]).toEqual({
       columnKey: 'annual-2024',
       value: 42,
       sourceOfTruth: 'user',
@@ -603,7 +657,13 @@ describe('watchlistDashboardApi', () => {
         payloadPath: 'forecastData.fy1.ebit',
       },
     });
-    expect(payload.metricsRows[0].isBold).toBe(true);
+    expect(payload.metricsRows[1].isBold).toBe(true);
+    expect(payload.mainTableRowPreferences[0]).toEqual({
+      rowKey: 'main::priceCurrency',
+      fieldPath: 'priceCurrency',
+      label: 'SP currency',
+      isBold: false,
+    });
     expect(payload.annualMainTableRows[0].cells.sharePrice.isBold).toBe(true);
   });
 
@@ -748,7 +808,7 @@ describe('watchlistDashboardApi', () => {
     expect(axios.get).toHaveBeenNthCalledWith(3, '/api/watchlist/AAPL/metrics-view', { signal: abortSignal });
     expect(payload.companyName).toBe('Apple Inc.');
     expect(payload.prices).toEqual([{ date: '2024-01-02', close: 185.64 }]);
-    expect(payload.metricsRows[0].fieldPath).toBe('annualData[].forecastData.fy1.ebit');
+    expect(payload.metricsRows[1].fieldPath).toBe('annualData[].forecastData.fy1.ebit');
   });
 
   it('loads batched dashboard bootstraps through the new watchlist dashboards route', async () => {
@@ -762,6 +822,7 @@ describe('watchlistDashboardApi', () => {
             companyName: 'Apple Inc.',
             investmentCategory: 'Profitable Hi Growth',
             priceCurrency: 'USD',
+            reportingCurrency: 'GBP',
             prices: [{ date: '2024-01-02', close: 185.64 }],
             annualMetrics: [
               {
@@ -778,6 +839,16 @@ describe('watchlistDashboardApi', () => {
                 fiscalYear: 2024,
                 fiscalYearEndDate: '2024-12-31',
                 cells: {
+                  priceCurrency: {
+                    columnKey: 'annual-2024',
+                    rowKey: 'main::priceCurrency',
+                    value: 'USD',
+                    sourceOfTruth: 'system',
+                    isOverridden: false,
+                    isBold: false,
+                    isOverrideable: false,
+                    overrideTarget: null,
+                  },
                   sharePrice: {
                     columnKey: 'annual-2024',
                     rowKey: 'main::annualData[].base.sharePrice',
@@ -835,6 +906,7 @@ describe('watchlistDashboardApi', () => {
         companyName: 'Apple Inc.',
         investmentCategory: 'Profitable Hi Growth',
         priceCurrency: 'USD',
+        reportingCurrency: 'GBP',
         prices: [{ date: '2024-01-02', close: 185.64 }],
         annualMetrics: [
           {
@@ -883,6 +955,17 @@ describe('watchlistDashboardApi', () => {
                 isOverrideable: false,
                 overrideTarget: null,
                 fieldKey: 'earningsReleaseDate',
+              },
+              priceCurrency: {
+                columnKey: 'annual-2024',
+                rowKey: 'main::priceCurrency',
+                value: 'USD',
+                sourceOfTruth: 'system',
+                isOverridden: false,
+                isBold: false,
+                isOverrideable: false,
+                overrideTarget: null,
+                fieldKey: 'priceCurrency',
               },
               sharePrice: {
                 columnKey: 'annual-2024',
@@ -949,9 +1032,15 @@ describe('watchlistDashboardApi', () => {
 
     expect(axios.get).toHaveBeenCalledWith('/api/watchlist/AAPL/metrics-view', { signal: abortSignal });
     expect(payload.hasLoadedMetricsView).toBe(true);
-    expect(payload.metricsRows[0].fieldPath).toBe('annualData[].forecastData.fy1.ebit');
-    expect(payload.metricsRows[0].isBold).toBe(true);
+    expect(payload.metricsRows[1].fieldPath).toBe('annualData[].forecastData.fy1.ebit');
+    expect(payload.metricsRows[1].isBold).toBe(true);
     expect(payload.mainTableRowPreferences[0]).toEqual({
+      rowKey: 'main::priceCurrency',
+      fieldPath: 'priceCurrency',
+      label: 'SP currency',
+      isBold: false,
+    });
+    expect(payload.mainTableRowPreferences[1]).toEqual({
       rowKey: 'main::annualData[].base.sharePrice',
       fieldPath: 'annualData[].base.sharePrice',
       label: 'Share price',
@@ -978,8 +1067,12 @@ describe('watchlistDashboardApi', () => {
       },
       undefined,
     );
-    expect(payload.metricsRows[0].isBold).toBe(true);
-    expect(payload.mainTableRowPreferences[0].isBold).toBe(true);
+    expect(
+      payload.metricsRows.find((row) => row.rowKey === '710::annualData[].forecastData.fy1.ebit')?.isBold,
+    ).toBe(true);
+    expect(
+      payload.mainTableRowPreferences.find((row) => row.rowKey === 'main::annualData[].base.sharePrice')?.isBold,
+    ).toBe(true);
   });
 
   it('refreshes one dashboard in the background and then reloads its bootstrap payload', async () => {
@@ -996,6 +1089,7 @@ describe('watchlistDashboardApi', () => {
             companyName: 'Apple Inc.',
             investmentCategory: 'Profitable Hi Growth',
             priceCurrency: 'USD',
+            reportingCurrency: 'GBP',
             prices: [{ date: '2024-01-02', close: 185.64 }],
             annualMetrics: [],
             metricsColumns: [],

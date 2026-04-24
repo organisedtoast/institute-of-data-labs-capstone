@@ -29,6 +29,9 @@ test("schema reference generator emits the key anchor lines developers need", ()
   // we pick a few representative field paths from important parts of the schema
   // rather than checking every single rendered line.
   assert.match(markdown, /annualData\[\]\.base\.sharePrice/);
+  assert.match(markdown, /priceCurrency/);
+  assert.match(markdown, /reportingCurrency/);
+  assert.match(markdown, /annualData\[\]\.reportingCurrency/);
   assert.match(markdown, /forecastData\.fy1\.eps/);
   assert.match(markdown, /growthForecasts\.revenueCagr3y/);
 

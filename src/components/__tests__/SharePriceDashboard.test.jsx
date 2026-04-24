@@ -319,6 +319,19 @@ function buildAnnualMainTableRows(annualMetrics = []) {
         isOverrideable: false,
         overrideTarget: null,
       },
+      // Currency metadata repeats across columns because it belongs to the
+      // stock itself, not to one fiscal year. Keeping it in the main table
+      // still gives the user a clear reference right next to share price.
+      priceCurrency: {
+        columnKey: `annual-${annualRow.fiscalYear}`,
+        rowKey: 'main::priceCurrency',
+        value: annualRow.priceCurrency ?? 'USD',
+        sourceOfTruth: 'system',
+        isOverridden: false,
+        isBold: false,
+        isOverrideable: false,
+        overrideTarget: null,
+      },
       // The base table uses these rich cells so the tests can exercise the
       // same override editor flow as the detail metrics surface.
       sharePrice: {
@@ -397,11 +410,20 @@ function buildDashboardPayload(overrides = {}) {
     companyName: 'Apple Inc.',
     investmentCategory: 'Profitable Hi Growth',
     priceCurrency: 'USD',
+    reportingCurrency: 'GBP',
     prices,
-    annualMetrics: finalAnnualMetrics,
+    annualMetrics: finalAnnualMetrics.map((annualRow) => ({
+      ...annualRow,
+      priceCurrency: annualRow.priceCurrency ?? 'USD',
+    })),
     annualMainTableRows: Array.isArray(overrides.annualMainTableRows)
       ? overrides.annualMainTableRows
-      : buildAnnualMainTableRows(finalAnnualMetrics),
+      : buildAnnualMainTableRows(
+          finalAnnualMetrics.map((annualRow) => ({
+            ...annualRow,
+            priceCurrency: annualRow.priceCurrency ?? 'USD',
+          })),
+        ),
     metricsColumns: [],
     metricsRows: [],
     ...overrides,
@@ -5618,6 +5640,86 @@ describe('SharePriceDashboard metrics mode', () => {
     });
 
     expect(mouseDownEvent.defaultPrevented).toBe(true);
+  });
+
+  it('renders SP currency above Share price and Reporting currency directly under the detail heading', async () => {
+    const payload = buildMetricsModePayload({
+      metricsRows: [
+        {
+          rowKey: '105::reportingCurrency',
+          fieldPath: 'reportingCurrency',
+          label: 'Reporting currency',
+          shortLabel: 'Reporting currency',
+          section: 'DETAIL METRICS',
+          shortSection: 'DETAIL METRICS',
+          order: 105,
+          surface: 'detail',
+          isEnabled: true,
+          isBold: false,
+          cells: [
+            {
+              columnKey: 'annual-2023',
+              value: 'GBP',
+              sourceOfTruth: 'roic',
+              isOverridden: false,
+              isOverrideable: false,
+              overrideTarget: null,
+            },
+            {
+              columnKey: 'annual-2024',
+              value: 'GBP',
+              sourceOfTruth: 'roic',
+              isOverridden: false,
+              isOverrideable: false,
+              overrideTarget: null,
+            },
+            {
+              columnKey: 'annual-2025',
+              value: 'GBP',
+              sourceOfTruth: 'roic',
+              isOverridden: false,
+              isOverrideable: false,
+              overrideTarget: null,
+            },
+          ],
+        },
+        ...buildMetricsModePayload().metricsRows,
+      ],
+    });
+    const { user } = await renderDashboard({
+      payload,
+      dashboardProps: {
+        isFocusedMetricsMode: true,
+      },
+    });
+
+    const mainTableRails = screen.getAllByTestId('share-price-dashboard-main-table-row-left-rail');
+    const priceCurrencyIndex = mainTableRails.findIndex((rowNode) => rowNode.getAttribute('data-row-key') === 'main::priceCurrency');
+    const sharePriceIndex = mainTableRails.findIndex((rowNode) => rowNode.getAttribute('data-row-key') === 'main::annualData[].base.sharePrice');
+
+    // This protects the stock-card reading order directly in the rendered rail,
+    // so the pricing currency stays above the numeric share-price row.
+    expect(priceCurrencyIndex).toBeGreaterThanOrEqual(0);
+    expect(sharePriceIndex).toBeGreaterThanOrEqual(0);
+    expect(priceCurrencyIndex).toBeLessThan(sharePriceIndex);
+    expect(getMainTableRowLeftRail('main::priceCurrency')?.textContent).toContain('SP currency');
+    expect(screen.getAllByText('USD').length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    const metricsViewport = screen.getAllByTestId('share-price-dashboard-metrics-viewport').at(-1);
+    const metricRowLeftRails = within(metricsViewport).getAllByTestId('share-price-dashboard-metric-row-left-rail');
+    const reportingCurrencyIndex = metricRowLeftRails.findIndex((rowNode) => rowNode.getAttribute('data-row-key') === '105::reportingCurrency');
+    const firstNumericDetailIndex = metricRowLeftRails.findIndex((rowNode) => rowNode.getAttribute('data-row-key') === '710::annualData[].forecastData.fy1.ebit');
+
+    // Reporting currency is stock metadata, so the focused metrics view should
+    // show it immediately after the heading before the numeric detail rows start.
+    expect(within(metricsViewport).getByText('DETAIL METRICS')).toBeTruthy();
+    expect(reportingCurrencyIndex).toBe(0);
+    expect(firstNumericDetailIndex).toBeGreaterThan(reportingCurrencyIndex);
+    expect(within(metricsViewport).getByText('Reporting currency')).toBeTruthy();
+    expect(within(metricsViewport).getAllByText('GBP').length).toBeGreaterThan(0);
   });
 
 });

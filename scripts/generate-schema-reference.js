@@ -26,6 +26,7 @@ const TOP_LEVEL_REFERENCE_FIELDS = [
   { fieldPath: "companyName", label: "Company name override object", sourceType: "roic", roicEndpoint: ROIC_ENDPOINTS.COMPANY_PROFILE },
   { fieldPath: "investmentCategory", label: "User-facing investment category", sourceType: "system", roicEndpoint: null },
   { fieldPath: "priceCurrency", label: "Price currency", sourceType: "roic", roicEndpoint: ROIC_ENDPOINTS.COMPANY_PROFILE },
+  { fieldPath: "reportingCurrency", label: "Reporting currency", sourceType: "roic", roicEndpoint: ROIC_ENDPOINTS.INCOME_STATEMENT },
   { fieldPath: "sourceMeta.lastImportedAt", label: "Last import timestamp", sourceType: "system", roicEndpoint: null },
   { fieldPath: "sourceMeta.lastRefreshAt", label: "Last refresh timestamp", sourceType: "system", roicEndpoint: null },
   { fieldPath: "sourceMeta.importRangeYears", label: "Requested yearly import range", sourceType: "system", roicEndpoint: null },
@@ -39,6 +40,7 @@ const TOP_LEVEL_REFERENCE_FIELDS = [
 const ANNUAL_CORE_FIELDS = [
   { fieldPath: "annualData[].fiscalYear", label: "Fiscal year", sourceType: "roic", roicEndpoint: "Multiple annual endpoints" },
   { fieldPath: "annualData[].fiscalYearEndDate", label: "FY end date", sourceType: "roic", roicEndpoint: ROIC_ENDPOINTS.PER_SHARE },
+  { fieldPath: "annualData[].reportingCurrency", label: "Annual reporting currency", sourceType: "roic", roicEndpoint: ROIC_ENDPOINTS.INCOME_STATEMENT },
   { fieldPath: "annualData[].earningsReleaseDate", label: "FY release date", sourceType: "roic", roicEndpoint: ROIC_ENDPOINTS.EARNINGS_CALLS },
 ];
 

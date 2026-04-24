@@ -401,6 +401,15 @@ function formatFiscalReleaseLabel(dateString, useCompactLabel = false) {
   return useCompactLabel ? dateString.slice(2, 7) : dateString.slice(0, 7);
 }
 
+function formatMetadataTextValue(value) {
+  if (typeof value !== 'string') {
+    return '--';
+  }
+
+  const trimmedValue = value.trim();
+  return trimmedValue || '--';
+}
+
 function areScaleValuesClose(leftScale, rightScale) {
   const referenceRange = Math.max(
     (leftScale?.maxPrice ?? 0) - (leftScale?.minPrice ?? 0),
@@ -471,6 +480,10 @@ function formatMetricPercent(value) {
 function inferMetricDisplayKind(fieldPath) {
   const normalizedFieldPath = String(fieldPath || '').toLowerCase();
 
+  if (normalizedFieldPath.endsWith('pricecurrency') || normalizedFieldPath.endsWith('reportingcurrency')) {
+    return 'text';
+  }
+
   if (normalizedFieldPath.includes('date')) {
     return 'date';
   }
@@ -539,6 +552,10 @@ function formatMetricCellValue(value, fieldPath, options = {}) {
 
   if (displayKind === 'date') {
     return formatFiscalReleaseLabel(value, options.compact);
+  }
+
+  if (displayKind === 'text') {
+    return formatMetadataTextValue(value);
   }
 
   if (displayKind === 'percent') {
@@ -1487,6 +1504,14 @@ export default function SharePriceDashboard({
         formatter: (value, options = {}) => formatFiscalReleaseLabel(value, options.compact),
       },
       {
+        key: 'priceCurrency',
+        ...resolveMainTableRowState('priceCurrency', 'priceCurrency'),
+        fieldPath: 'priceCurrency',
+        label: 'SP currency',
+        shortLabel: getShortLabel('SP currency'),
+        formatter: (value) => formatMetadataTextValue(value),
+      },
+      {
         key: 'sharePrice',
         ...resolveMainTableRowState('annualData[].base.sharePrice', 'sharePrice'),
         fieldPath: 'annualData[].base.sharePrice',
@@ -1555,13 +1580,18 @@ export default function SharePriceDashboard({
       // Section boundaries belong to the first visible row in each section, not
       // the first hidden source row. That keeps labels and dividers correct even
       // after users hide rows above the one they can still see.
-      showSectionLabel: metricIndex === 0 || metricRow.section !== visibleMetricRows[metricIndex - 1]?.section,
+      showSectionLabel:
+        metricRow.fieldPath === 'reportingCurrency'
+          ? false
+          : metricIndex === 0 || metricRow.section !== visibleMetricRows[metricIndex - 1]?.section,
       fieldPath: metricRow.fieldPath,
       height: METRICS_DATA_ROW_HEIGHT,
       backgroundColor: metricIndex % 2 === 0 ? '#ffffff' : '#fafafa',
       borderTop:
-        ((!(isMetricsOpen && isFocusedMetricsMode) && metricIndex === 0) ||
-          (metricIndex > 0 && metricRow.section !== visibleMetricRows[metricIndex - 1]?.section))
+        (metricRow.fieldPath === 'reportingCurrency')
+          ? 'none'
+          : ((!(isMetricsOpen && isFocusedMetricsMode) && metricIndex === 0) ||
+            (metricIndex > 0 && metricRow.section !== visibleMetricRows[metricIndex - 1]?.section))
           ? '2px solid #e2e8f0'
           : 'none',
       borderBottom: metricIndex < visibleMetricRows.length - 1 ? '1px solid #f1f5f9' : 'none',

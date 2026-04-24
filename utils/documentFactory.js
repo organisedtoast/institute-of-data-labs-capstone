@@ -17,6 +17,7 @@ function createEmptyAnnualEntry(fiscalYear = null, fiscalYearEndDate = null) {
   return {
     fiscalYear,
     fiscalYearEndDate,
+    reportingCurrency: null,
     earningsReleaseDate: createMetricField(null, "system"),
     base: buildMetricGroup(ANNUAL_GROUP_FIELDS.base),
     balanceSheet: buildMetricGroup(ANNUAL_GROUP_FIELDS.balanceSheet),
