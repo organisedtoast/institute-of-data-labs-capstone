@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildDashboardPayload,
+  fetchDashboardMetricsView,
+  fetchWatchlistDashboardBootstraps,
   fetchDashboardData,
+  refreshWatchlistDashboardBootstrap,
   updateDashboardInvestmentCategory,
 } from '../watchlistDashboardApi';
 
@@ -33,18 +36,18 @@ function buildWatchlistStock(overrides = {}) {
         fiscalYear: 2024,
         fiscalYearEndDate: '2024-12-31',
         base: {
-          sharePrice: { effectiveValue: 210.4 },
-          sharesOnIssue: { effectiveValue: 15500000000 },
-          marketCap: { effectiveValue: 3200000000000 },
+          sharePrice: { effectiveValue: 210.4, sourceOfTruth: 'roic' },
+          sharesOnIssue: { effectiveValue: 15500000000, sourceOfTruth: 'roic' },
+          marketCap: { effectiveValue: 3200000000000, sourceOfTruth: 'derived' },
         },
       },
       {
         fiscalYear: 2023,
         fiscalYearEndDate: '2023-12-31',
         base: {
-          sharePrice: { effectiveValue: 189.6 },
-          sharesOnIssue: { effectiveValue: 15700000000 },
-          marketCap: { effectiveValue: 2980000000000 },
+          sharePrice: { effectiveValue: 189.6, sourceOfTruth: 'user' },
+          sharesOnIssue: { effectiveValue: 15700000000, sourceOfTruth: 'roic' },
+          marketCap: { effectiveValue: 2980000000000, sourceOfTruth: 'derived' },
         },
       },
     ],
@@ -119,9 +122,9 @@ describe('watchlistDashboardApi', () => {
     axios.get.mockReset();
     axios.patch.mockReset();
     axios.post.mockReset();
-    // The dashboard now performs one extra read to fetch the richer metrics-view payload.
-    // Most tests in this file only care about the watchlist + prices calls, so we give the
-    // third GET a safe default response unless a test wants to assert its exact contents.
+    // The dashboard can perform one extra read for the richer metrics payload.
+    // Most tests here only care about the summary/bootstrap reads, so the third
+    // GET gets a safe default unless a test needs to inspect it directly.
     axios.get.mockResolvedValue({ data: { columns: [], rows: [] } });
   });
 
@@ -163,6 +166,32 @@ describe('watchlistDashboardApi', () => {
         marketCap: 3200000000000,
       },
     ]);
+    expect(payload.annualMainTableRows[0].cells.sharePrice).toEqual({
+      columnKey: 'annual-2023',
+      value: 189.6,
+      sourceOfTruth: 'user',
+      isOverridden: true,
+      isOverrideable: true,
+      overrideTarget: {
+        kind: 'annual',
+        fiscalYear: 2023,
+        payloadPath: 'base.sharePrice',
+      },
+      fieldKey: 'sharePrice',
+    });
+    expect(payload.annualMainTableRows[1].cells.sharesOnIssue).toEqual({
+      columnKey: 'annual-2024',
+      value: 15500000000,
+      sourceOfTruth: 'roic',
+      isOverridden: false,
+      isOverrideable: true,
+      overrideTarget: {
+        kind: 'annual',
+        fiscalYear: 2024,
+        payloadPath: 'base.sharesOnIssue',
+      },
+      fieldKey: 'sharesOnIssue',
+    });
     expect(payload.metricsColumns).toEqual([]);
     expect(payload.metricsRows).toEqual([]);
   });
@@ -273,6 +302,228 @@ describe('watchlistDashboardApi', () => {
     expect(payload.companyName).toBe('Apple Inc.');
     expect(payload.prices).toEqual([{ date: '2024-01-02', close: 185.64 }]);
     expect(payload.metricsRows[0].fieldPath).toBe('annualData[].forecastData.fy1.ebit');
+  });
+
+  it('loads batched dashboard bootstraps through the new watchlist dashboards route', async () => {
+    const abortSignal = new AbortController().signal;
+
+    axios.get.mockResolvedValueOnce({
+      data: {
+        dashboards: [
+          {
+            identifier: 'AAPL',
+            companyName: 'Apple Inc.',
+            investmentCategory: 'Profitable Hi Growth',
+            priceCurrency: 'USD',
+            prices: [{ date: '2024-01-02', close: 185.64 }],
+            annualMetrics: [
+              {
+                fiscalYear: 2024,
+                fiscalYearEndDate: '2024-12-31',
+                earningsReleaseDate: '2025-02-15',
+                sharePrice: 210.4,
+                sharesOnIssue: 15500000000,
+                marketCap: 3200000000000,
+              },
+            ],
+            annualMainTableRows: [
+              {
+                fiscalYear: 2024,
+                fiscalYearEndDate: '2024-12-31',
+                cells: {
+                  sharePrice: {
+                    columnKey: 'annual-2024',
+                    value: 210.4,
+                    sourceOfTruth: 'roic',
+                    isOverridden: false,
+                    isOverrideable: true,
+                    overrideTarget: {
+                      kind: 'annual',
+                      fiscalYear: 2024,
+                      payloadPath: 'base.sharePrice',
+                    },
+                  },
+                  sharesOnIssue: {
+                    columnKey: 'annual-2024',
+                    value: 15500000000,
+                    sourceOfTruth: 'user',
+                    isOverridden: true,
+                    isOverrideable: true,
+                    overrideTarget: {
+                      kind: 'annual',
+                      fiscalYear: 2024,
+                      payloadPath: 'base.sharesOnIssue',
+                    },
+                  },
+                },
+              },
+            ],
+            metricsColumns: [],
+            metricsRows: [],
+            hasLoadedMetricsView: false,
+            needsBackgroundRefresh: true,
+          },
+        ],
+      },
+    });
+
+    const payload = await fetchWatchlistDashboardBootstraps({
+      signal: abortSignal,
+      tickers: ['aapl'],
+    });
+
+    expect(axios.get).toHaveBeenCalledWith('/api/watchlist/dashboards', {
+      signal: abortSignal,
+      params: {
+        tickers: 'AAPL',
+      },
+    });
+    expect(payload).toEqual([
+      {
+        identifier: 'AAPL',
+        companyName: 'Apple Inc.',
+        investmentCategory: 'Profitable Hi Growth',
+        priceCurrency: 'USD',
+        prices: [{ date: '2024-01-02', close: 185.64 }],
+        annualMetrics: [
+          {
+            fiscalYear: 2024,
+            fiscalYearEndDate: '2024-12-31',
+            earningsReleaseDate: '2025-02-15',
+            sharePrice: 210.4,
+            sharesOnIssue: 15500000000,
+            marketCap: 3200000000000,
+          },
+        ],
+        annualMainTableRows: [
+          {
+            fiscalYear: 2024,
+            fiscalYearEndDate: '2024-12-31',
+            cells: {
+              fiscalYearEndDate: {
+                columnKey: 'annual-2024',
+                value: null,
+                sourceOfTruth: 'system',
+                isOverridden: false,
+                isOverrideable: false,
+                overrideTarget: null,
+                fieldKey: 'fiscalYearEndDate',
+              },
+              fiscalYear: {
+                columnKey: 'annual-2024',
+                value: null,
+                sourceOfTruth: 'system',
+                isOverridden: false,
+                isOverrideable: false,
+                overrideTarget: null,
+                fieldKey: 'fiscalYear',
+              },
+              earningsReleaseDate: {
+                columnKey: 'annual-2024',
+                value: null,
+                sourceOfTruth: 'system',
+                isOverridden: false,
+                isOverrideable: false,
+                overrideTarget: null,
+                fieldKey: 'earningsReleaseDate',
+              },
+              sharePrice: {
+                columnKey: 'annual-2024',
+                value: 210.4,
+                sourceOfTruth: 'roic',
+                isOverridden: false,
+                isOverrideable: true,
+                overrideTarget: {
+                  kind: 'annual',
+                  fiscalYear: 2024,
+                  payloadPath: 'base.sharePrice',
+                },
+                fieldKey: 'sharePrice',
+              },
+              sharesOnIssue: {
+                columnKey: 'annual-2024',
+                value: 15500000000,
+                sourceOfTruth: 'user',
+                isOverridden: true,
+                isOverrideable: true,
+                overrideTarget: {
+                  kind: 'annual',
+                  fiscalYear: 2024,
+                  payloadPath: 'base.sharesOnIssue',
+                },
+                fieldKey: 'sharesOnIssue',
+              },
+              marketCap: {
+                columnKey: 'annual-2024',
+                value: null,
+                sourceOfTruth: 'system',
+                isOverridden: false,
+                isOverrideable: false,
+                overrideTarget: null,
+                fieldKey: 'marketCap',
+              },
+            },
+          },
+        ],
+        metricsColumns: [],
+        metricsRows: [],
+        hasLoadedMetricsView: false,
+        needsBackgroundRefresh: true,
+        loadError: '',
+      },
+    ]);
+  });
+
+  it('loads metrics-view lazily through the dedicated endpoint', async () => {
+    const abortSignal = new AbortController().signal;
+
+    axios.get.mockResolvedValueOnce({
+      data: buildMetricsViewPayload(),
+    });
+
+    const payload = await fetchDashboardMetricsView('aapl', { signal: abortSignal });
+
+    expect(axios.get).toHaveBeenCalledWith('/api/watchlist/AAPL/metrics-view', { signal: abortSignal });
+    expect(payload.hasLoadedMetricsView).toBe(true);
+    expect(payload.metricsRows[0].fieldPath).toBe('annualData[].forecastData.fy1.ebit');
+  });
+
+  it('refreshes one dashboard in the background and then reloads its bootstrap payload', async () => {
+    const abortSignal = new AbortController().signal;
+
+    axios.post.mockResolvedValueOnce({
+      data: buildWatchlistStock(),
+    });
+    axios.get.mockResolvedValueOnce({
+      data: {
+        dashboards: [
+          {
+            identifier: 'AAPL',
+            companyName: 'Apple Inc.',
+            investmentCategory: 'Profitable Hi Growth',
+            priceCurrency: 'USD',
+            prices: [{ date: '2024-01-02', close: 185.64 }],
+            annualMetrics: [],
+            metricsColumns: [],
+            metricsRows: [],
+            hasLoadedMetricsView: false,
+            needsBackgroundRefresh: false,
+          },
+        ],
+      },
+    });
+
+    const payload = await refreshWatchlistDashboardBootstrap('aapl', { signal: abortSignal });
+
+    expect(axios.post).toHaveBeenCalledWith('/api/watchlist/AAPL/refresh', {}, { signal: abortSignal });
+    expect(axios.get).toHaveBeenCalledWith('/api/watchlist/dashboards', {
+      signal: abortSignal,
+      params: {
+        tickers: 'AAPL',
+      },
+    });
+    expect(payload.identifier).toBe('AAPL');
+    expect(payload.needsBackgroundRefresh).toBe(false);
   });
 
   it('updates the investment category through the canonical watchlist route', async () => {

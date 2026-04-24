@@ -92,14 +92,23 @@ export default function SectorChart({
 }) {
   const svgRef = useRef(null);
   const chartViewportRef = useRef(null);
+  const hasBootstrappedPresetRef = useRef(false);
+  const presetBootstrapKeyRef = useRef('');
+  const presetBootstrapFrameRef = useRef(null);
   const [chartWidth, setChartWidth] = useState(0);
-  const [isPresetScrollReady, setIsPresetScrollReady] = useState(false);
   const [hoverState, setHoverState] = useState({
     label: '',
     value: null,
     x: null,
   });
   const isRangeValid = !startDate || !endDate || startDate <= endDate;
+  const presetBootstrapKey = useMemo(() => {
+    if (!isPresetWindowMode) {
+      return `idle|${activePreset}|${maxPresetPanOffset}`;
+    }
+
+    return `${activePreset}|${maxPresetPanOffset}|${minAvailableMonth}|${maxAvailableMonth}`;
+  }, [activePreset, isPresetWindowMode, maxAvailableMonth, maxPresetPanOffset, minAvailableMonth]);
 
   useLayoutEffect(() => {
     const updateChartWidth = () => {
@@ -111,8 +120,8 @@ export default function SectorChart({
     if (typeof ResizeObserver === 'function' && chartViewportRef.current) {
       const observer = new ResizeObserver((entries) => {
         const nextWidth = entries[0]?.contentRect?.width ?? chartViewportRef.current?.clientWidth ?? 0;
-        // The scroll viewport includes the sticky Y-axis rail, so subtract it before sizing
-        // the SVG area. This keeps the plotted chart width aligned with the visible viewport.
+        // The scroll viewport also contains the sticky Y-axis rail. Subtracting
+        // it keeps the plotted SVG matched to the user-visible chart area.
         setChartWidth(Math.max(nextWidth - SECTOR_Y_AXIS_WIDTH, 0));
       });
 
@@ -137,13 +146,6 @@ export default function SectorChart({
       return undefined;
     }
 
-    const desiredScrollLeft = Math.max(maxPresetPanOffset, 0) * PRESET_PAN_STEP_PX;
-
-    if (!isPresetScrollReady) {
-      scrollElement.scrollLeft = desiredScrollLeft;
-      setIsPresetScrollReady(true);
-    }
-
     const handleScroll = () => {
       const nextPresetPanOffset = Math.min(
         Math.max(maxPresetPanOffset - Math.round(scrollElement.scrollLeft / PRESET_PAN_STEP_PX), 0),
@@ -161,16 +163,66 @@ export default function SectorChart({
       scrollElement.removeEventListener('scroll', handleScroll);
     };
   }, [
-    isPresetScrollReady,
     isPresetWindowMode,
     maxPresetPanOffset,
     onPresetPanOffsetChange,
     presetPanOffsetMonths,
   ]);
 
+  useLayoutEffect(() => {
+    if (presetBootstrapKeyRef.current !== presetBootstrapKey) {
+      presetBootstrapKeyRef.current = presetBootstrapKey;
+      hasBootstrappedPresetRef.current = false;
+    }
+  }, [presetBootstrapKey]);
+
+  useLayoutEffect(() => {
+    if (!isPresetWindowMode || hasBootstrappedPresetRef.current) {
+      return undefined;
+    }
+
+    const scrollElement = chartViewportRef.current;
+
+    if (!scrollElement) {
+      return undefined;
+    }
+
+    const desiredScrollLeft = Math.max(maxPresetPanOffset, 0) * PRESET_PAN_STEP_PX;
+
+    // This ref only protects one-time preset scroll setup. It is bookkeeping
+    // for the chart viewport, not user-visible state the card needs to render.
+    hasBootstrappedPresetRef.current = true;
+    scrollElement.scrollLeft = desiredScrollLeft;
+
+    if (presetPanOffsetMonths !== 0) {
+      onPresetPanOffsetChange(0);
+    }
+
+    if (presetBootstrapFrameRef.current) {
+      cancelAnimationFrame(presetBootstrapFrameRef.current);
+    }
+
+    presetBootstrapFrameRef.current = requestAnimationFrame(() => {
+      presetBootstrapFrameRef.current = null;
+      scrollElement.scrollLeft = desiredScrollLeft;
+    });
+
+    return () => {
+      if (presetBootstrapFrameRef.current) {
+        cancelAnimationFrame(presetBootstrapFrameRef.current);
+        presetBootstrapFrameRef.current = null;
+      }
+    };
+  }, [isPresetWindowMode, maxPresetPanOffset, onPresetPanOffsetChange, presetPanOffsetMonths, presetBootstrapKey]);
+
   useEffect(() => {
-    setIsPresetScrollReady(false);
-  }, [activePreset, maxPresetPanOffset]);
+    return () => {
+      if (presetBootstrapFrameRef.current) {
+        cancelAnimationFrame(presetBootstrapFrameRef.current);
+        presetBootstrapFrameRef.current = null;
+      }
+    };
+  }, []);
 
   const filteredSectorData = useMemo(() => {
     return filterDataByMonthRange(Array.isArray(series) ? series : [], startDate, endDate);

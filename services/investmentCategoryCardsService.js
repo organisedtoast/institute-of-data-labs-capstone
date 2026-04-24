@@ -271,21 +271,50 @@ async function ensureMonthlyPriceCacheForTicker(tickerSymbol) {
   };
 }
 
-async function resolvePriceCacheForStock(tickerSymbol) {
-  try {
-    return await ensureMonthlyPriceCacheForTicker(tickerSymbol);
-  } catch {
-    // The category card should still load even when one stock's price history
-    // cannot be fetched right now. We treat that stock as unavailable instead
-    // of failing the entire investment category card request.
-    return {
-      tickerSymbol: normalizeTickerSymbol(tickerSymbol),
-      pricePoints: [],
-      earliestMonth: "",
-      latestMonth: "",
-      lastSyncedAt: null,
-    };
-  }
+async function resolvePriceCachesForStocks(stockDocuments = []) {
+  const normalizedTickers = stockDocuments
+    .map((stockDocument) => normalizeTickerSymbol(stockDocument?.tickerSymbol))
+    .filter(Boolean);
+  const cachedPriceHistories = await StockPriceHistoryCache.find({
+    tickerSymbol: { $in: normalizedTickers },
+  }).lean();
+  const cachedPriceHistoryByTicker = new Map(
+    cachedPriceHistories.map((priceHistory) => [
+      normalizeTickerSymbol(priceHistory.tickerSymbol),
+      {
+        ...priceHistory,
+        pricePoints: normalizeMonthlyPricePoints(priceHistory.pricePoints),
+      },
+    ])
+  );
+
+  const priceCacheEntries = await Promise.all(
+    normalizedTickers.map(async (tickerSymbol) => {
+      const cachedPriceHistory = cachedPriceHistoryByTicker.get(tickerSymbol);
+
+      if (cachedPriceHistory) {
+        return [tickerSymbol, cachedPriceHistory];
+      }
+
+      try {
+        const createdPriceHistory = await ensureMonthlyPriceCacheForTicker(tickerSymbol);
+        return [tickerSymbol, createdPriceHistory];
+      } catch {
+        // The category card should still load even when one stock's price
+        // history cannot be fetched right now. We treat that stock as
+        // unavailable instead of failing the entire card request.
+        return [tickerSymbol, {
+          tickerSymbol,
+          pricePoints: [],
+          earliestMonth: "",
+          latestMonth: "",
+          lastSyncedAt: null,
+        }];
+      }
+    })
+  );
+
+  return new Map(priceCacheEntries);
 }
 
 function getCategoryBounds(priceCaches) {
@@ -359,12 +388,19 @@ async function buildInvestmentCategoryCard({
     constituentPreferences.map((preference) => [normalizeTickerSymbol(preference.tickerSymbol), preference])
   );
 
-  const stocksWithPriceCache = await Promise.all(
-    watchlistStocks.map(async (stockDocument) => ({
-      stockDocument,
-      priceCache: await resolvePriceCacheForStock(stockDocument.tickerSymbol),
-    }))
-  );
+  const requestedStartMonth = normalizeMonthString(startMonth);
+  const requestedEndMonth = normalizeMonthString(endMonth);
+  const priceCacheByTicker = await resolvePriceCachesForStocks(watchlistStocks);
+  const stocksWithPriceCache = watchlistStocks.map((stockDocument) => ({
+    stockDocument,
+    priceCache: priceCacheByTicker.get(normalizeTickerSymbol(stockDocument.tickerSymbol)) || {
+      tickerSymbol: normalizeTickerSymbol(stockDocument.tickerSymbol),
+      pricePoints: [],
+      earliestMonth: "",
+      latestMonth: "",
+      lastSyncedAt: null,
+    },
+  }));
 
   const categoryBounds = getCategoryBounds(stocksWithPriceCache.map((entry) => entry.priceCache));
   const normalizedCardRange = buildNormalizedCardRequest(
@@ -412,6 +448,7 @@ async function buildInvestmentCategoryCard({
     maxAvailableMonth: categoryBounds.latestMonth,
     startMonth: normalizedCardRange.startMonth,
     endMonth: normalizedCardRange.endMonth,
+    isCanonicalInitialRange: !requestedStartMonth || !requestedEndMonth,
     series: aggregateSeries,
     counts,
     emptyStateMessage: aggregateSeries.length

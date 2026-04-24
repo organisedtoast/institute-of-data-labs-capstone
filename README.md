@@ -65,6 +65,8 @@ These are the scripts beginners usually reach for first.
 | `npm run test:ui` | Runs the frontend/UI test suite with Vitest. | Use this for React components, frontend service helpers, context logic, and page regressions. |
 | `npm run test:ui:watch` | Runs Vitest in watch mode. | Use this while iterating on frontend code and you want tests to rerun automatically. |
 | `npm run test:backend` | Runs the fast backend bundle with Node's built-in test runner. | Use this when you want a broad backend confidence check without running the slower end-to-end harnesses. |
+| `npm run test:watchlist-routes` | Runs the watchlist summary + batched dashboard route integration test. | Use this when you change the backend routes that feed the `Stocks` page first paint. |
+| `npm run test:homepage-routes` | Runs the homepage category-card route integration test. | Use this when you change homepage card route behavior, canonical default ranges, or constituent toggles. |
 | `npm run test:e2e-stubbed` | Runs the deterministic end-to-end backend import/CRUD harness with fake ROIC responses. | Use this when you changed import, refresh, overrides, normalization, or MongoDB persistence behavior. |
 | `npm run test:e2e-live` | Runs the live end-to-end backend harness against the real ROIC API and real MongoDB. | Use this as a manual confidence check when you need production-like confirmation. |
 
@@ -72,6 +74,16 @@ Two extra script notes:
 
 - `npm run start` is effectively the same backend behavior as `npm run server` in this repo. Both run `nodemon server.js`.
 - `npm test` is only a placeholder script right now. It is **not** the real test entry point for this project.
+
+## 2.5. How Home And Stocks Load Data
+
+The app now splits "shared lightweight state" from "page-heavy data" on purpose:
+
+- `GET /api/watchlist/summary` loads the lightweight stock list used by shared search state, `SEE STOCK` detection, and add/open/remove flows.
+- `GET /api/watchlist/dashboards` loads the batched first-paint payload for the `Stocks` page so the browser does not make one dashboard request per card.
+- `GET /api/watchlist/:ticker/metrics-view` is lazy. The `Stocks` page only requests it after the user clicks `SHOW METRICS`.
+- `POST /api/watchlist/:ticker/refresh` still upgrades legacy stocks, but the `Stocks` page now does that work in the background after first paint instead of blocking the whole page load.
+- `POST /api/homepage/investment-category-cards/query` now returns the canonical latest trailing 5Y homepage payload on first load, so `Home` no longer mounts and immediately re-queries the same cards.
 
 ## 3. How testing is organized
 
@@ -154,14 +166,14 @@ npm run test:ui -- path/to/test-file
 
 | File | What it proves | When to run it | How to run it |
 | --- | --- | --- | --- |
-| `src/services/__tests__/watchlistDashboardApi.test.js` | Proves the frontend watchlist dashboard API layer can normalize backend payloads, build dashboard-ready shapes, preserve fiscal-year metadata, and decide when legacy watchlist stocks need refreshes. | Run this when you change frontend dashboard data loading, payload normalization, or legacy refresh behavior. | `npm run test:ui -- src/services/__tests__/watchlistDashboardApi.test.js` |
-| `src/services/__tests__/investmentCategoryCardsApi.test.js` | Proves the homepage category-cards API wrapper can load and normalize cards, request one card through the bulk contract, and send constituent-toggle updates with the right range payload. | Run this when you change homepage category card fetching or the frontend API wrapper around those routes. | `npm run test:ui -- src/services/__tests__/investmentCategoryCardsApi.test.js` |
+| `src/services/__tests__/watchlistDashboardApi.test.js` | Proves the frontend watchlist dashboard API layer can normalize full dashboard payloads, load batched dashboard bootstraps, lazy-load metrics-view payloads, and reload one dashboard after a background refresh. | Run this when you change frontend dashboard data loading, batched bootstrap behavior, lazy metrics loading, or legacy refresh behavior. | `npm run test:ui -- src/services/__tests__/watchlistDashboardApi.test.js` |
+| `src/services/__tests__/investmentCategoryCardsApi.test.js` | Proves the homepage category-cards API wrapper can load and normalize cards, preserve the canonical-initial-range flag, request one card through the bulk contract, and send constituent-toggle updates with the right range payload. | Run this when you change homepage category card fetching or the frontend API wrapper around those routes. | `npm run test:ui -- src/services/__tests__/investmentCategoryCardsApi.test.js` |
 
 ### Shared state and context tests
 
 | File | What it proves | When to run it | How to run it |
 | --- | --- | --- | --- |
-| `src/contexts/__tests__/StockSearchContext.test.jsx` | Proves the shared stock-search context can load the watchlist, reuse existing stocks, import missing stocks, remove stocks, and show useful search error messages. | Run this when you change navbar search state, watchlist loading, stock add/open/remove flows, or frontend error messaging. | `npm run test:ui -- src/contexts/__tests__/StockSearchContext.test.jsx` |
+| `src/contexts/__tests__/StockSearchContext.test.jsx` | Proves the shared stock-search context can load the lightweight watchlist summary, reuse existing stocks, import missing stocks, remove stocks, and show useful search error messages. | Run this when you change navbar search state, summary-route loading, stock add/open/remove flows, or frontend error messaging. | `npm run test:ui -- src/contexts/__tests__/StockSearchContext.test.jsx` |
 
 ### Focused UI component tests
 
@@ -169,15 +181,15 @@ npm run test:ui -- path/to/test-file
 | --- | --- | --- | --- |
 | `src/components/__tests__/StockSearchResults.test.jsx` | Proves the search-results list shows the correct action for each result, such as `SEE STOCK` for existing watchlist items and `ADD STOCK` for new ones. | Run this when you change search-result buttons, navigation behavior, or existing-stock detection in the visible UI. | `npm run test:ui -- src/components/__tests__/StockSearchResults.test.jsx` |
 | `src/components/__tests__/SectorChart.test.jsx` | Proves the homepage category chart renders correctly, validates month ranges, handles empty states, maps preset scroll movement, keeps the Y-axis left rail sticky, and filters long x-axis labels for readability. | Run this when you change the category-chart layout, preset scrolling, axis labeling, or date-range behavior. | `npm run test:ui -- src/components/__tests__/SectorChart.test.jsx` |
-| `src/components/__tests__/SectorCardComponent.test.jsx` | Proves a homepage category card can open its constituents list, preserve constituent order and status, stay compact with long company names, and re-query stale homepage payloads into the latest trailing 5Y range. | Run this when you change homepage category cards, constituent toggles, list layout, or default 5Y refresh behavior. | `npm run test:ui -- src/components/__tests__/SectorCardComponent.test.jsx` |
+| `src/components/__tests__/SectorCardComponent.test.jsx` | Proves a homepage category card can open its constituents list, preserve constituent order and status, stay compact with long company names, skip a redundant mount-time request when the initial payload is already canonical, and still re-query stale homepage payloads into the latest trailing 5Y range. | Run this when you change homepage category cards, constituent toggles, list layout, or canonical/default 5Y behavior. | `npm run test:ui -- src/components/__tests__/SectorCardComponent.test.jsx` |
 
 ### Page, dashboard, and integration-style regressions
 
 | File | What it proves | When to run it | How to run it |
 | --- | --- | --- | --- |
-| `src/pages/__tests__/Stocks.test.jsx` | Proves the `Stocks` page keeps search visible while hiding sibling stock cards during focused metrics mode, then restores the full watchlist when metrics are closed. | Run this when you change page-level watchlist rendering or focused metrics behavior on the `Stocks` route. | `npm run test:ui -- src/pages/__tests__/Stocks.test.jsx` |
+| `src/pages/__tests__/Stocks.test.jsx` | Proves the `Stocks` page keeps search visible while hiding sibling stock cards during focused metrics mode, restores the full watchlist when metrics are closed, and refreshes legacy dashboard cards in the background without blocking the initial render. | Run this when you change page-level watchlist rendering, batched dashboard bootstrap behavior, or focused metrics behavior on the `Stocks` route. | `npm run test:ui -- src/pages/__tests__/Stocks.test.jsx` |
 | `src/pages/__tests__/StocksRemount.integration.test.jsx` | Proves the `Stocks` route can survive remount-oriented flows where the page, provider, and dashboard wiring are exercised together in a larger integration-style test. | Run this when you change remount behavior, route/provider wiring, or flows where the focused stock hides and restores the rest of the page. | `npm run test:ui -- src/pages/__tests__/StocksRemount.integration.test.jsx` |
-| `src/components/__tests__/SharePriceDashboard.test.jsx` | Proves the stock dashboard survives the hardest UI scenarios: preset scrolling, sticky rails, chart alignment, metrics mode, React loop regressions, and focused metrics layout edge cases such as `MAX`. | Run this when you change the stock card dashboard, detail metrics table, scroll measurement, preset logic, or any animation/layout code inside `SharePriceDashboard`. | `npm run test:ui -- src/components/__tests__/SharePriceDashboard.test.jsx` |
+| `src/components/__tests__/SharePriceDashboard.test.jsx` | Proves the stock dashboard survives the hardest UI scenarios: preset scrolling, sticky rails, chart alignment, lazy metrics loading, React loop regressions, and focused metrics layout edge cases such as `MAX`. | Run this when you change the stock card dashboard, batched bootstrap handoff, detail metrics table, scroll measurement, preset logic, or any animation/layout code inside `SharePriceDashboard`. | `npm run test:ui -- src/components/__tests__/SharePriceDashboard.test.jsx` |
 
 ### Frontend investigation notes
 
@@ -195,6 +207,8 @@ Backend tests use Node's built-in runner. Some have dedicated npm scripts, and s
 | `npm run test:stock-search` | Runs only `tests/stock-search-service.test.js`. | Use this when you are changing search classification, result ranking, suffix probing, or search diagnostics. |
 | `npm run test:stock-lookup-routes` | Runs only `tests/frontend-api-routes.test.js`. | Use this when you changed the read-only stock lookup routes or their request/response behavior. |
 | `npm run test:server-startup` | Runs only `tests/server-startup.test.js`. | Use this when you changed startup behavior or degraded-mode availability during MongoDB failures. |
+| `npm run test:watchlist-routes` | Runs only `tests/watchlist-routes.test.js`. | Use this when you change watchlist summary loading, batched dashboard bootstrap loading, or the backend route contract behind the `Stocks` page first paint. |
+| `npm run test:homepage-routes` | Runs only `tests/investment-category-cards-routes.test.js`. | Use this when you change homepage card route behavior, canonical default ranges, constituent toggles, or category-card aggregation rules. |
 | `npm run test:lenses` | Runs `tests/lens-visibility.test.js` and `tests/inspect-lens-fields.test.js`. | Use this when you change lens seeding, field visibility rules, or the lens inspection flow. |
 | `npm run test:docs` | Runs only `tests/schema-reference-generator.test.js`. | Use this when you change the schema-reference generator or field-catalog-driven docs. |
 | `npm run test:e2e-stubbed` | Runs the deterministic end-to-end import/CRUD backend harness. | Use this for import, refresh, override, and MongoDB workflow changes. |
@@ -224,7 +238,8 @@ Backend tests use Node's built-in runner. Some have dedicated npm scripts, and s
 | File | What it proves | When to run it | How to run it |
 | --- | --- | --- | --- |
 | `tests/frontend-api-routes.test.js` | Proves the read-only stock lookup HTTP routes validate input, normalize requests, surface service errors cleanly, and return the expected response shape over real HTTP. | Run this when you change `GET /api/stocks/search`, `GET /api/stock-prices/:ticker`, or the route/controller boundary around them. | `npm run test:stock-lookup-routes` |
-| `tests/investment-category-cards-routes.test.js` | Proves the homepage investment-category card routes can build category payloads, classify constituents, persist user-disabled toggles, and reject invalid requests. | Run this when you change the backend routes for homepage investment-category cards. | `node --test tests/investment-category-cards-routes.test.js` |
+| `tests/watchlist-routes.test.js` | Proves the watchlist summary route returns the lightweight shared-search payload and the batched dashboard route returns the first-paint `Stocks` payload, ordered correctly with lazy metrics and background-refresh flags. | Run this when you change `/api/watchlist/summary`, `/api/watchlist/dashboards`, or the backend bootstrap contract behind the `Stocks` page. | `npm run test:watchlist-routes` |
+| `tests/investment-category-cards-routes.test.js` | Proves the homepage investment-category card routes can build category payloads, classify constituents, persist user-disabled toggles, return the canonical trailing 5Y default range, and reject invalid requests. | Run this when you change the backend routes for homepage investment-category cards. | `npm run test:homepage-routes` |
 | `tests/lens-visibility.test.js` | Proves the backend alone can resolve the correct card/detail visible fields for each investment category and for real stocks. | Run this when you change seeded lenses, visibility rules, or how categories resolve to lenses. | `npm run test:lenses` |
 | `tests/missing-earnings-calls-import.test.js` | Proves import and refresh tolerate ROIC's special "no earnings calls found" 404 while still failing loudly for genuine upstream failures. | Run this when you change import, refresh, or earnings-call fallback behavior. | `node --test tests/missing-earnings-calls-import.test.js` |
 | `tests/investment-category-migration.test.js` | Protects investment-category migration behavior. This is documented conservatively here because it is part of the fast backend bundle and its filename shows it guards category migration rules. | Run this when you change investment-category renaming or migration behavior. | `node --test tests/investment-category-migration.test.js` |

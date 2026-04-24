@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SharePriceDashboard from '../SharePriceDashboard';
 import {
   fetchDashboardData,
+  fetchDashboardMetricsView,
   updateDashboardMetricOverride,
   updateDashboardInvestmentCategory,
   updateDashboardRowPreference,
@@ -17,45 +18,10 @@ import {
   getPreferredTickCount,
 } from '../sharePriceChartScale';
 
-// This test relies on the following libraries:
-// - React Testing Library: for rendering the component and simulating user interactions in a way that resembles real usage.
-// - Vitest: for structuring the test suite, making assertions, and mocking dependencies like axios.
-// - A custom mock implementation for MUI components: to avoid rendering complex UI elements that are not relevant to the test scenarios.
-
-// This file holds component-specific regression tests for SharePriceDashboard.
-// We created this test because the stock dashboard has an easy-to-break user
-// interaction: preset buttons like 1M, 1Y, and 5Y must choose the correct date
-// range, place the horizontal scrollbar in the correct starting position, and
-// keep the month inputs updated while the user scrolls backward through older
-// history. That combination is hard to trust by eye alone, so we capture it in
-// an automated test file that can warn us when a future code change breaks it.
-//
-// The `__tests__` folder name is a common convention for keeping tests close
-// to the feature they verify. A beginner can think of it as: "this is the test
-// folder that belongs to this part of the app." This file lives next to the
-// dashboard area because it is specifically protecting dashboard behavior.
-//
-// This repo also has a separate `src/test/` folder. That folder is for shared
-// test infrastructure used by many test files, such as setup code and browser
-// fallbacks. In short:
-// - `src/components/__tests__/` = the actual component test scenarios
-// - `src/test/` = shared support code that helps all tests run
-//
-// If this test succeeds, that means we have evidence that the dashboard still
-// behaves the way a user expects in the checked scenarios. For example, the
-// default preset still opens correctly, the scrollbar still starts at the
-// newest available position, and dragging backward still updates the month
-// inputs the way the UI promises.
-//
-// If this test fails, it usually means one of those user-facing behaviors has
-// regressed. A failure might mean the wrong date range is shown, the scrollbar
-// is starting in the wrong place, preset scrolling stopped updating the month
-// fields, or switching stocks/presets no longer resets the dashboard properly.
-// In other words, a failure is a clue that something meaningful changed in the
-// behavior of the feature, not just that "the test is unhappy."
-//
-// To run just this file, use:
-// `npm run test:ui -- src/components/__tests__/SharePriceDashboard.test.jsx`
+// This file protects the stock card's hardest user-facing behavior: preset
+// ranges, scroll-driven month updates, lazy metrics, and focused metrics mode.
+// The helpers below keep the test browser simple, while the assertions stay
+// centered on what the user can see and what the page promises to preserve.
 
 function createMockComponent(tagName, omittedPropNames = []) {
   return React.forwardRef(function MockComponent({ children, ...props }, ref) {
@@ -75,6 +41,7 @@ function createMockComponent(tagName, omittedPropNames = []) {
 
 vi.mock('../../services/watchlistDashboardApi', () => ({
   fetchDashboardData: vi.fn(),
+  fetchDashboardMetricsView: vi.fn(),
   updateDashboardMetricOverride: vi.fn(),
   updateDashboardInvestmentCategory: vi.fn(),
   updateDashboardRowPreference: vi.fn(),
@@ -108,11 +75,8 @@ vi.mock('@mui/material/Typography', () => ({
   default: createMockComponent('div', ['align', 'color', 'component', 'gutterBottom', 'sx', 'variant']),
 }));
 
-// This mock keeps TextField behavior beginner-friendly and DOM-simple:
-// the tests only need a label plus a plain input they can type into.
-// Real MUI TextField accepts layout props like `fullWidth`, but a raw DOM
-// `<input>` does not. If we forward those MUI-only props into the DOM, React
-// warns even though the production component is correct, so we strip them here.
+// This mock keeps the input DOM-simple. The tests only need a label plus a
+// plain input, so we strip MUI-only layout props before they hit the real DOM.
 vi.mock('@mui/material/TextField', () => ({
   default: function MockTextField({
     fullWidth,
@@ -302,8 +266,79 @@ function buildExpectedFiscalYearBoundaryPositions({ annualMetrics, prices, heade
   });
 }
 
-// The component normally fetches a large backend payload. Keeping a local test
-// payload makes the regression deterministic and easier for a beginner to follow.
+// The real card fetches large backend payloads. Keeping a local payload here
+// makes the regression deterministic and easier to read.
+function buildAnnualMainTableRows(annualMetrics = []) {
+  return annualMetrics.map((annualRow) => ({
+    fiscalYear: annualRow.fiscalYear,
+    fiscalYearEndDate: annualRow.fiscalYearEndDate,
+    cells: {
+      fiscalYearEndDate: {
+        columnKey: `annual-${annualRow.fiscalYear}`,
+        value: annualRow.fiscalYearEndDate,
+        sourceOfTruth: 'system',
+        isOverridden: false,
+        isOverrideable: false,
+        overrideTarget: null,
+      },
+      fiscalYear: {
+        columnKey: `annual-${annualRow.fiscalYear}`,
+        value: annualRow.fiscalYear,
+        sourceOfTruth: 'system',
+        isOverridden: false,
+        isOverrideable: false,
+        overrideTarget: null,
+      },
+      earningsReleaseDate: {
+        columnKey: `annual-${annualRow.fiscalYear}`,
+        value: annualRow.earningsReleaseDate,
+        sourceOfTruth: 'system',
+        isOverridden: false,
+        isOverrideable: false,
+        overrideTarget: null,
+      },
+      // The base table uses these rich cells so the tests can exercise the
+      // same override editor flow as the detail metrics surface.
+      sharePrice: {
+        columnKey: `annual-${annualRow.fiscalYear}`,
+        value: annualRow.sharePrice,
+        sourceOfTruth: 'roic',
+        isOverridden: false,
+        isOverrideable: true,
+        overrideTarget: {
+          kind: 'annual',
+          fiscalYear: annualRow.fiscalYear,
+          payloadPath: 'base.sharePrice',
+        },
+      },
+      sharesOnIssue: {
+        columnKey: `annual-${annualRow.fiscalYear}`,
+        value: annualRow.sharesOnIssue,
+        sourceOfTruth: 'roic',
+        isOverridden: false,
+        isOverrideable: true,
+        overrideTarget: {
+          kind: 'annual',
+          fiscalYear: annualRow.fiscalYear,
+          payloadPath: 'base.sharesOnIssue',
+        },
+      },
+      marketCap: {
+        columnKey: `annual-${annualRow.fiscalYear}`,
+        value: annualRow.marketCap,
+        sourceOfTruth: 'derived',
+        isOverridden: false,
+        isOverrideable: true,
+        overrideTarget: {
+          kind: 'annual',
+          fiscalYear: annualRow.fiscalYear,
+          payloadPath: 'base.marketCap',
+        },
+      },
+    },
+  }));
+}
+
 function buildDashboardPayload(overrides = {}) {
   const prices = [];
 
@@ -329,13 +364,18 @@ function buildDashboardPayload(overrides = {}) {
     });
   }
 
+  const finalAnnualMetrics = Array.isArray(overrides.annualMetrics) ? overrides.annualMetrics : annualMetrics;
+
   return {
     identifier: 'AAPL',
     companyName: 'Apple Inc.',
     investmentCategory: 'Profitable Hi Growth',
     priceCurrency: 'USD',
     prices,
-    annualMetrics,
+    annualMetrics: finalAnnualMetrics,
+    annualMainTableRows: Array.isArray(overrides.annualMainTableRows)
+      ? overrides.annualMainTableRows
+      : buildAnnualMainTableRows(finalAnnualMetrics),
     metricsColumns: [],
     metricsRows: [],
     ...overrides,
@@ -524,6 +564,177 @@ function buildMetricsModePayload(overrides = {}) {
   });
 }
 
+function buildPlainValueBoundaryDashboardPayload(overrides = {}) {
+  return buildDashboardPayload({
+    prices: [
+      { date: '2024-01-01', close: 99.75 },
+      { date: '2024-12-01', close: 100.25 },
+      { date: '2025-12-01', close: 101.25 },
+    ],
+    annualMetrics: [
+      {
+        fiscalYear: 2024,
+        fiscalYearEndDate: '2024-12-31',
+        earningsReleaseDate: '2025-02-15',
+        sharePrice: 99.75,
+        sharesOnIssue: 980000000,
+        marketCap: 1200000000,
+      },
+      {
+        fiscalYear: 2025,
+        fiscalYearEndDate: '2025-12-31',
+        earningsReleaseDate: '2026-02-15',
+        sharePrice: 100.25,
+        sharesOnIssue: 990000000,
+        marketCap: 1300000000,
+      },
+    ],
+    ...overrides,
+  });
+}
+
+function buildPlainValueBoundaryMetricsPayload(overrides = {}) {
+  return buildPlainValueBoundaryDashboardPayload({
+    metricsColumns: [
+      {
+        key: 'annual-2024',
+        kind: 'annual',
+        label: 'FY 2024',
+        shortLabel: '2024',
+        fiscalYear: 2024,
+        fiscalYearEndDate: '2024-12-31',
+      },
+      {
+        key: 'annual-2025',
+        kind: 'annual',
+        label: 'FY 2025',
+        shortLabel: '2025',
+        fiscalYear: 2025,
+        fiscalYearEndDate: '2025-12-31',
+      },
+    ],
+    metricsRows: [
+      {
+        rowKey: '710::annualData[].forecastData.fy1.ebit',
+        fieldPath: 'annualData[].forecastData.fy1.ebit',
+        label: 'EBIT FY+1',
+        shortLabel: 'EBIT FY+1',
+        section: 'Income Statement',
+        shortSection: 'Income',
+        order: 710,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 99.75,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy1.ebit' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 100.25,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'forecastData.fy1.ebit' },
+          },
+        ],
+      },
+      {
+        rowKey: '720::annualData[].base.customerCount',
+        fieldPath: 'annualData[].base.customerCount',
+        label: 'Customer count',
+        shortLabel: 'Customer count',
+        section: 'Operating',
+        shortSection: 'Ops',
+        order: 720,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 99.75,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'base.customerCount' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 100.25,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'base.customerCount' },
+          },
+        ],
+      },
+      {
+        rowKey: '730::annualData[].base.evEbit',
+        fieldPath: 'annualData[].base.evEbit',
+        label: 'EV / EBIT',
+        shortLabel: 'EV / EBIT',
+        section: 'Valuation',
+        shortSection: 'Value',
+        order: 730,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 99.75,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'base.evEbit' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: -123.45,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'base.evEbit' },
+          },
+        ],
+      },
+      {
+        rowKey: '740::annualData[].growthForecasts.revenueCagr3y',
+        fieldPath: 'annualData[].growthForecasts.revenueCagr3y',
+        label: 'Revenue CAGR 3Y',
+        shortLabel: 'Revenue CAGR 3Y',
+        section: 'Growth',
+        shortSection: 'Growth',
+        order: 740,
+        surface: 'detail',
+        isEnabled: true,
+        cells: [
+          {
+            columnKey: 'annual-2024',
+            value: 12.34,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'growthForecasts.revenueCagr3y' },
+          },
+          {
+            columnKey: 'annual-2025',
+            value: 123.45,
+            sourceOfTruth: 'system',
+            isOverridden: false,
+            isOverrideable: true,
+            overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'growthForecasts.revenueCagr3y' },
+          },
+        ],
+      },
+    ],
+    ...overrides,
+  });
+}
+
 function buildLongHistoryDashboardPayload(overrides = {}) {
   const prices = [];
 
@@ -670,8 +881,8 @@ function createDeferredResponse() {
 }
 
 // The dashboard uses real DOM measurements from a horizontal scroll region.
-// This helper gives the test a controllable width and scroll position so we can
-// simulate panning to older history without relying on a browser layout engine.
+// This helper gives the test a controllable viewport so it can simulate panning
+// without depending on a full browser layout engine.
 async function configureScrollRegion(scrollRegion, clientWidth = 920) {
   let scrollLeftValue = 0;
 
@@ -743,16 +954,9 @@ function getCloseRangeForMonths(priceRows, startMonth, endMonth) {
   };
 }
 
-// The dashboard does not finish all of its work in one synchronous render.
-// One user action can fan out into:
-// - promise work from the mocked API
-// - microtask-backed requestAnimationFrame callbacks from our browser shim
-// - one real timer yield so "wait until the next task" code can finish
-//
-// This helper is not a substitute for `act(...)`. Its job starts *after* the
-// test has already entered React correctly through `act(...)`. A beginner
-// should think of it as: "give React and the fake browser a few chances to
-// settle before checking the final UI."
+// One dashboard action can fan out into mocked API promises, animation-frame
+// work, and one extra task turn. This helper gives React and the fake browser
+// time to settle after `act(...)` has already started the user-visible work.
 async function flushDashboardWork(turnCount = 1) {
   for (let turn = 0; turn < turnCount; turn += 1) {
     await act(async () => {
@@ -771,9 +975,9 @@ async function flushDashboardWork(turnCount = 1) {
   }
 }
 
-// These browser shims make JSDOM look enough like a real browser for this
-// component's layout logic. We keep them in one place because the same rules
-// must apply to both the preset tests and the metrics tests.
+// These browser shims make JSDOM look enough like the real browser behavior
+// this card depends on. Keeping them together makes preset and metrics tests
+// share the same layout rules.
 function installDashboardBrowserShims() {
   pendingAnimationFrameHandles = new Set();
   nextAnimationFrameHandle = 1;
@@ -890,9 +1094,8 @@ function installDashboardBrowserShims() {
   globalThis.cancelAnimationFrame = window.cancelAnimationFrame;
 }
 
-// Cleanup is just as important as setup. If a beginner removes this and leaves
-// one test's custom browser shims active for the next test, the resulting
-// failures look random even though the real problem is shared test state.
+// Cleanup matters just as much as setup. If one test leaves custom browser
+// shims behind, the next test can fail for the wrong reason because of shared state.
 function restoreDashboardBrowserShims() {
   if (mountedRoot) {
     act(() => {
@@ -921,10 +1124,9 @@ function restoreDashboardBrowserShims() {
   matchMediaListenerRegistry = new Map();
 }
 
-// We keep using `createRoot` instead of RTL's `render()` because earlier
-// experiments showed that RTL's React 19 path hangs for this component stack.
-// The important beginner rule is: even with `createRoot`, mounting and rerendering
-// still have to happen inside `act(...)` so React can flush the work safely.
+// This file still uses `createRoot` because the RTL React 19 path hangs for
+// this component stack in this environment. Even here, mount and rerender work
+// still belongs inside `act(...)` so React can flush user-visible state safely.
 function mountDashboard(ui) {
   mountedContainer = document.createElement('div');
   document.body.appendChild(mountedContainer);
@@ -943,8 +1145,8 @@ function mountDashboard(ui) {
   };
 }
 
-// This shared helper keeps the repetitive render/setup work in one place so
-// each test can focus on one user-facing behavior.
+// This shared helper keeps setup in one place so each test can focus on one
+// user-facing behavior.
 async function renderDashboard(options = {}) {
   const {
     dashboardProps = {},
@@ -1048,6 +1250,34 @@ function getOverrideableMetricCell({
   });
 }
 
+function getDashboardTableCell({
+  rowKey,
+  columnKey,
+} = {}) {
+  return screen.getAllByTestId('share-price-dashboard-metric-cell').find((cellNode) => {
+    return (
+      cellNode.getAttribute('data-row-key') === rowKey
+      && cellNode.getAttribute('data-column-key') === columnKey
+    );
+  });
+}
+
+function getMainTableRow(rowLabel) {
+  return screen.getByText(rowLabel).parentElement?.parentElement;
+}
+
+function getMainTableCell({
+  rowKey,
+  columnKey,
+} = {}) {
+  return screen.getAllByTestId('share-price-dashboard-main-table-cell').find((cellNode) => {
+    return (
+      cellNode.getAttribute('data-row-key') === rowKey
+      && cellNode.getAttribute('data-column-key') === columnKey
+    );
+  });
+}
+
 // Row-hiding now belongs to the frozen left rail instead of the annual-value
 // cells or a separate button. This helper keeps the row-label lookup readable.
 function getMetricRowLeftRail(rowKey = '710::annualData[].forecastData.fy1.ebit') {
@@ -1078,6 +1308,7 @@ function expectNoActWarnings(consoleErrorSpy) {
 describe('SharePriceDashboard preset scrolling', () => {
   beforeEach(() => {
     fetchDashboardData.mockReset();
+    fetchDashboardMetricsView.mockReset();
     updateDashboardMetricOverride.mockReset();
     updateDashboardInvestmentCategory.mockReset();
     updateDashboardRowPreference.mockReset();
@@ -1323,6 +1554,61 @@ describe('SharePriceDashboard preset scrolling', () => {
     renderedLabelTexts.forEach((labelText) => {
       expect(expectedLabelTexts).toContain(labelText);
     });
+  });
+
+  it('drops decimals from 3-digit plain main-table, Y-axis, and hover values while preserving smaller values', async () => {
+    const payload = buildPlainValueBoundaryDashboardPayload();
+    const { scrollRegion } = await renderDashboard({ payload });
+    const sharePriceRow = getMainTableRow('Share price');
+
+    expect(sharePriceRow).toBeTruthy();
+    expect(within(sharePriceRow).getByText('$99.75')).toBeTruthy();
+    expect(within(sharePriceRow).getByText('$100')).toBeTruthy();
+    expect(within(sharePriceRow).queryByText('$100.25')).toBeNull();
+
+    const renderedLabelTexts = screen.getAllByTestId('share-price-dashboard-y-axis-label').map((labelNode) => labelNode.textContent);
+    const renderedLabelsAtOrAboveHundred = renderedLabelTexts.filter((labelText) => {
+      const numericPortion = Number(String(labelText).replace(/[$,]/g, ''));
+      return Number.isFinite(numericPortion) && numericPortion >= 100;
+    });
+
+    expect(renderedLabelsAtOrAboveHundred.length).toBeGreaterThan(0);
+    renderedLabelsAtOrAboveHundred.forEach((labelText) => {
+      expect(labelText.includes('.')).toBe(false);
+    });
+
+    const svg = scrollRegion.querySelector('svg');
+    expect(svg).toBeTruthy();
+
+    Object.defineProperty(svg, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        left: 0,
+        top: 0,
+        width: Number(scrollRegion.getAttribute('data-content-width')),
+        height: 280,
+        right: Number(scrollRegion.getAttribute('data-content-width')),
+        bottom: 280,
+      }),
+    });
+
+    await act(async () => {
+      fireEvent.mouseMove(svg, { clientX: 1, clientY: 140 });
+    });
+    await flushDashboardWork();
+
+    expect(within(svg).getByText('$99.75')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.mouseMove(svg, {
+        clientX: 180,
+        clientY: 140,
+      });
+    });
+    await flushDashboardWork();
+
+    expect(within(svg).getByText('$100')).toBeTruthy();
+    expect(within(svg).queryByText('$100.25')).toBeNull();
   });
 
   it('uses full sticky rail labels on wider screens', async () => {
@@ -2169,6 +2455,7 @@ describe('SharePriceDashboard preset scrolling', () => {
 describe('SharePriceDashboard metrics mode', () => {
   beforeEach(() => {
     fetchDashboardData.mockReset();
+    fetchDashboardMetricsView.mockReset();
     updateDashboardMetricOverride.mockReset();
     updateDashboardInvestmentCategory.mockReset();
     updateDashboardRowPreference.mockReset();
@@ -2213,6 +2500,44 @@ describe('SharePriceDashboard metrics mode', () => {
     });
   });
 
+  it('loads metrics lazily from bootstrapped dashboard data and reuses them on reopen', async () => {
+    fetchDashboardMetricsView.mockResolvedValue({
+      identifier: 'AAPL',
+      metricsColumns: buildMetricsModePayload().metricsColumns,
+      metricsRows: buildMetricsModePayload().metricsRows,
+      hasLoadedMetricsView: true,
+    });
+
+    const bootstrappedPayload = buildDashboardPayload({
+      hasLoadedMetricsView: false,
+      metricsColumns: [],
+      metricsRows: [],
+    });
+
+    const { user } = await renderDashboard({
+      payload: bootstrappedPayload,
+      dashboardProps: {
+        initialDashboardData: bootstrappedPayload,
+      },
+    });
+
+    expect(fetchDashboardData).not.toHaveBeenCalled();
+    expect(screen.queryByText('DETAIL METRICS')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    expect(fetchDashboardMetricsView).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('DETAIL METRICS')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'HIDE METRICS' }));
+    await flushDashboardWork();
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    expect(fetchDashboardMetricsView).toHaveBeenCalledTimes(1);
+  });
+
   it('opens one annual metrics table, keeps non-empty rows visible, and places empty rows under hidden rows', async () => {
     const { user } = await renderDashboard({
       payload: buildMetricsModePayload(),
@@ -2252,6 +2577,58 @@ describe('SharePriceDashboard metrics mode', () => {
   it('formats large metrics values with compact units instead of raw full-length decimals', async () => {
     const { user } = await renderDashboard({
       payload: buildMetricsModePayload({
+        annualMetrics: [
+          {
+            fiscalYear: 2023,
+            fiscalYearEndDate: '2023-12-31',
+            earningsReleaseDate: '2024-02-15',
+            sharePrice: 14.2,
+            sharesOnIssue: 44200000,
+            marketCap: 1200000000,
+          },
+          {
+            fiscalYear: 2024,
+            fiscalYearEndDate: '2024-12-31',
+            earningsReleaseDate: '2025-02-15',
+            sharePrice: 16.8,
+            sharesOnIssue: 507600000,
+            marketCap: 114200000,
+          },
+          {
+            fiscalYear: 2025,
+            fiscalYearEndDate: '2025-12-31',
+            earningsReleaseDate: '2026-02-15',
+            sharePrice: 18.4,
+            sharesOnIssue: -507600000,
+            marketCap: -114600000000,
+          },
+        ],
+        annualMainTableRows: buildAnnualMainTableRows([
+          {
+            fiscalYear: 2023,
+            fiscalYearEndDate: '2023-12-31',
+            earningsReleaseDate: '2024-02-15',
+            sharePrice: 14.2,
+            sharesOnIssue: 44200000,
+            marketCap: 1200000000,
+          },
+          {
+            fiscalYear: 2024,
+            fiscalYearEndDate: '2024-12-31',
+            earningsReleaseDate: '2025-02-15',
+            sharePrice: 16.8,
+            sharesOnIssue: 507600000,
+            marketCap: 114200000,
+          },
+          {
+            fiscalYear: 2025,
+            fiscalYearEndDate: '2025-12-31',
+            earningsReleaseDate: '2026-02-15',
+            sharePrice: 18.4,
+            sharesOnIssue: -507600000,
+            marketCap: -114600000000,
+          },
+        ]),
         metricsRows: [
           {
             rowKey: '710::annualData[].forecastData.fy1.ebit',
@@ -2266,7 +2643,7 @@ describe('SharePriceDashboard metrics mode', () => {
             cells: [
               {
                 columnKey: 'annual-2023',
-                value: 1250000000.99,
+                value: 1200000000.99,
                 sourceOfTruth: 'system',
                 isOverridden: false,
                 isOverrideable: true,
@@ -2274,7 +2651,7 @@ describe('SharePriceDashboard metrics mode', () => {
               },
               {
                 columnKey: 'annual-2024',
-                value: 2400000.99,
+                value: 114600000.99,
                 sourceOfTruth: 'system',
                 isOverridden: false,
                 isOverrideable: true,
@@ -2290,18 +2667,213 @@ describe('SharePriceDashboard metrics mode', () => {
               },
             ],
           },
+          {
+            rowKey: '720::annualData[].base.customerCount',
+            fieldPath: 'annualData[].base.customerCount',
+            label: 'Customer count',
+            shortLabel: 'Customer count',
+            section: 'Income Statement',
+            shortSection: 'Income',
+            order: 720,
+            surface: 'detail',
+            isEnabled: true,
+            cells: [
+              {
+                columnKey: 'annual-2023',
+                value: 44200000,
+                sourceOfTruth: 'system',
+                isOverridden: false,
+                isOverrideable: true,
+                overrideTarget: { kind: 'annual', fiscalYear: 2023, payloadPath: 'base.customerCount' },
+              },
+              {
+                columnKey: 'annual-2024',
+                value: 507600000,
+                sourceOfTruth: 'system',
+                isOverridden: false,
+                isOverrideable: true,
+                overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'base.customerCount' },
+              },
+              {
+                columnKey: 'annual-2025',
+                value: -507600000,
+                sourceOfTruth: 'system',
+                isOverridden: false,
+                isOverrideable: true,
+                overrideTarget: { kind: 'annual', fiscalYear: 2025, payloadPath: 'base.customerCount' },
+              },
+            ],
+          },
         ],
       }),
+    });
+
+    const sharesOnIssueRow = getMainTableRow('Shares on issue');
+    const marketCapRow = getMainTableRow('Market cap');
+
+    expect(sharesOnIssueRow).toBeTruthy();
+    expect(marketCapRow).toBeTruthy();
+    expect(within(sharesOnIssueRow).getByText('44.2M')).toBeTruthy();
+    expect(within(sharesOnIssueRow).getByText('508M')).toBeTruthy();
+    expect(within(sharesOnIssueRow).getByText('-508M')).toBeTruthy();
+    expect(within(marketCapRow).getByText('$1.2B')).toBeTruthy();
+    expect(within(marketCapRow).getByText('$114M')).toBeTruthy();
+    expect(within(marketCapRow).getByText('-$115B')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    expect(screen.getAllByText('$1.2B').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('$115M')).not.toBeNull();
+    expect(screen.getByText('$3.8K')).not.toBeNull();
+    expect(screen.getAllByText('44.2M').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('508M').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('-508M').length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText('$1,200,000,000.99')).toBeNull();
+    expect(screen.queryByText('$114,600,000.99')).toBeNull();
+    expect(screen.queryByText('$1B')).toBeNull();
+    expect(screen.queryByText('$114.6M')).toBeNull();
+  });
+
+  it('keeps compact decimals below 100 while rounding compact 100+ values', async () => {
+    const { user } = await renderDashboard({
+      payload: buildMetricsModePayload({
+        annualMetrics: [
+          {
+            fiscalYear: 2023,
+            fiscalYearEndDate: '2023-12-31',
+            earningsReleaseDate: '2024-02-15',
+            sharePrice: 14.2,
+            sharesOnIssue: 44200000,
+            marketCap: 1200000000,
+          },
+          {
+            fiscalYear: 2024,
+            fiscalYearEndDate: '2024-12-31',
+            earningsReleaseDate: '2025-02-15',
+            sharePrice: 16.8,
+            sharesOnIssue: 507200000,
+            marketCap: 114600000,
+          },
+        ],
+        annualMainTableRows: buildAnnualMainTableRows([
+          {
+            fiscalYear: 2023,
+            fiscalYearEndDate: '2023-12-31',
+            earningsReleaseDate: '2024-02-15',
+            sharePrice: 14.2,
+            sharesOnIssue: 44200000,
+            marketCap: 1200000000,
+          },
+          {
+            fiscalYear: 2024,
+            fiscalYearEndDate: '2024-12-31',
+            earningsReleaseDate: '2025-02-15',
+            sharePrice: 16.8,
+            sharesOnIssue: 507200000,
+            marketCap: 114600000,
+          },
+        ]),
+        metricsRows: [
+          {
+            rowKey: '710::annualData[].forecastData.fy1.ebit',
+            fieldPath: 'annualData[].forecastData.fy1.ebit',
+            label: 'EBIT FY+1',
+            shortLabel: 'EBIT FY+1',
+            section: 'EBIT Forecast',
+            shortSection: 'EBIT Forecast',
+            order: 710,
+            surface: 'detail',
+            isEnabled: true,
+            cells: [
+              {
+                columnKey: 'annual-2023',
+                value: 1200000000,
+                sourceOfTruth: 'system',
+                isOverridden: false,
+                isOverrideable: true,
+                overrideTarget: { kind: 'annual', fiscalYear: 2023, payloadPath: 'forecastData.fy1.ebit' },
+              },
+              {
+                columnKey: 'annual-2024',
+                value: 114600000,
+                sourceOfTruth: 'system',
+                isOverridden: false,
+                isOverrideable: true,
+                overrideTarget: { kind: 'annual', fiscalYear: 2024, payloadPath: 'forecastData.fy1.ebit' },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const sharesOnIssueRow = getMainTableRow('Shares on issue');
+    const marketCapRow = getMainTableRow('Market cap');
+
+    expect(sharesOnIssueRow).toBeTruthy();
+    expect(marketCapRow).toBeTruthy();
+    // These three examples teach the compact threshold directly: values below compact
+    // 100 keep one decimal, while compact 100+ values round to whole units.
+    expect(within(sharesOnIssueRow).getByText('44.2M')).toBeTruthy();
+    expect(within(sharesOnIssueRow).getByText('507M')).toBeTruthy();
+    expect(within(marketCapRow).getByText('$1.2B')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await flushDashboardWork();
+
+    expect(screen.getAllByText('44.2M').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('507M').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('$1.2B').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('drops decimals from 3-digit plain detail metrics while preserving smaller values and compact rules', async () => {
+    const { user } = await renderDashboard({
+      payload: buildPlainValueBoundaryMetricsPayload(),
     });
 
     await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
     await flushDashboardWork();
 
-    expect(screen.getByText('$1.3B')).not.toBeNull();
-    expect(screen.getByText('$2.4M')).not.toBeNull();
-    expect(screen.getByText('$3.8K')).not.toBeNull();
-    expect(screen.queryByText('$1,250,000,000.99')).toBeNull();
-    expect(screen.queryByText('$2,400,000.99')).toBeNull();
+    expect(getDashboardTableCell({
+      rowKey: '710::annualData[].forecastData.fy1.ebit',
+      columnKey: 'annual-2024',
+    })?.textContent).toContain('$99.75');
+    expect(getDashboardTableCell({
+      rowKey: '710::annualData[].forecastData.fy1.ebit',
+      columnKey: 'annual-2025',
+    })?.textContent).toContain('$100');
+
+    expect(getDashboardTableCell({
+      rowKey: '720::annualData[].base.customerCount',
+      columnKey: 'annual-2024',
+    })?.textContent).toContain('99.75');
+    expect(getDashboardTableCell({
+      rowKey: '720::annualData[].base.customerCount',
+      columnKey: 'annual-2025',
+    })?.textContent).toContain('100');
+
+    expect(getDashboardTableCell({
+      rowKey: '730::annualData[].base.evEbit',
+      columnKey: 'annual-2024',
+    })?.textContent).toContain('99.75');
+    expect(getDashboardTableCell({
+      rowKey: '730::annualData[].base.evEbit',
+      columnKey: 'annual-2025',
+    })?.textContent).toContain('-123');
+    expect(getDashboardTableCell({
+      rowKey: '730::annualData[].base.evEbit',
+      columnKey: 'annual-2025',
+    })?.textContent).not.toContain('-123.45');
+
+    expect(getDashboardTableCell({
+      rowKey: '740::annualData[].growthForecasts.revenueCagr3y',
+      columnKey: 'annual-2024',
+    })?.textContent).toContain('12.3%');
+    expect(getDashboardTableCell({
+      rowKey: '740::annualData[].growthForecasts.revenueCagr3y',
+      columnKey: 'annual-2025',
+    })?.textContent).toContain('123%');
   });
 
   it('opens the left-rail row action menu and hides a row from that menu', async () => {
@@ -2459,6 +3031,188 @@ describe('SharePriceDashboard metrics mode', () => {
       columnKey: overriddenColumnKey,
     });
     expect(overriddenCellAfterClear).toBeTruthy();
+    expect(overriddenCellAfterClear.getAttribute('data-is-overridden')).toBe('false');
+  });
+
+  it('opens the shared override editor from a main-table right click', async () => {
+    await renderDashboard();
+
+    const sharePriceCell = getMainTableCell({
+      rowKey: 'annualData[].base.sharePrice',
+      columnKey: 'annual-2025',
+    });
+    expect(sharePriceCell).toBeTruthy();
+
+    const contextMenuEvent = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+    });
+
+    await act(async () => {
+      sharePriceCell.dispatchEvent(contextMenuEvent);
+    });
+
+    expect(contextMenuEvent.defaultPrevented).toBe(true);
+    expect(screen.getByTestId('share-price-dashboard-metric-editor')).toBeTruthy();
+  });
+
+  it('opens the shared override editor from a main-table long press', async () => {
+    await renderDashboard();
+
+    const sharesOnIssueCell = getMainTableCell({
+      rowKey: 'annualData[].base.sharesOnIssue',
+      columnKey: 'annual-2025',
+    });
+    expect(sharesOnIssueCell).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.touchStart(sharesOnIssueCell, {
+        touches: [{ clientX: 20, clientY: 20 }],
+      });
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 800);
+      });
+    });
+
+    expect(screen.getByTestId('share-price-dashboard-metric-editor')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.touchEnd(sharesOnIssueCell, { touches: [] });
+    });
+  });
+
+  it('keeps non-overrideable main-table cells inert', async () => {
+    const payload = buildDashboardPayload();
+    payload.annualMainTableRows[payload.annualMainTableRows.length - 1].cells.sharePrice = {
+      ...payload.annualMainTableRows[payload.annualMainTableRows.length - 1].cells.sharePrice,
+      isOverrideable: false,
+      overrideTarget: null,
+    };
+
+    await renderDashboard({ payload });
+
+    const sharePriceCell = getMainTableCell({
+      rowKey: 'annualData[].base.sharePrice',
+      columnKey: 'annual-2025',
+    });
+    expect(sharePriceCell).toBeTruthy();
+
+    const contextMenuEvent = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+    });
+
+    await act(async () => {
+      sharePriceCell.dispatchEvent(contextMenuEvent);
+    });
+
+    expect(contextMenuEvent.defaultPrevented).toBe(false);
+    expect(screen.queryByTestId('share-price-dashboard-metric-editor')).toBeNull();
+  });
+
+  it('saves a main-table override through the existing annual override route', async () => {
+    const initialPayload = buildDashboardPayload();
+    const savedPayload = buildDashboardPayload();
+    savedPayload.annualMainTableRows[savedPayload.annualMainTableRows.length - 1].cells.sharePrice = {
+      ...savedPayload.annualMainTableRows[savedPayload.annualMainTableRows.length - 1].cells.sharePrice,
+      value: 333.33,
+      sourceOfTruth: 'user',
+      isOverridden: true,
+    };
+
+    updateDashboardMetricOverride.mockResolvedValue({});
+
+    const { user } = await renderDashboard({
+      payloadSequence: [initialPayload, savedPayload],
+    });
+
+    const sharePriceCell = getMainTableCell({
+      rowKey: 'annualData[].base.sharePrice',
+      columnKey: 'annual-2025',
+    });
+    expect(sharePriceCell).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.contextMenu(sharePriceCell);
+    });
+
+    const overrideInput = screen.getByLabelText('Override value');
+    await user.clear(overrideInput);
+    await user.type(overrideInput, '333.33');
+    await user.click(screen.getByRole('button', { name: 'SAVE OVERRIDE' }));
+    await flushDashboardWork();
+    await flushDashboardWork();
+
+    expect(updateDashboardMetricOverride).toHaveBeenCalledWith(
+      'AAPL',
+      {
+        kind: 'annual',
+        fiscalYear: 2025,
+        payloadPath: 'base.sharePrice',
+      },
+      333.33,
+    );
+
+    const savedCell = getMainTableCell({
+      rowKey: 'annualData[].base.sharePrice',
+      columnKey: 'annual-2025',
+    });
+    expect(savedCell.getAttribute('data-is-overridden')).toBe('true');
+  });
+
+  it('drops the overridden flag after CLEAR OVERRIDE reloads a main-table payload', async () => {
+    const initialPayload = buildDashboardPayload();
+    const clearedPayload = buildDashboardPayload();
+
+    initialPayload.annualMainTableRows[initialPayload.annualMainTableRows.length - 1].cells.sharesOnIssue = {
+      ...initialPayload.annualMainTableRows[initialPayload.annualMainTableRows.length - 1].cells.sharesOnIssue,
+      sourceOfTruth: 'user',
+      isOverridden: true,
+      value: 2000000000,
+    };
+    clearedPayload.annualMainTableRows[clearedPayload.annualMainTableRows.length - 1].cells.sharesOnIssue = {
+      ...clearedPayload.annualMainTableRows[clearedPayload.annualMainTableRows.length - 1].cells.sharesOnIssue,
+      sourceOfTruth: 'roic',
+      isOverridden: false,
+      value: 1015000000,
+    };
+
+    updateDashboardMetricOverride.mockResolvedValue({});
+
+    const { user } = await renderDashboard({
+      payloadSequence: [initialPayload, clearedPayload],
+    });
+
+    const overriddenCellBeforeClear = getMainTableCell({
+      rowKey: 'annualData[].base.sharesOnIssue',
+      columnKey: 'annual-2025',
+    });
+    expect(overriddenCellBeforeClear.getAttribute('data-is-overridden')).toBe('true');
+
+    await act(async () => {
+      fireEvent.contextMenu(overriddenCellBeforeClear);
+    });
+
+    await user.click(screen.getByRole('button', { name: 'CLEAR OVERRIDE' }));
+    await flushDashboardWork();
+    await flushDashboardWork();
+
+    expect(updateDashboardMetricOverride).toHaveBeenCalledWith(
+      'AAPL',
+      {
+        kind: 'annual',
+        fiscalYear: 2025,
+        payloadPath: 'base.sharesOnIssue',
+      },
+      null,
+    );
+
+    const overriddenCellAfterClear = getMainTableCell({
+      rowKey: 'annualData[].base.sharesOnIssue',
+      columnKey: 'annual-2025',
+    });
     expect(overriddenCellAfterClear.getAttribute('data-is-overridden')).toBe('false');
   });
 

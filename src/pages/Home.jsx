@@ -22,6 +22,9 @@ function Home() {
     const controller = new AbortController();
 
     const loadInvestmentCategoryCards = async () => {
+      // Home now asks the backend for the canonical latest trailing 5Y payload
+      // on the very first request. That lets each card mount with the correct
+      // default range instead of loading once and immediately re-querying.
       setCardsStatus('loading');
       setCardsError('');
 

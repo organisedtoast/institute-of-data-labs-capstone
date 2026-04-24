@@ -13,6 +13,14 @@ process.env.PORT = "3104";
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const mongoose = require("mongoose");
+
+const { buildIsolatedMongoUri } = require("./helpers/buildIsolatedMongoUri");
+
+process.env.MONGO_URI = buildIsolatedMongoUri(
+  process.env.MONGO_URI,
+  "stockgossipmonitor_investment_category_cards_routes_test"
+);
 
 const WatchlistStock = require("../models/WatchlistStock");
 const InvestmentCategoryConstituentPreference = require("../models/InvestmentCategoryConstituentPreference");
@@ -84,6 +92,11 @@ test.after(async () => {
   // Always restore the real ROIC method so other tests are not affected.
   roicService.fetchStockPrices = originalFetchStockPrices;
   await clearHomepageCollections();
+
+  if (mongoose.connection.readyState === 1) {
+    await mongoose.connection.dropDatabase();
+  }
+
   await stopServer();
 });
 

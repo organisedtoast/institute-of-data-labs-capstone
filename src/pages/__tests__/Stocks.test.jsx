@@ -5,15 +5,24 @@
 // when that focused card exits metrics mode.
 
 import React from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Stocks from '../Stocks';
 import useStockSearch from '../../hooks/useStockSearch';
+import {
+  fetchWatchlistDashboardBootstraps,
+  refreshWatchlistDashboardBootstrap,
+} from '../../services/watchlistDashboardApi';
 
 vi.mock('../../hooks/useStockSearch', () => ({
   default: vi.fn(),
+}));
+
+vi.mock('../../services/watchlistDashboardApi', () => ({
+  fetchWatchlistDashboardBootstraps: vi.fn(),
+  refreshWatchlistDashboardBootstrap: vi.fn(),
 }));
 
 vi.mock('../../components/StockSearchResults', () => ({
@@ -76,6 +85,29 @@ function renderStocksPage(overrides = {}) {
     ...overrides,
   });
 
+  fetchWatchlistDashboardBootstraps.mockResolvedValue([
+    {
+      identifier: 'AAPL',
+      companyName: 'Apple Inc.',
+      prices: [{ date: '2024-01-02', close: 100 }],
+      annualMetrics: [],
+      metricsColumns: [],
+      metricsRows: [],
+      hasLoadedMetricsView: false,
+      needsBackgroundRefresh: false,
+    },
+    {
+      identifier: 'MSFT',
+      companyName: 'Microsoft Corporation',
+      prices: [{ date: '2024-01-02', close: 200 }],
+      annualMetrics: [],
+      metricsColumns: [],
+      metricsRows: [],
+      hasLoadedMetricsView: false,
+      needsBackgroundRefresh: false,
+    },
+  ]);
+
   return render(<Stocks />);
 }
 
@@ -90,6 +122,8 @@ function getDashboardCard(identifier) {
 describe('Stocks page focused metrics mode', () => {
   beforeEach(() => {
     useStockSearch.mockReset();
+    fetchWatchlistDashboardBootstraps.mockReset();
+    refreshWatchlistDashboardBootstrap.mockReset();
   });
 
   it('keeps search visible while hiding sibling stock cards for the focused stock', async () => {
@@ -97,9 +131,12 @@ describe('Stocks page focused metrics mode', () => {
 
     renderStocksPage();
 
+    await waitFor(() => {
+      expect(screen.getAllByTestId('share-price-dashboard-mock')).toHaveLength(2);
+    });
+
     // The page starts in its normal watchlist mode, so both mocked cards should
     // be visible before any stock enters focused metrics mode.
-    expect(screen.getAllByTestId('share-price-dashboard-mock')).toHaveLength(2);
     expect(screen.getByTestId('stock-search-results')).toBeTruthy();
 
     // Clicking SHOW METRICS on AAPL simulates the child dashboard asking the
@@ -118,6 +155,10 @@ describe('Stocks page focused metrics mode', () => {
 
     renderStocksPage();
 
+    await waitFor(() => {
+      expect(screen.getAllByTestId('share-price-dashboard-mock')).toHaveLength(2);
+    });
+
     // We enter focused metrics mode first so the second click can prove that
     // HIDE METRICS returns the page to its ordinary multi-card watchlist state.
     await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'SHOW METRICS' }));
@@ -128,5 +169,44 @@ describe('Stocks page focused metrics mode', () => {
     expect(getDashboardCard('AAPL')).toBeTruthy();
     expect(getDashboardCard('MSFT')).toBeTruthy();
     expect(screen.queryByText('Focused metrics mode')).toBeNull();
+  });
+
+  it('refreshes legacy dashboard cards in the background without blocking the initial render', async () => {
+    fetchWatchlistDashboardBootstraps.mockResolvedValueOnce([
+      {
+        identifier: 'AAPL',
+        companyName: 'Apple Inc.',
+        prices: [{ date: '2024-01-02', close: 100 }],
+        annualMetrics: [],
+        metricsColumns: [],
+        metricsRows: [],
+        hasLoadedMetricsView: false,
+        needsBackgroundRefresh: true,
+      },
+    ]);
+    refreshWatchlistDashboardBootstrap.mockResolvedValueOnce({
+      identifier: 'AAPL',
+      companyName: 'Apple Inc.',
+      prices: [{ date: '2024-01-02', close: 101 }],
+      annualMetrics: [],
+      metricsColumns: [],
+      metricsRows: [],
+      hasLoadedMetricsView: false,
+      needsBackgroundRefresh: false,
+    });
+
+    renderStocksPage({
+      stocks: [buildStock()],
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('share-price-dashboard-mock')).toHaveLength(1);
+    });
+
+    expect(screen.queryByText('Loading your watchlist...')).toBeNull();
+
+    await waitFor(() => {
+      expect(refreshWatchlistDashboardBootstrap).toHaveBeenCalledWith('AAPL');
+    });
   });
 });

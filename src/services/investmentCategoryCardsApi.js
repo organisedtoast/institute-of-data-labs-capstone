@@ -12,6 +12,7 @@ function normalizeCard(card) {
       typeof card?.startMonth === 'string' ? card.startMonth : '',
     endMonth:
       typeof card?.endMonth === 'string' ? card.endMonth : '',
+    isCanonicalInitialRange: card?.isCanonicalInitialRange === true,
     series: Array.isArray(card?.series)
       ? card.series
           .map((point) => ({

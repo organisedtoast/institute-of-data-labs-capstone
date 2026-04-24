@@ -1,4 +1,6 @@
 // This routes file defines all the endpoints related to the watchlist, including
+// lightweight summary reads,
+// batched dashboard bootstrap reads,
 // CRUD operations,
 // importing stocks,
 // setting overrides, and
@@ -23,7 +25,7 @@ const {
 const { importStock } = require("../controllers/importController");
 const {
   getAllStocks, getOneStock, createStock,
-  updateStock, deleteStock,
+  updateStock, deleteStock, getStockSummaries, getDashboardBootstraps,
 } = require("../controllers/watchlistController");
 const {
   setAnnualOverride,
@@ -39,6 +41,11 @@ const {
 // Import routes
 router.post("/import", importStock);
  
+// Summary and dashboard bootstrap reads come before `/:ticker` so those named
+// paths never get mistaken for a stock symbol.
+router.get("/summary", getStockSummaries);
+router.get("/dashboards", getDashboardBootstraps);
+
 // CRUD routes
 router.get("/", getAllStocks);
 router.get("/:ticker", validateTicker, getOneStock);

@@ -13,10 +13,24 @@ process.env.PORT = "3110";
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const mongoose = require("mongoose");
+
+const { buildIsolatedMongoUri } = require("./helpers/buildIsolatedMongoUri");
+
+process.env.MONGO_URI = buildIsolatedMongoUri(
+  process.env.MONGO_URI,
+  "stockgossipmonitor_lens_visibility_test"
+);
 
 const WatchlistStock = require("../models/WatchlistStock");
 const { startServer, stopServer } = require("../server");
 const { resolveVisibleFieldsForCategory, resolveVisibleFieldsForStock } = require("../services/lensService");
+
+test.after(async () => {
+  if (mongoose.connection.readyState === 1) {
+    await mongoose.connection.dropDatabase();
+  }
+});
 
 test("lens visibility resolves card/detail fields for categories and stocks", async () => {
   // Start the real server so the seeded/default lenses are available exactly as

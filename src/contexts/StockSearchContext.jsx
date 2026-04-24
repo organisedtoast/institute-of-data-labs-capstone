@@ -61,13 +61,16 @@ function getApiErrorMessage(requestError, fallbackMessage) {
 }
 
 function mapWatchlistStockToCard(stockDocument) {
-  const identifier = normalizeTickerIdentifier(stockDocument?.tickerSymbol);
+  const identifier = normalizeTickerIdentifier(
+    stockDocument?.identifier || stockDocument?.tickerSymbol,
+  );
 
   if (!identifier) {
     return null;
   }
 
   const rawName =
+    stockDocument?.name ||
     stockDocument?.companyName?.effectiveValue ||
     stockDocument?.companyName?.userValue ||
     stockDocument?.companyName?.roicValue ||
@@ -122,7 +125,7 @@ export function StockSearchProvider({ children }) {
     setStocksError('');
 
     try {
-      const response = await axios.get('/api/watchlist');
+      const response = await axios.get('/api/watchlist/summary');
       const stockCards = Array.isArray(response.data)
         ? response.data.map(mapWatchlistStockToCard).filter(Boolean)
         : [];
@@ -151,10 +154,9 @@ export function StockSearchProvider({ children }) {
     setSearchError('');
   }, []);
 
-  // We intentionally use the watchlist we already loaded into frontend state as
-  // the source of truth for the `SEE STOCK` label. That means the label reflects
-  // what this page currently knows about `/api/watchlist`, which is fast and simple
-  // even though it can be briefly stale if another tab changes the database.
+  // We intentionally use the lightweight watchlist summary already loaded into
+  // frontend state as the source of truth for the `SEE STOCK` label. That keeps
+  // the shared search flow fast even though another tab could briefly make it stale.
   const watchlistTickerSet = useMemo(() => {
     return new Set(
       stocks

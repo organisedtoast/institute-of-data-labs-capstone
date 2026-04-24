@@ -194,8 +194,21 @@ export function getYAxisDecimalPlaces(tickValues) {
   );
 }
 
+const PLAIN_VALUE_NO_DECIMALS_THRESHOLD = 100;
+
+function getPlainLabelFractionDigits(value, fallbackFractionDigits) {
+  if (!Number.isFinite(Number(value))) {
+    return fallbackFractionDigits;
+  }
+
+  return Math.abs(Number(value)) >= PLAIN_VALUE_NO_DECIMALS_THRESHOLD ? 0 : fallbackFractionDigits;
+}
+
 export function formatYAxisPrice(value, tickValues) {
-  const decimalPlaces = getYAxisDecimalPlaces(tickValues);
+  // The stock card uses the same plain-value rule in both the table and chart:
+  // once a non-compact value reaches 100, we drop decimals to keep the labels
+  // easy to scan while leaving smaller values at the chart's normal precision.
+  const decimalPlaces = getPlainLabelFractionDigits(value, getYAxisDecimalPlaces(tickValues));
 
   return new Intl.NumberFormat('en-US', {
     style: 'currency',

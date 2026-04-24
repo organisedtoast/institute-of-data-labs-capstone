@@ -191,14 +191,34 @@ export default function SectorCardComponent({ initialCardData }) {
     : freeRangeEndMonth;
 
   const isRangeValid = !currentStartMonth || !currentEndMonth || compareMonthStrings(currentStartMonth, currentEndMonth) <= 0;
+  const canonicalInitialRangeStartMonth = cardData?.startMonth || '';
+  const canonicalInitialRangeEndMonth = cardData?.endMonth || '';
+  const hasCanonicalInitialRange = cardData?.isCanonicalInitialRange === true;
+  const investmentCategory = cardData?.investmentCategory || '';
 
   useEffect(() => {
-    if (!cardData?.investmentCategory || !isRangeValid) {
+    // The backend now gives the card the correct first range, so this effect
+    // only fetches after the page moves away from that starting payload. This
+    // ref remembers the last finished request as bookkeeping, not user-visible state.
+    if (!investmentCategory || !isRangeValid) {
       return undefined;
     }
 
     if (
-      lastCompletedRangeRef.current.investmentCategory === cardData.investmentCategory
+      hasCanonicalInitialRange
+      && currentStartMonth === canonicalInitialRangeStartMonth
+      && currentEndMonth === canonicalInitialRangeEndMonth
+    ) {
+      lastCompletedRangeRef.current = {
+        investmentCategory,
+        startMonth: currentStartMonth,
+        endMonth: currentEndMonth,
+      };
+      return undefined;
+    }
+
+    if (
+      lastCompletedRangeRef.current.investmentCategory === investmentCategory
       && lastCompletedRangeRef.current.startMonth === currentStartMonth
       && lastCompletedRangeRef.current.endMonth === currentEndMonth
     ) {
@@ -213,7 +233,7 @@ export default function SectorCardComponent({ initialCardData }) {
       try {
         const nextCardData = await queryInvestmentCategoryCard(
           {
-            investmentCategory: cardData.investmentCategory,
+            investmentCategory,
             startMonth: currentStartMonth,
             endMonth: currentEndMonth,
           },
@@ -234,7 +254,7 @@ export default function SectorCardComponent({ initialCardData }) {
         setError(
           requestError.response?.data?.error
             || requestError.response?.data?.message
-            || `Unable to load the ${cardData.investmentCategory} card right now.`,
+            || `Unable to load the ${investmentCategory} card right now.`,
         );
       } finally {
         setIsLoading(false);
@@ -245,7 +265,15 @@ export default function SectorCardComponent({ initialCardData }) {
       controller.abort();
       window.clearTimeout(timeoutId);
     };
-  }, [cardData?.investmentCategory, currentEndMonth, currentStartMonth, isRangeValid]);
+  }, [
+    canonicalInitialRangeEndMonth,
+    canonicalInitialRangeStartMonth,
+    currentEndMonth,
+    currentStartMonth,
+    hasCanonicalInitialRange,
+    investmentCategory,
+    isRangeValid,
+  ]);
 
   const handlePresetClick = (presetButton) => {
     if (!minAvailableMonth || !maxAvailableMonth) {

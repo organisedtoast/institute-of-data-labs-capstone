@@ -1,11 +1,19 @@
-// Basic watchlist CRUD remains intentionally small:
+// Watchlist reads now have two levels:
+// - lightweight summary reads for shared search/navigation state
+// - richer dashboard bootstrap reads for the Stocks page first paint
+//
+// The older CRUD routes still stay here too:
 // - create a placeholder stock manually
-// - read one or many stocks
+// - read one or many full stock documents
 // - update category or company name
 // - delete a stock
 
 const WatchlistStock = require("../models/WatchlistStock");
 const { assertActiveLensName } = require("../services/lensService");
+const {
+  listWatchlistDashboardBootstraps,
+  listWatchlistSummaries,
+} = require("../services/watchlistDashboardService");
 const {
   createEmptyAnalystRevisions,
   createEmptyForecastBucket,
@@ -52,6 +60,31 @@ async function getAllStocks(req, res, next) {
   try {
     const stocks = await WatchlistStock.find();
     res.json(stocks);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getStockSummaries(req, res, next) {
+  try {
+    const summaries = await listWatchlistSummaries();
+    res.json(summaries);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getDashboardBootstraps(req, res, next) {
+  try {
+    const requestedTickers = typeof req.query?.tickers === "string"
+      ? req.query.tickers.split(",")
+      : Array.isArray(req.query?.tickers)
+        ? req.query.tickers
+        : [];
+    const dashboards = await listWatchlistDashboardBootstraps({
+      tickers: requestedTickers,
+    });
+    res.json({ dashboards });
   } catch (error) {
     next(error);
   }
@@ -135,4 +168,12 @@ async function deleteStock(req, res, next) {
   }
 }
 
-module.exports = { createStock, deleteStock, getAllStocks, getOneStock, updateStock };
+module.exports = {
+  createStock,
+  deleteStock,
+  getAllStocks,
+  getDashboardBootstraps,
+  getOneStock,
+  getStockSummaries,
+  updateStock,
+};

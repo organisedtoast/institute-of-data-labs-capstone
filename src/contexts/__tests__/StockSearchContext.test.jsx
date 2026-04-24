@@ -1,9 +1,6 @@
-// Purpose of this test file:
 // These tests protect the shared stock-search state used by the Home and Stocks
-// pages. They focus on how the context loads the watchlist, decides whether a
-// searched ticker already exists, reuses an existing watchlist entry instead of
-// importing again, imports missing stocks, and now opens/prioritizes existing
-// stocks through the dedicated `SEE STOCK` path.
+// pages. They focus on summary payload loading, duplicate prevention, import
+// behavior, and the dedicated `SEE STOCK` path for already-known cards.
 
 import React from 'react';
 import axios from 'axios';
@@ -111,9 +108,10 @@ describe('StockSearchContext', () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it('loads stock cards from the backend watchlist on mount', async () => {
-    // The first `axios.get` call always loads `/api/watchlist` when the provider mounts.
-    // Returning one stock here simulates the page booting with AAPL already in MongoDB.
+  it('loads stock cards from the backend watchlist summary on mount', async () => {
+    // The first `axios.get` now loads the lightweight summary payload from the
+    // backend. Returning one stock here simulates the page starting with AAPL
+    // already in MongoDB.
     axios.get.mockResolvedValueOnce({
       data: [buildWatchlistStock()],
     });
@@ -124,8 +122,9 @@ describe('StockSearchContext', () => {
       expect(screen.getByTestId('stocks-status').textContent).toBe('success');
     });
 
-    // The rendered list proves the backend watchlist document was normalized
-    // into the simpler card shape used by the UI.
+    // The rendered list proves the summary payload was normalized into the
+    // simpler card shape used by shared page state.
+    expect(axios.get).toHaveBeenCalledWith('/api/watchlist/summary');
     expect(screen.getByText('AAPL:Apple Inc.')).toBeTruthy();
     expect(screen.getByTestId('in-watchlist').textContent).toBe('true');
   });
@@ -133,10 +132,10 @@ describe('StockSearchContext', () => {
   it('reuses an existing watchlist stock without importing it again', async () => {
     const user = userEvent.setup();
 
-    // Call order matters in this test:
-    // 1. initial provider mount loads an empty watchlist
+    // Call order matters here:
+    // 1. the provider loads an empty summary payload
     // 2. addStockFromResult checks whether /api/watchlist/AAPL already exists
-    // 3. loadStocks runs again and returns the watchlist with AAPL in it
+    // 3. the provider reloads the summary payload with AAPL in it
     axios.get
       .mockResolvedValueOnce({ data: [] })
       .mockResolvedValueOnce({ data: buildWatchlistStock() })
@@ -154,8 +153,8 @@ describe('StockSearchContext', () => {
       expect(screen.getByTestId('search-status').textContent).toBe('success');
     });
 
-    // This is the key business rule: if the stock already exists, we must not
-    // call the import route and create a duplicate record.
+    // This is the key rule: if the stock already exists, the page must not
+    // call the import route and create a duplicate card.
     expect(axios.post).not.toHaveBeenCalled();
     expect(axios.get).toHaveBeenNthCalledWith(2, '/api/watchlist/AAPL');
     expect(screen.getByText('AAPL:Apple Inc.')).toBeTruthy();
@@ -164,9 +163,9 @@ describe('StockSearchContext', () => {
   it('opens an existing watchlist stock without checking the import route again', async () => {
     const user = userEvent.setup();
 
-    // This test covers the new dedicated "SEE STOCK" path.
-    // Because the stock is already in loaded frontend state, the context can
-    // simply reload/prioritize the watchlist instead of re-checking/importing.
+    // This covers the dedicated `SEE STOCK` path. Because the stock is already
+    // in loaded summary state, the context can reload/prioritize it instead of
+    // re-checking the backend or importing again.
     axios.get
       .mockResolvedValueOnce({ data: [buildWatchlistStock()] })
       .mockResolvedValueOnce({ data: [buildWatchlistStock()] });
@@ -183,8 +182,8 @@ describe('StockSearchContext', () => {
       expect(screen.getByTestId('search-status').textContent).toBe('success');
     });
 
-    // The open-existing path should never call either the existence check route
-    // or the import route. It only reloads the already-known watchlist.
+    // The open-existing path should never call the existence-check route or the
+    // import route. It only reloads the already-known summary state.
     expect(axios.post).not.toHaveBeenCalled();
     expect(axios.get).toHaveBeenCalledTimes(2);
     expect(axios.get).not.toHaveBeenCalledWith('/api/watchlist/AAPL');
@@ -195,9 +194,9 @@ describe('StockSearchContext', () => {
     const user = userEvent.setup();
 
     // Call order here simulates the "stock does not exist yet" path:
-    // 1. initial watchlist load is empty
+    // 1. initial summary payload is empty
     // 2. existence check for /api/watchlist/AAPL returns 404
-    // 3. reloading the watchlist after import now returns AAPL
+    // 3. reloading the summary payload after import now returns AAPL
     axios.get
       .mockResolvedValueOnce({ data: [] })
       .mockRejectedValueOnce({
@@ -222,7 +221,7 @@ describe('StockSearchContext', () => {
       expect(screen.getByTestId('search-status').textContent).toBe('success');
     });
 
-    // Missing stocks should still go through the import route with the default category.
+    // Missing stocks should still use the import route with the default category.
     expect(axios.post).toHaveBeenCalledWith('/api/watchlist/import', {
       tickerSymbol: 'AAPL',
       investmentCategory: 'Firm Specific Turnaround',

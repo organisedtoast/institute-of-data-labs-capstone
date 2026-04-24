@@ -35,6 +35,7 @@ import {
 } from './timeSeriesChartCore';
 import {
   fetchDashboardData,
+  fetchDashboardMetricsView,
   updateDashboardMetricOverride,
   updateDashboardInvestmentCategory,
   updateDashboardRowPreference,
@@ -251,18 +252,64 @@ function formatLongDate(dateString) {
   return longDateFormatter.format(new Date(dateString));
 }
 
+const PLAIN_VALUE_NO_DECIMALS_THRESHOLD = 100;
+const COMPACT_VALUE_NO_DECIMALS_THRESHOLD = 100;
+const COMPACT_MAGNITUDE_THRESHOLDS = [
+  1e12,
+  1e9,
+  1e6,
+  1e3,
+];
+
+function shouldDropPlainValueDecimals(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return false;
+  }
+
+  return Math.abs(Number(value)) >= PLAIN_VALUE_NO_DECIMALS_THRESHOLD;
+}
+
+function getPlainValueFractionDigits(value, fallbackFractionDigits) {
+  return shouldDropPlainValueDecimals(value) ? 0 : fallbackFractionDigits;
+}
+
+function getCompactValueFractionDigits(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return 1;
+  }
+
+  const absoluteValue = Math.abs(Number(value));
+  const compactUnit = COMPACT_MAGNITUDE_THRESHOLDS.find((threshold) => absoluteValue >= threshold) || 1;
+  const compactMagnitude = absoluteValue / compactUnit;
+
+  return compactMagnitude >= COMPACT_VALUE_NO_DECIMALS_THRESHOLD ? 0 : 1;
+}
+
 function formatCurrency(value, options = {}) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return '--';
   }
+
+  // Plain stock-card values at 100 or more are easier to scan without cents.
+  // Compact values use their own rule: keep one decimal below 100 compact
+  // units, then switch to whole numbers once the compact text reaches 3 digits.
+  // That keeps compact formatting separate from the plain "100+" rule.
+  const fractionDigits = options.compact
+    ? {
+        minimumFractionDigits: getCompactValueFractionDigits(value),
+        maximumFractionDigits: getCompactValueFractionDigits(value),
+      }
+    : {
+        minimumFractionDigits: getPlainValueFractionDigits(value, 2),
+        maximumFractionDigits: getPlainValueFractionDigits(value, 2),
+      };
 
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
     notation: options.compact ? 'compact' : 'standard',
     compactDisplay: options.compact ? 'short' : undefined,
-    minimumFractionDigits: options.compact ? 0 : 2,
-    maximumFractionDigits: options.compact ? 1 : 2,
+    ...fractionDigits,
   }).format(value);
 }
 
@@ -271,10 +318,13 @@ function formatCompactNumber(value) {
     return '--';
   }
 
+  const compactFractionDigits = getCompactValueFractionDigits(value);
+
   return new Intl.NumberFormat('en-US', {
     notation: 'compact',
     compactDisplay: 'short',
-    maximumFractionDigits: 1,
+    minimumFractionDigits: compactFractionDigits,
+    maximumFractionDigits: compactFractionDigits,
   }).format(value);
 }
 
@@ -283,7 +333,7 @@ function formatPercent(value) {
     return '--';
   }
 
-  return `${Number(value).toFixed(2)}%`;
+  return `${Number(value).toFixed(getPlainValueFractionDigits(value, 2))}%`;
 }
 
 function formatCompactPercent(value) {
@@ -358,7 +408,7 @@ function formatPlainNumber(value, maximumFractionDigits = 2) {
   }
 
   return new Intl.NumberFormat('en-US', {
-    maximumFractionDigits,
+    maximumFractionDigits: getPlainValueFractionDigits(value, maximumFractionDigits),
   }).format(Number(value));
 }
 
@@ -377,7 +427,9 @@ function formatMetricPercent(value) {
 
   const numericValue = Number(value);
   const displayValue = Math.abs(numericValue) <= 1 ? numericValue * 100 : numericValue;
-  return `${displayValue.toFixed(1)}%`;
+  // This rule uses absolute magnitude, so negative percentages follow the same
+  // "100 or more means no decimals" display threshold as the table and chart.
+  return `${displayValue.toFixed(getPlainValueFractionDigits(displayValue, 1))}%`;
 }
 
 function inferMetricDisplayKind(fieldPath) {
@@ -738,6 +790,10 @@ function useMediaQueryMatch(mediaQuery) {
 export default function SharePriceDashboard({
   identifier,
   name,
+  // The page can hand the card a batched bootstrap payload from the backend.
+  // That lets the card render on first paint while keeping the old fetch fallback
+  // for tests and any future direct use outside the page flow.
+  initialDashboardData = null,
   isRemovable = false,
   onRemove = null,
   scaleAnimationDurationMs = null,
@@ -747,7 +803,8 @@ export default function SharePriceDashboard({
   const svgRef = useRef(null);
   const timelineScrollRef = useRef(null);
   const [dashboardData, setDashboardData] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(initialDashboardData == null);
+  const [isLoadingMetrics, setIsLoadingMetrics] = useState(false);
   const [error, setError] = useState('');
   const [investmentCategoryError, setInvestmentCategoryError] = useState('');
   const [metricsActionError, setMetricsActionError] = useState('');
@@ -834,32 +891,26 @@ export default function SharePriceDashboard({
         return previousDashboardData;
       }
 
+      const nextMetricsColumns = Array.isArray(metricsUpdate?.metricsColumns)
+        ? metricsUpdate.metricsColumns
+        : previousDashboardData.metricsColumns;
+      const nextMetricsRows = Array.isArray(metricsUpdate?.metricsRows)
+        ? metricsUpdate.metricsRows
+        : previousDashboardData.metricsRows;
+      const hasLoadedMetricsView =
+        metricsUpdate?.hasLoadedMetricsView === true
+        || (Array.isArray(nextMetricsColumns) && nextMetricsColumns.length > 0)
+        || (Array.isArray(nextMetricsRows) && nextMetricsRows.length > 0)
+        || previousDashboardData.hasLoadedMetricsView === true;
+
       return {
         ...previousDashboardData,
-        metricsColumns: Array.isArray(metricsUpdate?.metricsColumns)
-          ? metricsUpdate.metricsColumns
-          : previousDashboardData.metricsColumns,
-        metricsRows: Array.isArray(metricsUpdate?.metricsRows)
-          ? metricsUpdate.metricsRows
-          : previousDashboardData.metricsRows,
+        metricsColumns: nextMetricsColumns,
+        metricsRows: nextMetricsRows,
+        hasLoadedMetricsView,
       };
     });
   }, []);
-
-  const reloadDashboardPayload = useCallback(async () => {
-    const nextDashboardData = await fetchDashboardData(identifier);
-
-    setDashboardData((previousDashboardData) => {
-      if (!previousDashboardData) {
-        return nextDashboardData;
-      }
-
-      return {
-        ...nextDashboardData,
-        investmentCategory: nextDashboardData.investmentCategory || previousDashboardData.investmentCategory,
-      };
-    });
-  }, [identifier]);
 
   const setFreeRangeMonths = useCallback((nextRange) => {
     setFreeRange((previousFreeRange) => {
@@ -879,7 +930,104 @@ export default function SharePriceDashboard({
     });
   }, []);
 
+  const applyDashboardSnapshot = useCallback((nextDashboardData, options = {}) => {
+    const {
+      preserveLoadedMetrics = true,
+      resetViewState = true,
+    } = options;
+    const normalizedNextDashboardData = nextDashboardData
+      ? {
+          ...nextDashboardData,
+          hasLoadedMetricsView:
+            nextDashboardData.hasLoadedMetricsView === true ||
+            (Array.isArray(nextDashboardData.metricsColumns) && nextDashboardData.metricsColumns.length > 0) ||
+            (Array.isArray(nextDashboardData.metricsRows) && nextDashboardData.metricsRows.length > 0),
+        }
+      : nextDashboardData;
+    const nextPriceRows = Array.isArray(normalizedNextDashboardData?.prices) ? normalizedNextDashboardData.prices : [];
+
+    setDashboardData((previousDashboardData) => {
+      if (
+        preserveLoadedMetrics
+        && previousDashboardData?.hasLoadedMetricsView
+        && normalizedNextDashboardData
+        && normalizedNextDashboardData.hasLoadedMetricsView !== true
+      ) {
+        return {
+          ...normalizedNextDashboardData,
+          metricsColumns: previousDashboardData.metricsColumns,
+          metricsRows: previousDashboardData.metricsRows,
+          hasLoadedMetricsView: true,
+        };
+      }
+
+      return normalizedNextDashboardData;
+    });
+
+    setInvestmentCategoryError('');
+    setMetricsActionError('');
+
+    if (resetViewState) {
+      setMetricEditorState(null);
+      setMetricEditorValue('');
+      setIsHiddenRowsOpen(false);
+      setIsMetricsOpen(false);
+    }
+
+    if (normalizedNextDashboardData?.loadError) {
+      setError(normalizedNextDashboardData.loadError);
+      return;
+    }
+
+    if (nextPriceRows.length === 0) {
+      setError(`No chart data is available for ${identifier}.`);
+      return;
+    }
+
+    setError('');
+
+    if (!resetViewState) {
+      return;
+    }
+
+    const defaultRange = getDefaultDashboardRange(nextPriceRows);
+
+    setFreeRangeMonths(defaultRange);
+    setRangeMode('preset');
+    setActivePreset('5Y');
+    // Preset scroll only becomes reliable after the browser measures the card
+    // and we snap to the latest trailing window, so this state protects that
+    // first paint setup for the preset viewport.
+    setIsPresetScrollReady(false);
+    setPresetPanOffsetMonths(0);
+  }, [identifier, setFreeRangeMonths]);
+
+  const reloadDashboardPayload = useCallback(async () => {
+    const nextDashboardData = await fetchDashboardData(identifier);
+
+    applyDashboardSnapshot(nextDashboardData, {
+      preserveLoadedMetrics: false,
+      resetViewState: false,
+    });
+  }, [applyDashboardSnapshot, identifier]);
+
   useEffect(() => {
+    if (!initialDashboardData || String(initialDashboardData.identifier || '').trim().toUpperCase() !== identifier) {
+      return;
+    }
+
+    setIsLoading(false);
+    applyDashboardSnapshot(initialDashboardData, {
+      preserveLoadedMetrics: true,
+      resetViewState: dashboardData?.identifier !== identifier,
+    });
+  }, [applyDashboardSnapshot, dashboardData?.identifier, identifier, initialDashboardData]);
+
+  useEffect(() => {
+    if (initialDashboardData && String(initialDashboardData.identifier || '').trim().toUpperCase() === identifier) {
+      return undefined;
+    }
+
     let isMounted = true;
     const controller = new AbortController();
 
@@ -900,32 +1048,10 @@ export default function SharePriceDashboard({
           return;
         }
 
-        const nextPriceRows = Array.isArray(nextDashboardData?.prices) ? nextDashboardData.prices : [];
-
-        if (nextPriceRows.length === 0) {
-          setDashboardData(null);
-          setError(`No chart data is available for ${identifier}.`);
-          setIsLoading(false);
-          return;
-        }
-
-        const defaultRange = getDefaultDashboardRange(nextPriceRows);
-
-        setDashboardData(nextDashboardData);
-        setInvestmentCategoryError('');
-        setMetricsActionError('');
-        setMetricEditorState(null);
-        setMetricEditorValue('');
-        setIsHiddenRowsOpen(false);
-        setIsMetricsOpen(false);
-        setFreeRangeMonths(defaultRange);
-        setRangeMode('preset');
-        setActivePreset('5Y');
-        // A fixed-length preset only becomes scrollable after the browser has
-        // measured the scroll container and we have snapped it to the latest
-        // trailing position on the hidden pan track.
-        setIsPresetScrollReady(false);
-        setPresetPanOffsetMonths(0);
+        applyDashboardSnapshot(nextDashboardData, {
+          preserveLoadedMetrics: false,
+          resetViewState: true,
+        });
       } catch (requestError) {
         if (!isMounted || requestError.name === 'CanceledError') {
           return;
@@ -949,12 +1075,76 @@ export default function SharePriceDashboard({
       isMounted = false;
       controller.abort();
     };
-  }, [identifier, setFreeRangeMonths]);
+  }, [applyDashboardSnapshot, identifier, initialDashboardData]);
 
-  const priceRows = dashboardData?.prices || [];
-  const annualMetrics = dashboardData?.annualMetrics || [];
-  const metricsColumns = dashboardData?.metricsColumns || [];
-  const metricsRows = dashboardData?.metricsRows || [];
+  useEffect(() => {
+    if (!isMetricsOpen || !dashboardData || dashboardData.hasLoadedMetricsView === true) {
+      return undefined;
+    }
+
+    let isMounted = true;
+    const controller = new AbortController();
+
+    const loadMetricsView = async () => {
+      // Detail metrics are intentionally lazy. Most visits only need the card
+      // shell, so the page waits until the user opens metrics before fetching
+      // the heavier metrics payload from the backend.
+      setIsLoadingMetrics(true);
+      setMetricsActionError('');
+
+      try {
+        const metricsUpdate = await fetchDashboardMetricsView(identifier, {
+          signal: controller.signal,
+        });
+
+        if (!isMounted) {
+          return;
+        }
+
+        applyMetricsViewUpdate(metricsUpdate);
+      } catch (requestError) {
+        if (!isMounted || requestError.name === 'CanceledError') {
+          return;
+        }
+
+        setMetricsActionError(
+          requestError.response?.data?.message ||
+          requestError.response?.data?.error ||
+          'Unable to load detail metrics right now.',
+        );
+      } finally {
+        if (isMounted) {
+          setIsLoadingMetrics(false);
+        }
+      }
+    };
+
+    loadMetricsView();
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
+  }, [applyMetricsViewUpdate, dashboardData, identifier, isMetricsOpen]);
+
+  // These collections feed many downstream memos. Memoizing the fallback keeps
+  // the dependencies honest, so a missing payload does not create fresh empty
+  // arrays on every render and look like fake data changes to the hooks below.
+  const priceRows = useMemo(() => (
+    Array.isArray(dashboardData?.prices) ? dashboardData.prices : []
+  ), [dashboardData?.prices]);
+  const annualMetrics = useMemo(() => (
+    Array.isArray(dashboardData?.annualMetrics) ? dashboardData.annualMetrics : []
+  ), [dashboardData?.annualMetrics]);
+  const annualMainTableRows = useMemo(() => (
+    Array.isArray(dashboardData?.annualMainTableRows) ? dashboardData.annualMainTableRows : []
+  ), [dashboardData?.annualMainTableRows]);
+  const metricsColumns = useMemo(() => (
+    Array.isArray(dashboardData?.metricsColumns) ? dashboardData.metricsColumns : []
+  ), [dashboardData?.metricsColumns]);
+  const metricsRows = useMemo(() => (
+    Array.isArray(dashboardData?.metricsRows) ? dashboardData.metricsRows : []
+  ), [dashboardData?.metricsRows]);
   const shouldUseShortLabels = useMediaQueryMatch(MOBILE_LABEL_BREAKPOINT_QUERY);
   const shouldUseBottomSheetMetricEditor = useMediaQueryMatch(MOBILE_METRIC_EDITOR_BREAKPOINT_QUERY);
   const activePresetConfig = PRESET_BUTTONS.find((preset) => preset.key === activePreset) || null;
@@ -1009,8 +1199,9 @@ export default function SharePriceDashboard({
     Math.max(presetPanOffsetMonths, 0),
     maxPresetPanOffset,
   );
-  // Preset mode owns one moving value: the month offset from the latest trailing preset.
-  // The displayed start/end months are derived from that offset instead of being rewritten by effects.
+  // Preset mode keeps one piece of user-visible state: the month offset from
+  // the latest trailing preset. The visible range is derived from that offset
+  // instead of being repaired later by effects.
   const currentStartMonth = isPresetWindowMode
     ? clampMonthString(
         shiftMonthString(latestPresetRange.startMonth, -clampedPresetPanOffsetMonths),
@@ -1047,8 +1238,9 @@ export default function SharePriceDashboard({
       return presetRange.startMonth === minAvailableMonth && presetRange.endMonth === maxAvailableMonth;
     });
   }, [fixedLengthPresetConfigs, maxAvailableMonth, minAvailableMonth]);
-  // MAX keeps free-range scrolling semantics, but short histories that already collapse to a
-  // fixed preset should reuse the preset layout so the chart/table geometry stays consistent.
+  // MAX normally keeps free-range scrolling rules, but short histories that
+  // already match a fixed preset reuse the preset layout so the card keeps the
+  // same chart/table geometry the user already sees.
   const usesPresetTimelineLayout = isPresetWindowMode || (
     activePreset === 'MAX'
     && currentStartMonth === minAvailableMonth
@@ -1074,15 +1266,22 @@ export default function SharePriceDashboard({
       return [];
     }
 
-    // The table uses annual points only, while the chart still uses all daily prices.
-    // Filtering them separately lets a short date range keep a dense chart without inventing
-    // extra fiscal-year rows that the backend does not actually have.
-    // The number of columns now comes from every completed year-end row inside the visible
-    // chart range, not from a preset-specific cap such as "10Y means 10 table columns".
+    // The chart still uses daily prices, but the table only uses annual rows.
+    // Filtering them separately preserves a dense chart without inventing extra
+    // fiscal-year rows the backend never sent for this card.
     return annualMetrics.filter((annualRow) => {
       return annualRow.fiscalYearEndDate >= startBoundaryDate && annualRow.fiscalYearEndDate <= endBoundaryDate;
     });
   }, [annualMetrics, endBoundaryDate, isRangeValid, startBoundaryDate]);
+  const visibleAnnualMainTableRows = useMemo(() => {
+    if (!annualMainTableRows.length || !startBoundaryDate || !endBoundaryDate || !isRangeValid) {
+      return [];
+    }
+
+    return annualMainTableRows.filter((annualRow) => {
+      return annualRow.fiscalYearEndDate >= startBoundaryDate && annualRow.fiscalYearEndDate <= endBoundaryDate;
+    });
+  }, [annualMainTableRows, endBoundaryDate, isRangeValid, startBoundaryDate]);
   const visibleMetricRows = useMemo(() => {
     return metricsRows.filter((row) => row.isEnabled !== false);
   }, [metricsRows]);
@@ -1212,8 +1411,8 @@ export default function SharePriceDashboard({
       return Math.max(maximumLength, String(fieldRow.shortLabel || '').length);
     }, 0);
 
-    // Keep the short-label rail only as wide as the current short labels need,
-    // while leaving a small buffer so the text does not kiss the column edge.
+    // The left rail follows the current short labels instead of staying
+    // oversized, while the small buffer keeps the text readable at the edge.
     return Math.max(
       MIN_SHORT_LABEL_LEFT_RAIL_WIDTH,
       Math.ceil(longestShortLabelLength * 6.5) + 18,
@@ -1228,9 +1427,8 @@ export default function SharePriceDashboard({
       return Math.max(maximumLength, String(fieldRow.label || '').length);
     }, 0);
 
-    // Wide layouts should still hug the active full labels instead of keeping
-    // a stale oversized fixed rail. The small buffer preserves breathing room
-    // between the text and the column divider.
+    // Wide layouts still size the left rail to the active labels. The buffer
+    // preserves breathing room without turning the rail into stale empty space.
     return Math.max(
       MIN_FULL_LABEL_LEFT_RAIL_WIDTH,
       Math.ceil(longestFullLabelLength * 6.6) + 18,
@@ -1248,9 +1446,9 @@ export default function SharePriceDashboard({
     && tablePoints.length >= 8
     && Boolean(scrollState.containerWidth)
     && scrollState.containerWidth < 560;
-  // MAX already gets readable spacing from its wider scrollable timeline. Narrow preset windows
-  // do not have that extra width, so we switch to a compact presentation before the columns
-  // become unreadable on mobile.
+  // MAX already has a wider timeline to work with. Narrow preset windows do
+  // not, so the card switches to a compact layout before the columns become
+  // unreadable on mobile.
   const fixedLeftRailWidth = isCompactPresetTable
     ? (shouldUseShortLabels ? compactShortLabelLeftRailWidth : 136)
     : (shouldUseShortLabels ? shortLabelLeftRailWidth : fullLabelLeftRailWidth);
@@ -1350,19 +1548,18 @@ export default function SharePriceDashboard({
       publishScrollMeasurementRef.current(scrollElement);
     };
 
-    // Preset windows and free-range windows share the same DOM scroller, but not the same meaning.
-    // Fixed-length presets use scroll to PAN the selected month range itself, while MAX/custom
-    // ranges use scroll inside the already-selected range for long-history chart/table layouts.
+    // Preset windows and free-range windows share one scroller, but they do
+    // different jobs. Presets use scroll to pan the selected range itself,
+    // while MAX/custom ranges scroll inside an already selected history.
     updateScrollWindow();
-    // Some cards report their final width one frame after mount, so we re-measure once more
-    // on the next frame instead of waiting for the user to manually resize the browser.
+    // Some cards settle on their final width one frame after mount, so the
+    // card re-measures once more instead of waiting for a manual resize.
     measurementFrameRef.current = requestAnimationFrame(() => {
       measurementFrameRef.current = null;
       updateScrollWindow();
 
-      // Short-history preset cards can mount their scroll region before the browser has
-      // finalized the real card width. One extra post-paint recheck closes that gap
-      // without relying on the user to manually resize the window.
+      // Short-history preset cards can still finish sizing one paint later.
+      // One extra post-paint check closes that gap without user intervention.
       postPaintMeasurementFrameRef.current = requestAnimationFrame(() => {
         postPaintMeasurementFrameRef.current = null;
         updateScrollWindow();
@@ -1401,12 +1598,9 @@ export default function SharePriceDashboard({
         window.removeEventListener('resize', updateScrollWindow);
       }
     };
-  // Re-run when data loads (priceRows.length 0→N) so the scroll element — which only
-  // renders after loading finishes — gets its ResizeObserver and initial measurement.
-  // publishScrollMeasurementRef.current is always kept current so we never need to
-  // re-run this effect just because fixedLeftRailWidth changed; the ResizeObserver
-  // naturally picks up the new viewportWidth on the next layout pass.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Re-run when price rows appear so the scroll element can attach its
+  // observer and publish its first measurement. The ref keeps the latest
+  // measurement function without turning width changes into effect churn.
   }, [priceRows.length]);
 
   useLayoutEffect(() => {
@@ -1430,10 +1624,9 @@ export default function SharePriceDashboard({
       cancelAnimationFrame(presetBootstrapFrameRef.current);
     }
 
-    // The hidden preset pan track is wider than the visible chart area so
-    // users can drag backward through older history. On first load we
-    // always park the scrollbar at the far-right edge, which represents
-    // the newest trailing preset window such as the latest available 5Y.
+    // The hidden preset track is wider than the visible chart area so users
+    // can pan into older history. On first paint the card parks the scrollbar
+    // at the newest trailing preset window, such as the latest 5Y.
     presetBootstrapFrameRef.current = requestAnimationFrame(() => {
       presetBootstrapFrameRef.current = null;
       scrollElement.scrollLeft = nextScrollLeft;
@@ -1801,7 +1994,7 @@ export default function SharePriceDashboard({
       mapTimeToX: chartXGeometry.mapTimeToX,
       mapXToTime: chartXGeometry.mapXToTime,
     };
-  }, [chartXGeometry, filteredPriceRows, renderedScale, timelineLayout.plotWidth, timelineLayout.yearCellWidth]);
+  }, [chartXGeometry, filteredPriceRows, renderedScale, timelineLayout.plotWidth]);
 
   const visibleYAxisLabels = useMemo(() => {
     if (chartGeometry.ticks.length <= 2) {
@@ -1827,9 +2020,9 @@ export default function SharePriceDashboard({
   const baseSurfaceWidth = fixedLeftRailWidth + timelineLayout.contentWidth;
   const presetPanTrackWidth = Math.max(scrollState.containerWidth || baseSurfaceWidth, baseSurfaceWidth) + (maxPresetPanOffset * PRESET_PAN_STEP_PX);
   const scrollSurfaceWidth = isPresetWindowMode ? presetPanTrackWidth : baseSurfaceWidth;
-  // Focused metrics mode is intentionally a second visual mode of the same card.
-  // The page decides *which* stock is in focus, while the card decides *how*
-  // to render the focused layout once that mode is active.
+  // Focused metrics is a second visual mode of the same card. The page owns
+  // which stock is in focus, while the card owns how that focused layout
+  // renders once the page turns the mode on.
   const usesFocusedMetricsViewport = isMetricsOpen && isFocusedMetricsMode;
   const focusedMetricsHorizontalOffset = usesPresetTimelineLayout ? 0 : visibleWindow.left;
   const focusedMetricsVisibleValuesWidth = Math.min(
@@ -1894,9 +2087,8 @@ export default function SharePriceDashboard({
   };
 
   const handleMetricsVisibilityToggle = () => {
-    // We keep the page-level "which stock is focused?" decision outside this
-    // component, but this card still owns the local open/closed state for the
-    // metrics surface itself. The callback bridges those two layers.
+    // The page owns which card is focused, but this card still owns its local
+    // metrics open/closed state. The callback bridges those two layers.
     const nextIsMetricsOpen = !isMetricsOpen;
 
     setMetricsActionError('');
@@ -2041,6 +2233,99 @@ export default function SharePriceDashboard({
   const handleMetricCellTouchEnd = () => {
     clearMetricCellLongPressTimeout();
     metricCellTouchStateRef.current.isActive = false;
+  };
+
+  const renderOverrideAwareAnnualValueCell = ({
+    cell,
+    columnKey,
+    centerX,
+    fiscalYear,
+    fieldPath,
+    formattedValue,
+    height,
+    width,
+    fontSize,
+    fiscalYearEndDate = null,
+    isHeader = false,
+    testId,
+  }) => {
+    if (!cell || !Number.isFinite(centerX)) {
+      return null;
+    }
+
+    // The base table now receives the same rich annual-cell metadata as detail
+    // metrics. Reusing one interaction shell keeps right click and long press
+    // behavior consistent without inventing a second override editor.
+    return (
+      <Box
+        key={`${fieldPath}-${columnKey}`}
+        role={cell.isOverrideable ? 'button' : undefined}
+        tabIndex={cell.isOverrideable ? 0 : undefined}
+        data-testid={testId}
+        data-row-key={fieldPath}
+        data-column-key={columnKey}
+        data-is-overridden={cell.isOverridden ? 'true' : 'false'}
+        data-fiscal-year={Number.isInteger(fiscalYear) ? String(fiscalYear) : undefined}
+        data-date={typeof fiscalYearEndDate === 'string' ? fiscalYearEndDate : undefined}
+        data-center-x={String(centerX)}
+        data-cell-width={String(width)}
+        onContextMenu={(event) => handleMetricCellContextMenu(event, { fieldPath }, cell)}
+        onMouseDown={(event) => handleMetricCellMouseDown(event, cell)}
+        onTouchStart={(event) => handleMetricCellTouchStart(event, { fieldPath }, cell)}
+        onTouchMove={handleMetricCellTouchMove}
+        onTouchEnd={handleMetricCellTouchEnd}
+        onTouchCancel={handleMetricCellTouchEnd}
+        sx={{
+          position: 'absolute',
+          left: `${centerX}px`,
+          transform: 'translateX(-50%)',
+          height: `${height}px`,
+          fontSize,
+          fontWeight: isHeader ? 600 : (cell.isOverridden ? 600 : 400),
+          color: isHeader ? '#64748b' : (cell.isOverridden ? '#6d28d9' : '#334155'),
+          textAlign: 'center',
+          width: `${width}px`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          lineHeight: 1.1,
+          px: 0.35,
+          cursor: cell.isOverrideable ? 'context-menu' : 'default',
+          userSelect: 'none',
+          ...(cell.isOverrideable ? {
+            '&:hover .share-price-dashboard-metric-value, &:focus-visible .share-price-dashboard-metric-value': {
+              borderBottomColor: cell.isOverridden
+                ? OVERRIDDEN_METRIC_UNDERLINE_HOVER
+                : EDITABLE_METRIC_UNDERLINE_HOVER,
+            },
+          } : {}),
+        }}
+      >
+        <Box
+          component="span"
+          className="share-price-dashboard-metric-value"
+          sx={{
+            display: 'inline-block',
+            maxWidth: '100%',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            lineHeight: 1.1,
+            paddingBottom: cell.isOverrideable ? '1px' : 0,
+            borderBottom: cell.isOverrideable
+              ? `${cell.isOverridden ? 1.5 : 1}px solid ${cell.isOverridden
+                ? OVERRIDDEN_METRIC_UNDERLINE
+                : EDITABLE_METRIC_UNDERLINE}`
+              : '1px solid transparent',
+          }}
+        >
+          {formattedValue}
+        </Box>
+      </Box>
+    );
   };
 
   const handleMetricRowContextMenu = (event, metricRow) => {
@@ -3126,44 +3411,38 @@ export default function SharePriceDashboard({
                     >
                       {tablePoints.map((annualRow, columnIndex) => {
                         const position = chartGeometry.pointPositions[columnIndex];
+                        const annualMainTableRow = visibleAnnualMainTableRows[columnIndex];
+                        const annualCell = annualMainTableRow?.cells?.[tableRow.key];
 
                         if (!position) {
                           return null;
                         }
 
-                        return (
-                          <Box
-                            key={`${tableRow.key}-${annualRow.fiscalYear}`}
-                            data-testid={tableRow.isHeader ? 'share-price-dashboard-header-cell' : undefined}
-                            data-fiscal-year={String(annualRow.fiscalYear)}
-                            data-date={annualRow.fiscalYearEndDate}
-                            data-center-x={String(position.x)}
-                            data-cell-width={String(timelineLayout.yearCellWidth)}
-                            sx={{
-                              position: 'absolute',
-                              left: `${position.x}px`,
-                              transform: 'translateX(-50%)',
-                              height: `${tableRow.height}px`,
-                              fontSize: tableRow.isHeader ? timelineLayout.headerFontSize : timelineLayout.bodyFontSize,
-                              fontWeight: tableRow.isHeader ? 600 : 400,
-                              color: tableRow.isHeader ? '#64748b' : '#334155',
-                              textAlign: 'center',
-                              width: `${timelineLayout.yearCellWidth}px`,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                              lineHeight: 1.1,
-                              px: 0.25,
-                            }}
-                          >
-                            {tableRow.isHeader
-                              ? tableRow.formatter(annualRow[tableRow.key], { compact: isCompactPresetTable })
-                              : tableRow.formatter(annualRow[tableRow.key], { compact: isCompactPresetTable })}
-                          </Box>
-                        );
+                        const displayValue = annualCell?.value ?? annualRow[tableRow.key];
+
+                        return renderOverrideAwareAnnualValueCell({
+                          cell: annualCell || {
+                            columnKey: `annual-${annualRow.fiscalYear}`,
+                            value: displayValue,
+                            sourceOfTruth: 'system',
+                            isOverridden: false,
+                            isOverrideable: false,
+                            overrideTarget: null,
+                          },
+                          columnKey: `annual-${annualRow.fiscalYear}`,
+                          centerX: position.x,
+                          fiscalYear: annualRow.fiscalYear,
+                          fieldPath: tableRow.fieldPath,
+                          formattedValue: tableRow.formatter(displayValue, { compact: isCompactPresetTable }),
+                          height: tableRow.height,
+                          width: timelineLayout.yearCellWidth,
+                          fontSize: tableRow.isHeader ? timelineLayout.headerFontSize : timelineLayout.bodyFontSize,
+                          fiscalYearEndDate: annualRow.fiscalYearEndDate,
+                          isHeader: tableRow.isHeader,
+                          testId: tableRow.isHeader
+                            ? 'share-price-dashboard-header-cell'
+                            : 'share-price-dashboard-main-table-cell',
+                        });
                       })}
                     </Box>
                   </Box>
@@ -3400,9 +3679,10 @@ export default function SharePriceDashboard({
           <Box sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
             <Button
               size="small"
+              disabled={isLoadingMetrics}
               onClick={handleMetricsVisibilityToggle}
             >
-              {isMetricsOpen ? 'HIDE METRICS' : 'SHOW METRICS'}
+              {isLoadingMetrics ? 'LOADING METRICS...' : isMetricsOpen ? 'HIDE METRICS' : 'SHOW METRICS'}
             </Button>
           </Box>
 

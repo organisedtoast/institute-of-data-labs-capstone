@@ -30,6 +30,7 @@ describe('investmentCategoryCardsApi', () => {
             maxAvailableMonth: '2024-03',
             startMonth: '2024-01',
             endMonth: '2024-03',
+            isCanonicalInitialRange: true,
             series: [
               { date: '2024-01-01', close: 100 },
               { date: '2024-02-01', close: '115' },
@@ -67,6 +68,7 @@ describe('investmentCategoryCardsApi', () => {
         maxAvailableMonth: '2024-03',
         startMonth: '2024-01',
         endMonth: '2024-03',
+        isCanonicalInitialRange: true,
         series: [
           { date: '2024-01-01', close: 100 },
           { date: '2024-02-01', close: 115 },

@@ -58,6 +58,145 @@ function normalizeAnnualMetrics(stockDocument) {
     });
 }
 
+const MAIN_TABLE_FIELD_KEYS = [
+  'fiscalYearEndDate',
+  'fiscalYear',
+  'earningsReleaseDate',
+  'sharePrice',
+  'sharesOnIssue',
+  'marketCap',
+];
+const MAIN_TABLE_FIELD_CONFIG = {
+  fiscalYearEndDate: {
+    payloadPath: null,
+    resolveField: (annualRow) => annualRow?.fiscalYearEndDate ?? null,
+  },
+  fiscalYear: {
+    payloadPath: null,
+    resolveField: (annualRow) => annualRow?.fiscalYear ?? null,
+  },
+  earningsReleaseDate: {
+    payloadPath: null,
+    resolveField: (annualRow) => annualRow?.earningsReleaseDate ?? null,
+  },
+  sharePrice: {
+    payloadPath: 'base.sharePrice',
+    resolveField: (annualRow) => annualRow?.base?.sharePrice ?? null,
+  },
+  sharesOnIssue: {
+    payloadPath: 'base.sharesOnIssue',
+    resolveField: (annualRow) => annualRow?.base?.sharesOnIssue ?? null,
+  },
+  marketCap: {
+    payloadPath: 'base.marketCap',
+    resolveField: (annualRow) => annualRow?.base?.marketCap ?? null,
+  },
+};
+
+function normalizeAnnualMainTableCell(cell, fallbackFiscalYear, fieldKey) {
+  return {
+    columnKey:
+      typeof cell?.columnKey === 'string' && cell.columnKey
+        ? cell.columnKey
+        : Number.isInteger(fallbackFiscalYear)
+          ? `annual-${fallbackFiscalYear}`
+          : '',
+    value: cell?.value ?? null,
+    sourceOfTruth: typeof cell?.sourceOfTruth === 'string' ? cell.sourceOfTruth : 'system',
+    isOverridden: cell?.isOverridden === true,
+    // The base table now needs the same rich cell metadata as detail metrics.
+    // That keeps one editor flow for both surfaces and only makes truly
+    // overrideable cells interactive.
+    isOverrideable: cell?.isOverrideable === true,
+    overrideTarget: cell?.overrideTarget || null,
+    fieldKey,
+  };
+}
+
+function normalizeAnnualMainTableRowsPayload(rawRows) {
+  return Array.isArray(rawRows)
+    ? rawRows
+        .map((annualRow) => {
+          const fiscalYear = Number.isInteger(Number(annualRow?.fiscalYear))
+            ? Number(annualRow.fiscalYear)
+            : null;
+          const rawCells = annualRow?.cells && typeof annualRow.cells === 'object'
+            ? annualRow.cells
+            : {};
+
+          return {
+            fiscalYear,
+            fiscalYearEndDate:
+              typeof annualRow?.fiscalYearEndDate === 'string' ? annualRow.fiscalYearEndDate : null,
+            cells: Object.fromEntries(
+              MAIN_TABLE_FIELD_KEYS.map((fieldKey) => [
+                fieldKey,
+                normalizeAnnualMainTableCell(rawCells[fieldKey], fiscalYear, fieldKey),
+              ]),
+            ),
+          };
+        })
+        .sort((left, right) => {
+          const leftDate = left.fiscalYearEndDate || '';
+          const rightDate = right.fiscalYearEndDate || '';
+
+          return leftDate.localeCompare(rightDate);
+        })
+    : [];
+}
+
+function createAnnualMainTableCellFromStockDocument(fieldKey, annualRow, fiscalYear) {
+  const fieldConfig = MAIN_TABLE_FIELD_CONFIG[fieldKey];
+  const rawField = fieldConfig?.resolveField?.(annualRow);
+  const hasMetricMetadata = rawField && typeof rawField === 'object' && 'sourceOfTruth' in rawField;
+
+  return {
+    columnKey: Number.isInteger(fiscalYear) ? `annual-${fiscalYear}` : '',
+    value: getEffectiveValue(rawField),
+    sourceOfTruth: hasMetricMetadata && typeof rawField.sourceOfTruth === 'string'
+      ? rawField.sourceOfTruth
+      : 'system',
+    isOverridden: hasMetricMetadata && rawField.sourceOfTruth === 'user',
+    isOverrideable: Boolean(fieldConfig?.payloadPath && Number.isInteger(fiscalYear) && hasMetricMetadata),
+    overrideTarget: fieldConfig?.payloadPath && Number.isInteger(fiscalYear) && hasMetricMetadata
+      ? {
+          kind: 'annual',
+          fiscalYear,
+          payloadPath: fieldConfig.payloadPath,
+        }
+      : null,
+    fieldKey,
+  };
+}
+
+function normalizeAnnualMainTableRows(stockDocument) {
+  const annualRows = Array.isArray(stockDocument?.annualData) ? stockDocument.annualData : [];
+
+  return annualRows
+    .map((annualRow) => {
+      const fiscalYear = Number(annualRow?.fiscalYear);
+      const normalizedFiscalYear = Number.isInteger(fiscalYear) ? fiscalYear : null;
+
+      return {
+        fiscalYear: normalizedFiscalYear,
+        fiscalYearEndDate:
+          typeof annualRow?.fiscalYearEndDate === 'string' ? annualRow.fiscalYearEndDate : null,
+        cells: Object.fromEntries(
+          MAIN_TABLE_FIELD_KEYS.map((fieldKey) => [
+            fieldKey,
+            createAnnualMainTableCellFromStockDocument(fieldKey, annualRow, normalizedFiscalYear),
+          ]),
+        ),
+      };
+    })
+    .sort((left, right) => {
+      const leftDate = left.fiscalYearEndDate || '';
+      const rightDate = right.fiscalYearEndDate || '';
+
+      return leftDate.localeCompare(rightDate);
+    });
+}
+
 function normalizeMetricsColumns(metricsPayload) {
   const columns = Array.isArray(metricsPayload?.columns) ? metricsPayload.columns : [];
 
@@ -101,6 +240,14 @@ function normalizeMetricsRows(metricsPayload) {
   }));
 }
 
+function hasMetricsView(metricsPayload) {
+  return Array.isArray(metricsPayload?.columns) && Array.isArray(metricsPayload?.rows);
+}
+
+function buildRequestOptions(options = {}) {
+  return options.signal ? { signal: options.signal } : undefined;
+}
+
 function buildNestedPatchPayload(path, value) {
   const parts = String(path || '').split('.').filter(Boolean);
 
@@ -141,7 +288,13 @@ function shouldUpgradeLegacyAnnualHistory(stockDocument) {
   );
 }
 
-export function buildDashboardPayload(stockDocument, pricePayload, identifier, metricsPayload = null) {
+export function buildDashboardPayload(
+  stockDocument,
+  pricePayload,
+  identifier,
+  metricsPayload = null,
+  options = {},
+) {
   const normalizedIdentifier = String(identifier || '').trim().toUpperCase();
   const rawCompanyName =
     stockDocument?.companyName?.effectiveValue ||
@@ -163,9 +316,123 @@ export function buildDashboardPayload(stockDocument, pricePayload, identifier, m
     priceCurrency: stockDocument?.priceCurrency || 'USD',
     prices: normalizePriceRows(pricePayload),
     annualMetrics: normalizeAnnualMetrics(stockDocument),
+    annualMainTableRows: Array.isArray(stockDocument?.annualMainTableRows)
+      ? normalizeAnnualMainTableRowsPayload(stockDocument.annualMainTableRows)
+      : normalizeAnnualMainTableRows(stockDocument),
     metricsColumns: normalizeMetricsColumns(metricsPayload),
     metricsRows: normalizeMetricsRows(metricsPayload),
+    hasLoadedMetricsView: hasMetricsView(metricsPayload),
+    needsBackgroundRefresh: options.needsBackgroundRefresh === true,
+    loadError: typeof options.loadError === 'string' ? options.loadError : '',
   };
+}
+
+function normalizeDashboardBootstrapPayload(rawPayload) {
+  return {
+    identifier: String(rawPayload?.identifier || '').trim().toUpperCase(),
+    companyName:
+      typeof rawPayload?.companyName === 'string' && rawPayload.companyName.trim()
+        ? rawPayload.companyName.trim()
+        : String(rawPayload?.identifier || '').trim().toUpperCase(),
+    investmentCategory:
+      typeof rawPayload?.investmentCategory === 'string'
+        ? rawPayload.investmentCategory.trim()
+        : '',
+    priceCurrency: rawPayload?.priceCurrency || 'USD',
+    prices: normalizePriceRows(rawPayload),
+    annualMetrics: Array.isArray(rawPayload?.annualMetrics)
+      ? rawPayload.annualMetrics
+          .map((annualRow) => ({
+            fiscalYear: Number.isInteger(Number(annualRow?.fiscalYear))
+              ? Number(annualRow.fiscalYear)
+              : null,
+            fiscalYearEndDate:
+              typeof annualRow?.fiscalYearEndDate === 'string' ? annualRow.fiscalYearEndDate : null,
+            earningsReleaseDate:
+              typeof annualRow?.earningsReleaseDate === 'string' ? annualRow.earningsReleaseDate : null,
+            sharePrice: annualRow?.sharePrice ?? null,
+            sharesOnIssue: annualRow?.sharesOnIssue ?? null,
+            marketCap: annualRow?.marketCap ?? null,
+          }))
+          .sort((left, right) => {
+            const leftDate = left.fiscalYearEndDate || '';
+            const rightDate = right.fiscalYearEndDate || '';
+
+            return leftDate.localeCompare(rightDate);
+          })
+      : [],
+    annualMainTableRows: normalizeAnnualMainTableRowsPayload(rawPayload?.annualMainTableRows),
+    metricsColumns: normalizeMetricsColumns(rawPayload),
+    metricsRows: normalizeMetricsRows(rawPayload),
+    hasLoadedMetricsView: rawPayload?.hasLoadedMetricsView === true,
+    needsBackgroundRefresh: rawPayload?.needsBackgroundRefresh === true,
+    loadError: typeof rawPayload?.loadError === 'string' ? rawPayload.loadError : '',
+  };
+}
+
+function buildDashboardBootstrapRequestOptions(options = {}) {
+  const requestOptions = buildRequestOptions(options);
+  const params = {};
+
+  if (Array.isArray(options.tickers) && options.tickers.length > 0) {
+    params.tickers = options.tickers
+      .map((ticker) => String(ticker || '').trim().toUpperCase())
+      .filter(Boolean)
+      .join(',');
+  }
+
+  if (!Object.keys(params).length) {
+    return requestOptions;
+  }
+
+  return {
+    ...(requestOptions || {}),
+    params,
+  };
+}
+
+export async function fetchWatchlistDashboardBootstraps(options = {}) {
+  const response = await axios.get(
+    '/api/watchlist/dashboards',
+    buildDashboardBootstrapRequestOptions(options),
+  );
+
+  return Array.isArray(response.data?.dashboards)
+    ? response.data.dashboards.map(normalizeDashboardBootstrapPayload)
+    : [];
+}
+
+export async function fetchDashboardMetricsView(identifier, options = {}) {
+  const normalizedIdentifier = String(identifier || '').trim().toUpperCase();
+  const response = await axios.get(
+    `/api/watchlist/${normalizedIdentifier}/metrics-view`,
+    buildRequestOptions(options),
+  );
+
+  return {
+    identifier: normalizedIdentifier,
+    metricsColumns: normalizeMetricsColumns(response.data),
+    metricsRows: normalizeMetricsRows(response.data),
+    hasLoadedMetricsView: true,
+  };
+}
+
+export async function refreshWatchlistDashboardBootstrap(identifier, options = {}) {
+  const normalizedIdentifier = String(identifier || '').trim().toUpperCase();
+  const requestOptions = buildRequestOptions(options);
+
+  await axios.post(
+    `/api/watchlist/${normalizedIdentifier}/refresh`,
+    {},
+    requestOptions,
+  );
+
+  const refreshedDashboards = await fetchWatchlistDashboardBootstraps({
+    signal: options.signal,
+    tickers: [normalizedIdentifier],
+  });
+
+  return refreshedDashboards[0] || null;
 }
 
 export async function fetchDashboardData(identifier, options = {}) {

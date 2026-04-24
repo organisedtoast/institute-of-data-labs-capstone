@@ -266,13 +266,13 @@ function normalizeCategoryName(name) {
     .replace(/^_+|_+$/g, "");
 }
 
-function annualFieldPath(relativePath) {
+function _annualFieldPath(relativePath) {
   return relativePath === "fiscalYearEndDate"
     ? "annualData[].fiscalYearEndDate"
     : `annualData[].${relativePath}`;
 }
 
-function forecastFieldPath(bucket, metric) {
+function _forecastFieldPath(bucket, metric) {
   return `forecastData.${bucket}.${metric}`;
 }
 

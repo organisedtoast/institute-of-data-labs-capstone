@@ -11,7 +11,7 @@
 // const errorHandler = require('./middleware/errorHandler');
 // app.use(errorHandler);
 
-function errorHandler(err, req, res, next) {
+function errorHandler(err, req, res, _next) {
   console.error("Error:", err.message);
  
   // Mongoose validation errors

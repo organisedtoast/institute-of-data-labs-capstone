@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Stocks from '../Stocks.jsx';
 import StockSearchProvider from '../../contexts/StockSearchContext.jsx';
 import axios from 'axios';
-import { fetchDashboardData } from '../../services/watchlistDashboardApi';
+import { fetchWatchlistDashboardBootstraps } from '../../services/watchlistDashboardApi';
 
 vi.mock('axios', () => ({
   default: {
@@ -17,7 +17,10 @@ vi.mock('axios', () => ({
 }));
 
 vi.mock('../../services/watchlistDashboardApi', () => ({
+  fetchWatchlistDashboardBootstraps: vi.fn(),
+  refreshWatchlistDashboardBootstrap: vi.fn(),
   fetchDashboardData: vi.fn(),
+  fetchDashboardMetricsView: vi.fn(),
   updateDashboardMetricOverride: vi.fn(),
   updateDashboardInvestmentCategory: vi.fn(),
   updateDashboardRowPreference: vi.fn(),
@@ -127,17 +130,15 @@ describe('Stocks route remount integration', () => {
     axios.get.mockReset();
     axios.post.mockReset();
     axios.delete.mockReset();
-    fetchDashboardData.mockReset();
+    fetchWatchlistDashboardBootstraps.mockReset();
 
     axios.get.mockImplementation((url) => {
-      if (url === '/api/watchlist') {
+      if (url === '/api/watchlist/summary') {
         return Promise.resolve({
           data: [
             {
-              tickerSymbol: 'AAPL',
-              companyName: {
-                effectiveValue: 'AAPL name',
-              },
+              identifier: 'AAPL',
+              name: 'AAPL name',
             },
           ],
         });
@@ -145,7 +146,7 @@ describe('Stocks route remount integration', () => {
 
       throw new Error(`Unexpected axios.get call for ${url}`);
     });
-    fetchDashboardData.mockResolvedValue(buildDashboardPayload());
+    fetchWatchlistDashboardBootstraps.mockResolvedValue([buildDashboardPayload()]);
 
     originalRequestAnimationFrame = window.requestAnimationFrame;
     originalCancelAnimationFrame = window.cancelAnimationFrame;
@@ -241,9 +242,9 @@ describe('Stocks route remount integration', () => {
     vi.restoreAllMocks();
   });
 
-  // The real provider-level remount harness currently hard-hangs in this environment
-  // before Vitest can report a normal assertion failure. We keep the scenario here as
-  // a documented follow-up without leaving a hanging test active in the default suite.
+  // The real provider-level remount harness currently hard-hangs in this
+  // environment before Vitest can report a normal failure. We keep the
+  // scenario documented here without leaving a hanging test in the default suite.
   it.skip('keeps Stocks dashboards loaded when navigating Home -> Stocks -> Home -> Stocks', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const user = userEvent.setup();
