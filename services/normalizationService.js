@@ -2,6 +2,10 @@ const {
   ROIC_ENDPOINTS_USED,
 } = require("../catalog/fieldCatalog");
 const {
+  ANNUAL_HISTORY_FETCH_VERSION,
+  CURRENT_STOCK_DATA_VERSION,
+} = require("./stockDataVersionService");
+const {
   createEmptyAnalystRevisions,
   createEmptyAnnualEntry,
   createEmptyForecastBucket,
@@ -11,7 +15,6 @@ const { assignMetricValue, createMetricField } = require("../utils/metricField")
 const { recalculateDerived } = require("../utils/derivedCalc");
 const { selectPriceAfterAnchorDate } = require("../utils/priceSelector");
 
-const ANNUAL_HISTORY_FETCH_VERSION = 3;
 const EARNINGS_RELEASE_FALLBACK_DAYS = 60;
 
 // Basic type guard used throughout the file when we expect a plain object.
@@ -785,6 +788,7 @@ function buildStockDocument({
       importRangeYears: normalizedYearLimit,
       importRangeYearsExplicit: Boolean(importRangeYearsExplicit),
       annualHistoryFetchVersion: ANNUAL_HISTORY_FETCH_VERSION,
+      stockDataVersion: CURRENT_STOCK_DATA_VERSION,
       roicEndpointsUsed: ROIC_ENDPOINTS_USED,
       currencyDiagnostics,
     },

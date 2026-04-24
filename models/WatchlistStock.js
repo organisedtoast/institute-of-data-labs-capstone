@@ -138,6 +138,10 @@ const watchlistStockSchema = new mongoose.Schema({
     importRangeYears: { type: Number, default: null },
     importRangeYearsExplicit: { type: Boolean, default: false },
     annualHistoryFetchVersion: { type: Number, default: null },
+    // This version tracks the overall ROIC-backed stock document contract.
+    // Bumping it lets us refresh old rows generically when future API-backed
+    // fields are added, instead of writing one migration per field.
+    stockDataVersion: { type: Number, default: null },
     roicEndpointsUsed: [String],
     currencyDiagnostics: { type: mongoose.Schema.Types.Mixed, default: null },
   },

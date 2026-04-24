@@ -5,6 +5,7 @@ import {
 } from '../../shared/defaultBoldStockRows.mjs';
 
 const ANNUAL_HISTORY_FETCH_VERSION = 3;
+const CURRENT_STOCK_DATA_VERSION = 1;
 // The browser uses the ESM wrapper here so Vite and real browsers both see a
 // valid module, while still sharing the same JSON-backed default-bold source.
 
@@ -373,10 +374,14 @@ function buildNestedPatchPayload(path, value) {
 }
 
 function shouldUpgradeLegacyAnnualHistory(stockDocument) {
+  const stockDataVersion = Number(stockDocument?.sourceMeta?.stockDataVersion);
   const importRangeYears = stockDocument?.sourceMeta?.importRangeYears;
   const importRangeYearsExplicit = stockDocument?.sourceMeta?.importRangeYearsExplicit === true;
   const annualHistoryFetchVersion = Number(stockDocument?.sourceMeta?.annualHistoryFetchVersion);
   const annualRowCount = Array.isArray(stockDocument?.annualData) ? stockDocument.annualData.length : 0;
+  const needsStockDataUpgrade =
+    !Number.isInteger(stockDataVersion) ||
+    stockDataVersion < CURRENT_STOCK_DATA_VERSION;
   const needsVersionUpgrade =
     !Number.isInteger(annualHistoryFetchVersion) ||
     annualHistoryFetchVersion < ANNUAL_HISTORY_FETCH_VERSION;
@@ -384,10 +389,10 @@ function shouldUpgradeLegacyAnnualHistory(stockDocument) {
     importRangeYears == null && (annualRowCount === 10 || annualRowCount === 20);
 
   if (importRangeYearsExplicit) {
-    return false;
+    return needsStockDataUpgrade;
   }
 
-  return needsVersionUpgrade || (
+  return needsStockDataUpgrade || needsVersionUpgrade || (
     hasLegacyTruncatedUncappedHistory &&
     annualHistoryFetchVersion !== ANNUAL_HISTORY_FETCH_VERSION
   );

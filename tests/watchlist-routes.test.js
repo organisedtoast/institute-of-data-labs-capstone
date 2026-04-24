@@ -16,6 +16,7 @@ process.env.MONGO_URI = buildIsolatedMongoUri(
 const WatchlistStock = require("../models/WatchlistStock");
 const StockMetricsRowPreference = require("../models/StockMetricsRowPreference");
 const roicService = require("../services/roicService");
+const { CURRENT_STOCK_DATA_VERSION } = require("../services/stockDataVersionService");
 const originalFetchStockPrices = roicService.fetchStockPrices;
 const { startServer, stopServer } = require("../server");
 
@@ -104,6 +105,7 @@ test.beforeEach(async () => {
         importRangeYears: null,
         importRangeYearsExplicit: false,
         annualHistoryFetchVersion: 3,
+        stockDataVersion: CURRENT_STOCK_DATA_VERSION,
       },
       annualData: [
         {
@@ -369,6 +371,7 @@ test.beforeEach(async () => {
         importRangeYears: null,
         importRangeYearsExplicit: false,
         annualHistoryFetchVersion: 1,
+        stockDataVersion: CURRENT_STOCK_DATA_VERSION,
       },
       annualData: Array.from({ length: 10 }, (_, index) => ({
         fiscalYear: 2025 - index,

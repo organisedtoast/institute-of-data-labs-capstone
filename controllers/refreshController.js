@@ -2,22 +2,12 @@
 // It updates imported/default values, then reruns backend formulas so derived
 // fields stay in sync with any user-entered corrections.
 
-const roicService = require("../services/roicService");
 const { resolveStoredImportRange } = require("../services/importRangeService");
-const normalize = require("../services/normalizationService");
 const WatchlistStock = require("../models/WatchlistStock");
-const { recalculateDerived } = require("../utils/derivedCalc");
-const { mergeAnnualEntry } = require("../services/stockMergeService");
-const { fetchOptionalEarningsCalls } = require("../services/optionalEarningsCallsService");
-
-async function fetchWithContext(label, fetcher, tickerSymbol, fetchOptions) {
-  try {
-    return await fetcher(tickerSymbol, fetchOptions);
-  } catch (error) {
-    error.message = `ROIC ${label} fetch failed for ${tickerSymbol}: ${error.message}`;
-    throw error;
-  }
-}
+const {
+  applyFreshStockDataToExistingStock,
+  buildFreshStockData,
+} = require("../services/watchlistStockRefreshService");
 
 async function refreshStock(req, res, next) {
   try {
@@ -31,77 +21,13 @@ async function refreshStock(req, res, next) {
       years,
       importRangeYearsExplicit,
     } = resolveStoredImportRange(stock.sourceMeta);
-    const annualFetchOptions = { years };
-
-    const [
-      profile,
-      perShare,
-      profitability,
-      prices,
-      earnings,
-      incomeStatement,
-      balanceSheet,
-      cashFlow,
-      creditRatios,
-      enterpriseValue,
-      multiples,
-    ] = await Promise.all([
-      fetchWithContext("company profile", roicService.fetchCompanyProfile, ticker),
-      fetchWithContext("annual per-share", roicService.fetchAnnualPerShare, ticker, annualFetchOptions),
-      fetchWithContext("annual profitability", roicService.fetchAnnualProfitability, ticker, annualFetchOptions),
-      fetchWithContext("historical prices", roicService.fetchStockPrices, ticker),
-      fetchOptionalEarningsCalls(fetchWithContext, ticker),
-      fetchWithContext("annual income statement", roicService.fetchAnnualIncomeStatement, ticker, annualFetchOptions),
-      fetchWithContext("annual balance sheet", roicService.fetchAnnualBalanceSheet, ticker, annualFetchOptions),
-      fetchWithContext("annual cash flow", roicService.fetchAnnualCashFlow, ticker, annualFetchOptions),
-      fetchWithContext("annual credit ratios", roicService.fetchAnnualCreditRatios, ticker, annualFetchOptions),
-      fetchWithContext("annual enterprise value", roicService.fetchAnnualEnterpriseValue, ticker, annualFetchOptions),
-      fetchWithContext("annual multiples", roicService.fetchAnnualMultiples, ticker, annualFetchOptions),
-    ]);
-
-    const freshData = normalize.buildStockDocument({
+    const freshData = await buildFreshStockData({
       tickerSymbol: ticker,
-      profile,
-      perShare,
-      profitability,
-      prices,
-      earnings,
-      incomeStatement,
-      balanceSheet,
-      cashFlow,
-      creditRatios,
-      enterpriseValue,
-      multiples,
       years,
       importRangeYearsExplicit,
       investmentCategory: stock.investmentCategory,
     });
-
-    stock.companyName.roicValue = freshData.companyName.roicValue;
-    if (!stock.companyName.userValue) {
-      stock.companyName.effectiveValue = freshData.companyName.effectiveValue;
-      stock.companyName.sourceOfTruth = freshData.companyName.sourceOfTruth;
-    }
-
-    stock.priceCurrency = freshData.priceCurrency;
-    stock.reportingCurrency = freshData.reportingCurrency;
-    stock.sourceMeta.importRangeYears = freshData.sourceMeta.importRangeYears;
-    stock.sourceMeta.importRangeYearsExplicit = freshData.sourceMeta.importRangeYearsExplicit;
-    stock.sourceMeta.annualHistoryFetchVersion = freshData.sourceMeta.annualHistoryFetchVersion;
-    stock.sourceMeta.roicEndpointsUsed = freshData.sourceMeta.roicEndpointsUsed;
-    stock.sourceMeta.currencyDiagnostics = freshData.sourceMeta.currencyDiagnostics;
-
-    for (const freshYear of freshData.annualData) {
-      const existingYear = stock.annualData.find((row) => row.fiscalYear === freshYear.fiscalYear);
-      if (existingYear) {
-        mergeAnnualEntry(existingYear, freshYear);
-      } else {
-        stock.annualData.push(freshYear);
-      }
-    }
-
-    stock.annualData.sort((left, right) => right.fiscalYear - left.fiscalYear);
-    recalculateDerived(stock);
+    applyFreshStockDataToExistingStock(stock, freshData);
 
     stock.sourceMeta.lastRefreshAt = new Date();
     await stock.save();

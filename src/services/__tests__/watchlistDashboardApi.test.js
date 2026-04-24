@@ -371,6 +371,7 @@ function buildWatchlistStock(overrides = {}) {
       importRangeYears: null,
       importRangeYearsExplicit: false,
       annualHistoryFetchVersion: 3,
+      stockDataVersion: 1,
     },
     annualData: [
       {
@@ -1149,6 +1150,8 @@ describe('watchlistDashboardApi', () => {
       sourceMeta: {
         importRangeYears: null,
         importRangeYearsExplicit: false,
+        annualHistoryFetchVersion: 3,
+        stockDataVersion: 1,
       },
       annualData: [
         {
@@ -1203,6 +1206,7 @@ describe('watchlistDashboardApi', () => {
       sourceMeta: {
         importRangeYears: null,
         importRangeYearsExplicit: false,
+        stockDataVersion: 1,
       },
     });
     const refreshedStockDocument = buildWatchlistStock({
@@ -1210,6 +1214,7 @@ describe('watchlistDashboardApi', () => {
         importRangeYears: null,
         importRangeYearsExplicit: false,
         annualHistoryFetchVersion: 3,
+        stockDataVersion: 1,
       },
     });
 
@@ -1234,6 +1239,7 @@ describe('watchlistDashboardApi', () => {
         importRangeYears: null,
         importRangeYearsExplicit: false,
         annualHistoryFetchVersion: 1,
+        stockDataVersion: 1,
       },
       annualData: Array.from({ length: 10 }, (_, index) => {
         const fiscalYear = 2025 - index;
@@ -1254,6 +1260,7 @@ describe('watchlistDashboardApi', () => {
         importRangeYears: null,
         importRangeYearsExplicit: false,
         annualHistoryFetchVersion: 3,
+        stockDataVersion: 1,
       },
       annualData: Array.from({ length: 22 }, (_, index) => {
         const fiscalYear = 2025 - index;
@@ -1294,6 +1301,7 @@ describe('watchlistDashboardApi', () => {
         importRangeYears: null,
         importRangeYearsExplicit: false,
         annualHistoryFetchVersion: 1,
+        stockDataVersion: 1,
       },
       annualData: Array.from({ length: 20 }, (_, index) => {
         const fiscalYear = 2025 - index;
@@ -1314,6 +1322,7 @@ describe('watchlistDashboardApi', () => {
         importRangeYears: null,
         importRangeYearsExplicit: false,
         annualHistoryFetchVersion: 3,
+        stockDataVersion: 1,
       },
       annualData: Array.from({ length: 22 }, (_, index) => {
         const fiscalYear = 2025 - index;
@@ -1354,6 +1363,7 @@ describe('watchlistDashboardApi', () => {
         importRangeYears: null,
         importRangeYearsExplicit: false,
         annualHistoryFetchVersion: 3,
+        stockDataVersion: 1,
       },
       annualData: Array.from({ length: 22 }, (_, index) => {
         const fiscalYear = 2025 - index;
@@ -1393,6 +1403,7 @@ describe('watchlistDashboardApi', () => {
         importRangeYears: null,
         importRangeYearsExplicit: false,
         annualHistoryFetchVersion: 3,
+        stockDataVersion: 1,
       },
       annualData: Array.from({ length: 10 }, (_, index) => {
         const fiscalYear = 2025 - index;
@@ -1432,6 +1443,7 @@ describe('watchlistDashboardApi', () => {
         importRangeYears: 20,
         importRangeYearsExplicit: true,
         annualHistoryFetchVersion: 3,
+        stockDataVersion: 1,
       },
       annualData: Array.from({ length: 20 }, (_, index) => {
         const fiscalYear = 2025 - index;
@@ -1471,6 +1483,7 @@ describe('watchlistDashboardApi', () => {
         importRangeYears: 10,
         importRangeYearsExplicit: true,
         annualHistoryFetchVersion: 3,
+        stockDataVersion: 1,
       },
       annualData: Array.from({ length: 10 }, (_, index) => {
         const fiscalYear = 2025 - index;
@@ -1501,5 +1514,61 @@ describe('watchlistDashboardApi', () => {
     expect(payload.annualMetrics).toHaveLength(10);
     expect(payload.annualMetrics[0].fiscalYear).toBe(2016);
     expect(payload.annualMetrics[9].fiscalYear).toBe(2025);
+  });
+
+  it('refreshes stocks that are missing stockDataVersion even when annual history metadata is current', async () => {
+    const abortSignal = new AbortController().signal;
+    const staleVersionStock = buildWatchlistStock({
+      sourceMeta: {
+        importRangeYears: null,
+        importRangeYearsExplicit: false,
+        annualHistoryFetchVersion: 3,
+      },
+    });
+    const refreshedStockDocument = buildWatchlistStock({
+      sourceMeta: {
+        importRangeYears: null,
+        importRangeYearsExplicit: false,
+        annualHistoryFetchVersion: 3,
+        stockDataVersion: 1,
+      },
+    });
+
+    axios.get
+      .mockResolvedValueOnce({ data: staleVersionStock })
+      .mockResolvedValueOnce({
+        data: {
+          prices: [{ date: '2024-01-02', close: 185.64 }],
+        },
+      });
+    axios.post.mockResolvedValueOnce({ data: refreshedStockDocument });
+
+    await fetchDashboardData('aapl', { signal: abortSignal });
+
+    expect(axios.post).toHaveBeenCalledWith('/api/watchlist/AAPL/refresh', {}, { signal: abortSignal });
+  });
+
+  it('does not refresh explicitly capped stocks when stockDataVersion is current', async () => {
+    const abortSignal = new AbortController().signal;
+    const explicitCurrentStock = buildWatchlistStock({
+      sourceMeta: {
+        importRangeYears: 10,
+        importRangeYearsExplicit: true,
+        annualHistoryFetchVersion: 3,
+        stockDataVersion: 1,
+      },
+    });
+
+    axios.get
+      .mockResolvedValueOnce({ data: explicitCurrentStock })
+      .mockResolvedValueOnce({
+        data: {
+          prices: [{ date: '2024-01-02', close: 185.64 }],
+        },
+      });
+
+    await fetchDashboardData('aapl', { signal: abortSignal });
+
+    expect(axios.post).not.toHaveBeenCalled();
   });
 });

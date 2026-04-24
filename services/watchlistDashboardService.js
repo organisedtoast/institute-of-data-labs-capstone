@@ -6,8 +6,7 @@ const { buildMainTableRowKey } = require("./stockMetricsViewService");
 const { clearLegacyDerivedMetricOverrides } = require("../utils/derivedMetricOverrideCleanup");
 const { recalculateDerived } = require("../utils/derivedCalc");
 const { isDefaultBoldMainTableRowKey } = require("../shared/defaultBoldStockRows");
-
-const ANNUAL_HISTORY_FETCH_VERSION = 3;
+const { isStockDocumentRefreshRequired } = require("./stockDataVersionService");
 
 // The Stocks page now loads in two stages:
 // 1. a tiny watchlist summary for shared search/navigation state
@@ -209,27 +208,6 @@ function normalizeAnnualMainTableRows(stockDocument, rowPreferenceByKey = new Ma
     });
 }
 
-function shouldUpgradeLegacyAnnualHistory(stockDocument) {
-  const importRangeYears = stockDocument?.sourceMeta?.importRangeYears;
-  const importRangeYearsExplicit = stockDocument?.sourceMeta?.importRangeYearsExplicit === true;
-  const annualHistoryFetchVersion = Number(stockDocument?.sourceMeta?.annualHistoryFetchVersion);
-  const annualRowCount = Array.isArray(stockDocument?.annualData) ? stockDocument.annualData.length : 0;
-  const needsVersionUpgrade =
-    !Number.isInteger(annualHistoryFetchVersion) ||
-    annualHistoryFetchVersion < ANNUAL_HISTORY_FETCH_VERSION;
-  const hasLegacyTruncatedUncappedHistory =
-    importRangeYears == null && (annualRowCount === 10 || annualRowCount === 20);
-
-  if (importRangeYearsExplicit) {
-    return false;
-  }
-
-  return needsVersionUpgrade || (
-    hasLegacyTruncatedUncappedHistory &&
-    annualHistoryFetchVersion !== ANNUAL_HISTORY_FETCH_VERSION
-  );
-}
-
 function buildSummaryPayload(stockDocument) {
   const identifier = normalizeTickerSymbol(stockDocument?.tickerSymbol);
 
@@ -339,7 +317,9 @@ async function listWatchlistDashboardBootstraps(options = {}) {
     orderedStockDocuments.map(async (stockDocument) => {
       await persistLegacyDerivedCleanup(stockDocument);
       const identifier = normalizeTickerSymbol(stockDocument.tickerSymbol);
-      const needsBackgroundRefresh = shouldUpgradeLegacyAnnualHistory(stockDocument);
+      // The bootstrap payload tells the Stocks page whether this row should be
+      // refreshed in the background because its stored ROIC-backed shape is old.
+      const needsBackgroundRefresh = isStockDocumentRefreshRequired(stockDocument);
       const storedPreferences = await StockMetricsRowPreference.find({
         tickerSymbol: identifier,
       }).lean();
@@ -375,5 +355,5 @@ module.exports = {
   normalizeAnnualMainTableRows,
   normalizeAnnualMetrics,
   normalizePriceRows,
-  shouldUpgradeLegacyAnnualHistory,
+  shouldUpgradeLegacyAnnualHistory: isStockDocumentRefreshRequired,
 };

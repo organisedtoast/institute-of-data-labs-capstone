@@ -13,6 +13,7 @@
     "test:ui:watch": "vitest",
     "check:frontend-branch-sync": "node scripts/check-frontend-branch-sync.js",
     "search:live": "node scripts/live-stock-search-cli.js",
+    "backfill:stocks": "node scripts/backfill-watchlist-stocks.js",
     "docs:schema": "node scripts/generate-schema-reference.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:stock-search": "node --test tests/stock-search-service.test.js",

@@ -14,6 +14,7 @@ process.env.PORT = "3101";
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { ANNUAL_HISTORY_FETCH_VERSION } = require("../services/normalizationService");
+const { CURRENT_STOCK_DATA_VERSION } = require("../services/stockDataVersionService");
 
 const TEST_TICKER = "STUBLENS01";
 const TEST_CATEGORY = "Profitable Hi Growth";
@@ -270,6 +271,7 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     assert.equal(importedDoc.investmentCategory, TEST_CATEGORY);
     assert.equal(importedDoc.sourceMeta.importRangeYears, TEST_YEARS);
     assert.equal(importedDoc.sourceMeta.annualHistoryFetchVersion, ANNUAL_HISTORY_FETCH_VERSION);
+    assert.equal(importedDoc.sourceMeta.stockDataVersion, CURRENT_STOCK_DATA_VERSION);
     assert.deepEqual(importedDoc.sourceMeta.roicEndpointsUsed, EXPECTED_ROIC_ENDPOINTS);
     assert.equal(annualFetchCalls.length, 8);
     annualFetchCalls.forEach((fetchCall) => {
@@ -426,6 +428,7 @@ test("stubbed import populates grouped annual fields, placeholders, overrides, a
     });
     assert.equal(refreshResponse.status, 200, buildFailureMessage("Refresh imported ticker", refreshResponse));
     assert.equal(refreshResponse.body.sourceMeta.annualHistoryFetchVersion, ANNUAL_HISTORY_FETCH_VERSION);
+    assert.equal(refreshResponse.body.sourceMeta.stockDataVersion, CURRENT_STOCK_DATA_VERSION);
     assert.equal(annualFetchCalls.length, 16);
     annualFetchCalls.slice(8).forEach((fetchCall) => {
       assert.equal(fetchCall.ticker, TEST_TICKER);

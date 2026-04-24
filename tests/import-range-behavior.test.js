@@ -19,6 +19,7 @@ const {
   normalizeEarningsCalls,
   selectEarningsReleaseDate,
 } = require("../services/normalizationService");
+const { CURRENT_STOCK_DATA_VERSION } = require("../services/stockDataVersionService");
 
 // Build a simple set of annual rows covering many fiscal years.
 // This gives the tests predictable history to slice down when checking import
@@ -110,6 +111,7 @@ test("buildStockDocument keeps all available annual rows when years is omitted",
   assert.equal(stockDocument.sourceMeta.importRangeYears, null);
   assert.equal(stockDocument.sourceMeta.importRangeYearsExplicit, false);
   assert.equal(stockDocument.sourceMeta.annualHistoryFetchVersion, ANNUAL_HISTORY_FETCH_VERSION);
+  assert.equal(stockDocument.sourceMeta.stockDataVersion, CURRENT_STOCK_DATA_VERSION);
 
   // The fixture covers 2010 through 2025 inclusive, which is 16 rows.
   // The normalized annual history is sorted newest-first.
@@ -128,6 +130,7 @@ test("buildStockDocument limits annual rows when an explicit cap is provided", (
   assert.equal(stockDocument.sourceMeta.importRangeYears, 5);
   assert.equal(stockDocument.sourceMeta.importRangeYearsExplicit, true);
   assert.equal(stockDocument.sourceMeta.annualHistoryFetchVersion, ANNUAL_HISTORY_FETCH_VERSION);
+  assert.equal(stockDocument.sourceMeta.stockDataVersion, CURRENT_STOCK_DATA_VERSION);
 
   // With a 5-year cap, the newest five years should be kept: 2025 down to 2021.
   assert.equal(stockDocument.annualData.length, 5);
