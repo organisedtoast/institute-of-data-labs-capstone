@@ -305,7 +305,7 @@ function Stocks() {
   }, [dashboardCards]);
 
   const handleMetricsVisibilityChange = useCallback((identifier, nextIsOpen) => {
-    // The card owns the `SHOW METRICS` button, but the page owns which card is
+    // The card owns the `ENTER METRICS` / `EXIT METRICS` button, but the page owns which card is
     // currently focused. This state keeps that page-level decision in one place.
     setFocusedMetricsIdentifier(nextIsOpen ? identifier : '');
   }, []);

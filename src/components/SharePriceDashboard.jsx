@@ -72,6 +72,7 @@ const ACTIVE_FISCAL_BAND_FILL = 'rgba(148, 163, 184, 0.12)';
 const FY_WATERMARK_OPACITY = 0.9;
 const LONG_PRESS_ACTIVATION_MS = 400;
 const LONG_PRESS_MOVE_TOLERANCE_PX = 10;
+const LEFT_RAIL_PRESS_PULSE_DURATION_MS = 180;
 const EDITABLE_METRIC_UNDERLINE = 'rgba(100, 116, 139, 0.22)';
 const EDITABLE_METRIC_UNDERLINE_HOVER = 'rgba(100, 116, 139, 0.34)';
 const OVERRIDDEN_METRIC_UNDERLINE = 'rgba(109, 40, 217, 0.44)';
@@ -618,6 +619,16 @@ function clampNumber(value, minimum, maximum) {
   return Math.min(Math.max(value, minimum), maximum);
 }
 
+function getLeftRailPressPulseSx({ isActive, backgroundColor }) {
+  return {
+    backgroundColor: isActive ? 'rgba(249, 115, 22, 0.10)' : backgroundColor,
+    boxShadow: isActive ? 'inset 0 0 0 1px rgba(249, 115, 22, 0.16), 0 2px 8px rgba(15, 23, 42, 0.08)' : 'none',
+    transform: isActive ? 'scale(0.985)' : 'scale(1)',
+    transformOrigin: 'center left',
+    transition: `transform 120ms ease, background-color 160ms ease, box-shadow 180ms ease`,
+  };
+}
+
 function buildViewportSafeOverlayPosition({
   anchorRect,
   preferredWidth,
@@ -966,6 +977,7 @@ export default function SharePriceDashboard({
   const [metricEditorState, setMetricEditorState] = useState(null);
   const [metricEditorValue, setMetricEditorValue] = useState('');
   const [metricRowActionMenuState, setMetricRowActionMenuState] = useState(null);
+  const [activeLeftRailPressFeedbackRowKey, setActiveLeftRailPressFeedbackRowKey] = useState('');
   const [freeRange, setFreeRange] = useState({
     startMonth: '',
     endMonth: '',
@@ -1016,6 +1028,7 @@ export default function SharePriceDashboard({
     startClientY: 0,
   });
   const metricRowActionMenuRef = useRef(null);
+  const leftRailPressFeedbackTimeoutRef = useRef(null);
 
   const attachTimelineScrollRef = useCallback((node) => {
     if (timelineScrollRef.current && timelineScrollRef.current !== node) {
@@ -2336,6 +2349,31 @@ export default function SharePriceDashboard({
     }
   };
 
+  const clearLeftRailPressFeedbackTimeout = useCallback(() => {
+    if (leftRailPressFeedbackTimeoutRef.current) {
+      clearTimeout(leftRailPressFeedbackTimeoutRef.current);
+      leftRailPressFeedbackTimeoutRef.current = null;
+    }
+  }, []);
+
+  const triggerLeftRailPressFeedback = useCallback((rowKey) => {
+    if (!rowKey) {
+      return;
+    }
+
+    // The pulse belongs to the same gesture that opens the row menu. We keep
+    // its timer separate from menu state so the feedback can settle naturally
+    // without changing the menu's own open/close behavior.
+    clearLeftRailPressFeedbackTimeout();
+    setActiveLeftRailPressFeedbackRowKey(rowKey);
+    leftRailPressFeedbackTimeoutRef.current = window.setTimeout(() => {
+      setActiveLeftRailPressFeedbackRowKey((previousRowKey) => {
+        return previousRowKey === rowKey ? '' : previousRowKey;
+      });
+      leftRailPressFeedbackTimeoutRef.current = null;
+    }, LEFT_RAIL_PRESS_PULSE_DURATION_MS);
+  }, [clearLeftRailPressFeedbackTimeout]);
+
   const openMetricEditor = (cell, fieldPath, anchorRect) => {
     if (!cell?.isOverrideable || !cell?.overrideTarget) {
       return;
@@ -2364,6 +2402,7 @@ export default function SharePriceDashboard({
 
     setMetricsActionError('');
     closeMetricEditor();
+    triggerLeftRailPressFeedback(rowKey);
     setMetricRowActionMenuState({
       rowKey,
       rowLabel: metricRow.label,
@@ -2374,8 +2413,16 @@ export default function SharePriceDashboard({
   };
 
   const closeMetricRowActionMenu = () => {
+    clearLeftRailPressFeedbackTimeout();
+    setActiveLeftRailPressFeedbackRowKey('');
     setMetricRowActionMenuState(null);
   };
+
+  useEffect(() => {
+    return () => {
+      clearLeftRailPressFeedbackTimeout();
+    };
+  }, [clearLeftRailPressFeedbackTimeout]);
 
   const suppressContextMenuEvent = (event) => {
     event.preventDefault();
@@ -3020,6 +3067,7 @@ export default function SharePriceDashboard({
               data-testid="share-price-dashboard-metric-row-left-rail"
               data-row-key={tableRow.key}
               data-is-bold={tableRow.isBold === true ? 'true' : 'false'}
+              data-press-feedback-active={activeLeftRailPressFeedbackRowKey === tableRow.key ? 'true' : 'false'}
               data-row-top-divider={tableRow.borderTop === 'none' ? 'none' : 'full-width'}
               data-row-divider={tableRow.borderBottom === 'none' ? 'none' : 'full-width'}
               title={shouldUseShortLabels ? tableRow.label : undefined}
@@ -3050,6 +3098,10 @@ export default function SharePriceDashboard({
                 borderTop: tableRow.borderTop,
                 borderBottom: tableRow.borderBottom,
                 textAlign: 'left',
+                ...getLeftRailPressPulseSx({
+                  isActive: activeLeftRailPressFeedbackRowKey === tableRow.key,
+                  backgroundColor: tableRow.backgroundColor,
+                }),
               }}
             >
               {tableRow.showSectionLabel ? (
@@ -3265,6 +3317,7 @@ export default function SharePriceDashboard({
               data-testid="share-price-dashboard-metric-row-left-rail"
               data-row-key={tableRow.key}
               data-is-bold={tableRow.isBold === true ? 'true' : 'false'}
+              data-press-feedback-active={activeLeftRailPressFeedbackRowKey === tableRow.key ? 'true' : 'false'}
               data-row-top-divider={tableRow.borderTop === 'none' ? 'none' : 'full-width'}
               data-row-divider={tableRow.borderBottom === 'none' ? 'none' : 'full-width'}
               title={shouldUseShortLabels ? tableRow.label : undefined}
@@ -3290,6 +3343,10 @@ export default function SharePriceDashboard({
                 borderTop: tableRow.borderTop,
                 borderBottom: tableRow.borderBottom,
                 textAlign: 'left',
+                ...getLeftRailPressPulseSx({
+                  isActive: activeLeftRailPressFeedbackRowKey === tableRow.key,
+                  backgroundColor: tableRow.backgroundColor,
+                }),
               }}
             >
               {tableRow.showSectionLabel ? (
@@ -3634,6 +3691,7 @@ export default function SharePriceDashboard({
                       data-testid="share-price-dashboard-main-table-row-left-rail"
                       data-row-key={tableRow.rowKey}
                       data-is-bold={tableRow.isBold === true ? 'true' : 'false'}
+                      data-press-feedback-active={activeLeftRailPressFeedbackRowKey === tableRow.rowKey ? 'true' : 'false'}
                       data-row-divider={tableRow.borderBottom === 'none' ? 'none' : 'full-width'}
                       title={shouldUseShortLabels ? tableRow.label : undefined}
                       aria-label={tableRow.label}
@@ -3675,6 +3733,10 @@ export default function SharePriceDashboard({
                         whiteSpace: 'nowrap',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
+                        ...getLeftRailPressPulseSx({
+                          isActive: activeLeftRailPressFeedbackRowKey === tableRow.rowKey,
+                          backgroundColor: tableRow.backgroundColor,
+                        }),
                       }}
                     >
                       {shouldUseShortLabels ? tableRow.shortLabel : tableRow.label}
@@ -3882,6 +3944,30 @@ export default function SharePriceDashboard({
           px: { xs: 2, sm: 2.5, lg: 3 },
         }}
       >
+        {isRemovable ? (
+          <Box
+            data-testid="share-price-dashboard-remove-stock-row"
+            sx={{ display: 'flex', justifyContent: 'center', width: '100%', mb: 1 }}
+          >
+            <Button
+              color="error"
+              size="small"
+              onClick={onRemove}
+              sx={{
+                color: 'error.main',
+                fontSize: '0.74rem',
+                fontWeight: 500,
+                minWidth: 'auto',
+                px: 1,
+                py: 0.25,
+                lineHeight: 1.2,
+              }}
+            >
+              Remove stock
+            </Button>
+          </Box>
+        ) : null}
+
         <Typography
           gutterBottom
           sx={{
@@ -3952,31 +4038,39 @@ export default function SharePriceDashboard({
             </Box>
           </Box>
 
-          {isRemovable ? (
-            <Box
-              data-testid="share-price-dashboard-remove-stock-row"
-              sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}
-            >
-              <Button
-                color="error"
-                size="small"
-                onClick={onRemove}
-                sx={{
-                  color: 'error.main',
-                }}
-              >
-                Remove stock
-              </Button>
-            </Box>
-          ) : null}
-
           <Box sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
+            {/* Focused metrics hides sibling cards on the page, so the exit state
+                gets stronger emphasis to make the way back feel obvious. */}
             <Button
               size="small"
               disabled={isLoadingMetrics}
               onClick={handleMetricsVisibilityToggle}
+              variant={isMetricsOpen ? 'contained' : 'outlined'}
+              data-testid="share-price-dashboard-metrics-toggle"
+              data-visual-emphasis={isMetricsOpen ? 'high' : 'normal'}
+              sx={isMetricsOpen ? {
+                backgroundColor: '#c2410c',
+                color: '#fff7ed',
+                fontWeight: 700,
+                px: 2,
+                py: 0.75,
+                borderColor: '#c2410c',
+                boxShadow: '0 8px 18px rgba(194, 65, 12, 0.18)',
+                '&:hover': {
+                  backgroundColor: '#9a3412',
+                  borderColor: '#9a3412',
+                },
+              } : {
+                color: '#9a3412',
+                borderColor: 'rgba(194, 65, 12, 0.28)',
+                fontWeight: 600,
+                '&:hover': {
+                  borderColor: 'rgba(194, 65, 12, 0.44)',
+                  backgroundColor: 'rgba(249, 115, 22, 0.06)',
+                },
+              }}
             >
-              {isLoadingMetrics ? 'LOADING METRICS...' : isMetricsOpen ? 'HIDE METRICS' : 'SHOW METRICS'}
+              {isLoadingMetrics ? 'LOADING METRICS...' : isMetricsOpen ? 'EXIT METRICS' : 'ENTER METRICS'}
             </Button>
           </Box>
 

@@ -2812,7 +2812,7 @@ describe('SharePriceDashboard preset scrolling', () => {
     expect(screen.getByText('FY END')).toBeTruthy();
   });
 
-  it('shows the current investment category next to Remove stock and updates it from the dropdown', async () => {
+  it('keeps the smaller Remove stock action above the Stock heading and separate from the investment category row', async () => {
     setViewportWidth(420);
 
     const { user } = await renderDashboard({ isRemovable: true });
@@ -2821,11 +2821,14 @@ describe('SharePriceDashboard preset scrolling', () => {
     const removeStockButton = screen.getByRole('button', { name: 'Remove stock' });
     const investmentCategoryRow = screen.getByTestId('share-price-dashboard-investment-category-row');
     const removeStockRow = screen.getByTestId('share-price-dashboard-remove-stock-row');
+    const stockHeading = screen.getByText('Stock');
 
     expect(categorySelect.value).toBe('Profitable Hi Growth');
     expect(removeStockButton).toBeTruthy();
     expect(within(removeStockRow).getByRole('button', { name: 'Remove stock' })).toBe(removeStockButton);
     expect(within(investmentCategoryRow).queryByRole('button', { name: 'Remove stock' })).toBeNull();
+    expect(removeStockButton.textContent).toBe('Remove stock');
+    expect(removeStockRow.compareDocumentPosition(stockHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     await user.selectOptions(categorySelect, 'Mature Compounder');
     await flushDashboardWork();
@@ -3622,11 +3625,11 @@ describe('SharePriceDashboard metrics mode', () => {
         });
 
         expect(screen.queryByText('DETAIL METRICS')).toBeNull();
-        expect(screen.getByRole('button', { name: 'SHOW METRICS' })).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'ENTER METRICS' })).toBeTruthy();
 
         // Phase 2: open metrics and give React/browser follow-up work time to
         // settle through the shared helper.
-        await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+        await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
         await flushDashboardWork();
 
         // Phase 3: verify the user-visible metrics surface really opened, then
@@ -3663,18 +3666,19 @@ describe('SharePriceDashboard metrics mode', () => {
 
     expect(fetchDashboardData).not.toHaveBeenCalled();
     expect(screen.queryByText('DETAIL METRICS')).toBeNull();
+    expect(screen.getByTestId('share-price-dashboard-metrics-toggle').getAttribute('data-visual-emphasis')).toBe('normal');
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+      fireEvent.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     });
     await flushDashboardWork();
 
     expect(fetchDashboardMetricsView).toHaveBeenCalledTimes(1);
     expect(screen.getByText('DETAIL METRICS')).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: 'HIDE METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'EXIT METRICS' }));
     await flushDashboardWork();
-    await userEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await userEvent.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     expect(fetchDashboardMetricsView).toHaveBeenCalledTimes(1);
@@ -3687,7 +3691,7 @@ describe('SharePriceDashboard metrics mode', () => {
 
     expect(screen.queryByText('DETAIL METRICS')).toBeNull();
 
-    await userEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await userEvent.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     expect(screen.getByText('DETAIL METRICS')).not.toBeNull();
@@ -3862,7 +3866,7 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(within(marketCapRow).getByText('114M')).toBeTruthy();
     expect(within(marketCapRow).getByText('-115B')).toBeTruthy();
 
-    await userEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await userEvent.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     expect(screen.getAllByText('1.2B').length).toBeGreaterThanOrEqual(2);
@@ -3961,7 +3965,7 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(within(sharesOnIssueRow).getByText('507M')).toBeTruthy();
     expect(within(marketCapRow).getByText('1.2B')).toBeTruthy();
 
-    await userEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await userEvent.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     expect(screen.getAllByText('44.2M').length).toBeGreaterThanOrEqual(1);
@@ -3974,7 +3978,7 @@ describe('SharePriceDashboard metrics mode', () => {
       payload: buildPlainValueBoundaryMetricsPayload(),
     });
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     expect(getDashboardTableCell({
@@ -4062,7 +4066,7 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(marketCapZeroCell.textContent).not.toContain('0.0');
     expect(sharePriceNonZeroCell.textContent).toContain('100');
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     expect(getDashboardTableCell({
@@ -4128,7 +4132,7 @@ describe('SharePriceDashboard metrics mode', () => {
       payload: initialPayload,
     });
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     const metricRowLeftRail = getMetricRowLeftRail();
@@ -4176,13 +4180,43 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(within(hiddenRowsPanel).getAllByRole('button', { name: 'SHOW ROW' })).toHaveLength(2);
   });
 
+  it('shows a brief press pulse on detailed-metrics left rails when right click opens the row menu', async () => {
+    await renderDashboard({
+      payload: buildMetricsModePayload(),
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
+    });
+    await flushDashboardWork();
+
+    const metricRowLeftRail = getMetricRowLeftRail();
+    expect(metricRowLeftRail).toBeTruthy();
+    expect(metricRowLeftRail?.getAttribute('data-press-feedback-active')).toBe('false');
+
+    await act(async () => {
+      fireEvent.contextMenu(metricRowLeftRail);
+    });
+
+    expect(screen.getByTestId('share-price-dashboard-metric-row-action-menu')).toBeTruthy();
+    expect(metricRowLeftRail?.getAttribute('data-press-feedback-active')).toBe('true');
+
+    await act(async () => {
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 220);
+      });
+    });
+
+    expect(metricRowLeftRail?.getAttribute('data-press-feedback-active')).toBe('false');
+  });
+
   it('opens the left-rail row action menu from a touch long press', async () => {
     await renderDashboard({
       payload: buildMetricsModePayload(),
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+      fireEvent.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     });
     await flushDashboardWork();
 
@@ -4210,6 +4244,40 @@ describe('SharePriceDashboard metrics mode', () => {
     });
   });
 
+  it('shows a brief press pulse on detailed-metrics left rails when long press opens the row menu', async () => {
+    await renderDashboard({
+      payload: buildMetricsModePayload(),
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
+    });
+    await flushDashboardWork();
+
+    const metricRowLeftRail = getMetricRowLeftRail();
+    expect(metricRowLeftRail).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.touchStart(metricRowLeftRail, {
+        touches: [{ clientX: 20, clientY: 20 }],
+      });
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 700);
+      });
+    });
+
+    expect(screen.getByTestId('share-price-dashboard-metric-row-action-menu')).toBeTruthy();
+    expect(metricRowLeftRail?.getAttribute('data-press-feedback-active')).toBe('true');
+
+    await act(async () => {
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 220);
+      });
+    });
+
+    expect(metricRowLeftRail?.getAttribute('data-press-feedback-active')).toBe('false');
+  });
+
   it('bolds a detailed metrics row from the left-rail action menu', async () => {
     const initialPayload = buildMetricsModePayload();
     const boldedPayload = buildMetricsModePayload();
@@ -4226,7 +4294,7 @@ describe('SharePriceDashboard metrics mode', () => {
 
     const { user } = await renderDashboard({ payload: initialPayload });
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     const metricRowLeftRail = getMetricRowLeftRail();
@@ -4269,7 +4337,7 @@ describe('SharePriceDashboard metrics mode', () => {
 
     const { user } = await renderDashboard({ payload: initialPayload });
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     await act(async () => {
@@ -4304,6 +4372,29 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(within(rowActionMenu).queryByRole('button', { name: 'HIDE ROW' })).toBeNull();
   });
 
+  it('shows a brief press pulse on main-table left rails when right click opens the row menu', async () => {
+    await renderDashboard();
+
+    const mainTableLeftRail = getMainTableRowLeftRail('main::annualData[].base.sharesOnIssue');
+    expect(mainTableLeftRail).toBeTruthy();
+    expect(mainTableLeftRail?.getAttribute('data-press-feedback-active')).toBe('false');
+
+    await act(async () => {
+      fireEvent.contextMenu(mainTableLeftRail);
+    });
+
+    expect(screen.getByTestId('share-price-dashboard-metric-row-action-menu')).toBeTruthy();
+    expect(mainTableLeftRail?.getAttribute('data-press-feedback-active')).toBe('true');
+
+    await act(async () => {
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 220);
+      });
+    });
+
+    expect(mainTableLeftRail?.getAttribute('data-press-feedback-active')).toBe('false');
+  });
+
   it('opens the main-table row action menu from a long press', async () => {
     await renderDashboard();
 
@@ -4327,6 +4418,59 @@ describe('SharePriceDashboard metrics mode', () => {
     await act(async () => {
       fireEvent.touchEnd(mainTableLeftRail, { touches: [] });
     });
+  });
+
+  it('shows a brief press pulse on main-table left rails when long press opens the row menu', async () => {
+    await renderDashboard();
+
+    const mainTableLeftRail = getMainTableRowLeftRail('main::annualData[].base.sharesOnIssue');
+    expect(mainTableLeftRail).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.touchStart(mainTableLeftRail, {
+        touches: [{ clientX: 18, clientY: 18 }],
+      });
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 700);
+      });
+    });
+
+    expect(screen.getByTestId('share-price-dashboard-metric-row-action-menu')).toBeTruthy();
+    expect(mainTableLeftRail?.getAttribute('data-press-feedback-active')).toBe('true');
+
+    await act(async () => {
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 220);
+      });
+    });
+
+    expect(mainTableLeftRail?.getAttribute('data-press-feedback-active')).toBe('false');
+  });
+
+  it('does not trigger left-rail press feedback when an overrideable metric value cell opens the editor', async () => {
+    const { user } = await renderDashboard({
+      payload: buildMetricsModePayload(),
+      dashboardProps: {
+        isFocusedMetricsMode: true,
+      },
+    });
+
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
+    await flushDashboardWork();
+
+    const metricRowLeftRail = getMetricRowLeftRail();
+    const metricCell = getOverrideableMetricCell();
+
+    expect(metricRowLeftRail).toBeTruthy();
+    expect(metricCell).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.contextMenu(metricCell);
+    });
+
+    expect(screen.getByTestId('share-price-dashboard-metric-editor')).toBeTruthy();
+    expect(screen.queryByTestId('share-price-dashboard-metric-row-action-menu')).toBeNull();
+    expect(metricRowLeftRail?.getAttribute('data-press-feedback-active')).toBe('false');
   });
 
   it('keeps the row action menu fully inside a narrow desktop viewport near the right edge', async () => {
@@ -4463,7 +4607,7 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(getMainTableRowLeftRail('main::annualData[].base.sharePrice')?.getAttribute('data-is-bold')).toBe('true');
     expect(getMainTableRowLeftRail('main::annualData[].base.marketCap')?.getAttribute('data-is-bold')).toBe('true');
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     [
@@ -4515,7 +4659,7 @@ describe('SharePriceDashboard metrics mode', () => {
 
     const { user } = await renderDashboard({ payload: initialPayload });
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     await act(async () => {
@@ -4539,7 +4683,7 @@ describe('SharePriceDashboard metrics mode', () => {
       payload: buildMetricsModePayloadWithHiddenSectionLeader(),
     });
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     const visibleSectionStarts = getVisibleSectionStartContracts();
@@ -4568,7 +4712,7 @@ describe('SharePriceDashboard metrics mode', () => {
       },
     });
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     const visibleSectionStarts = getVisibleSectionStartContracts();
@@ -4598,7 +4742,7 @@ describe('SharePriceDashboard metrics mode', () => {
   it('keeps non-section detail rows free of the section-start divider styling', async () => {
     const { user } = await renderDashboard({ payload: buildMetricsModePayload() });
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     const nonSectionLeftRail = getMetricRowLeftRail('715::annualData[].forecastData.fy1.revenue');
@@ -4633,7 +4777,7 @@ describe('SharePriceDashboard metrics mode', () => {
 
     const { user } = await renderDashboard({ payload: hiddenBoldPayload });
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     const hiddenRowsToggle = screen.getAllByRole('button').find((buttonNode) => {
@@ -4673,7 +4817,7 @@ describe('SharePriceDashboard metrics mode', () => {
       payloadSequence: [initialPayload, clearedPayload],
     });
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     const overriddenCellBeforeClear = screen.getAllByTestId('share-price-dashboard-metric-cell').find((cellNode) => {
@@ -4799,7 +4943,7 @@ describe('SharePriceDashboard metrics mode', () => {
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+      fireEvent.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     });
     await flushDashboardWork();
 
@@ -4868,7 +5012,7 @@ describe('SharePriceDashboard metrics mode', () => {
 
   it('keeps derived detail-metrics cells inert while manual forecast rows still stay editable', async () => {
     await renderDashboard({ payload: buildDefaultBoldValuationMetricsPayload() });
-    await userEvent.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await userEvent.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
 
     const derivedMarketCapCell = getDashboardTableCell({
       rowKey: '670::annualData[].forecastData.fy1.marketCap',
@@ -5012,7 +5156,7 @@ describe('SharePriceDashboard metrics mode', () => {
 
   // This subsection protects the family of React loop bugs that previously froze
   // the stock cards. The historical failure chain looked like this:
-  // 1. the user pressed SHOW METRICS
+  // 1. the user pressed ENTER METRICS
   // 2. a parent component updated which stock was "focused"
   // 3. sibling cards hid or remounted
   // 4. scale/measurement inputs were recomputed during those rerenders
@@ -5121,7 +5265,7 @@ describe('SharePriceDashboard metrics mode', () => {
     // React must complete that handoff without any render-phase warnings or loop
     // warnings. We keep the focused/idle label visible so a beginner can see the
     // parent-owned state change directly in the DOM.
-    it('does not warn when SHOW METRICS updates parent focus state', async () => {
+    it('does not warn when ENTER METRICS updates parent focus state', async () => {
       const payload = buildMetricsModePayload();
       const deferredResponse = createDeferredResponse();
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -5145,18 +5289,20 @@ describe('SharePriceDashboard metrics mode', () => {
         // Phase 1: the parent starts idle and the child card is still in its
         // normal non-focused mode.
         expect(mountedQueries.getByTestId('share-price-dashboard-parent-focus-state').textContent).toBe('idle');
-        expect(mountedQueries.getByRole('button', { name: 'SHOW METRICS' })).toBeTruthy();
+        expect(mountedQueries.getByRole('button', { name: 'ENTER METRICS' })).toBeTruthy();
+        expect(mountedQueries.getByTestId('share-price-dashboard-metrics-toggle').getAttribute('data-visual-emphasis')).toBe('normal');
 
-        // Phase 2: pressing SHOW METRICS asks the parent to flip into focused
+        // Phase 2: pressing ENTER METRICS asks the parent to flip into focused
         // mode. We use three turns here because this path includes the parent
         // state update plus the dashboard's animated follow-up effects.
-        await user.click(mountedQueries.getByRole('button', { name: 'SHOW METRICS' }));
+        await user.click(mountedQueries.getByRole('button', { name: 'ENTER METRICS' }));
         await flushDashboardWork(3);
 
         // Phase 3: both the parent-owned state and the user-facing button label
         // should show that focused mode finished cleanly.
         expect(mountedQueries.getByTestId('share-price-dashboard-parent-focus-state').textContent).toBe('focused');
-        expect(mountedQueries.getByRole('button', { name: 'HIDE METRICS' })).toBeTruthy();
+        expect(mountedQueries.getByRole('button', { name: 'EXIT METRICS' })).toBeTruthy();
+        expect(mountedQueries.getByTestId('share-price-dashboard-metrics-toggle').getAttribute('data-visual-emphasis')).toBe('high');
         expectNoDangerousReactLoopWarnings(consoleErrorSpy);
       } finally {
         consoleErrorSpy.mockRestore();
@@ -5192,13 +5338,13 @@ describe('SharePriceDashboard metrics mode', () => {
 
         // Phase 1: open focused metrics so the parent-owned focus state and the
         // animated chart-scale path are both live.
-        await user.click(mountedQueries.getByRole('button', { name: 'SHOW METRICS' }));
+        await user.click(mountedQueries.getByRole('button', { name: 'ENTER METRICS' }));
         await flushDashboardWork(3);
 
         const labelsBeforeParentRerenders = getRenderedYAxisLabelTexts(mountedQueries);
 
         expect(labelsBeforeParentRerenders.length).toBeGreaterThan(0);
-        expect(mountedQueries.getByRole('button', { name: 'HIDE METRICS' })).toBeTruthy();
+        expect(mountedQueries.getByRole('button', { name: 'EXIT METRICS' })).toBeTruthy();
 
         // Phase 2: force several parent rerenders that do *not* change the
         // dashboard's semantic chart scale. If object identity accidentally
@@ -5214,7 +5360,7 @@ describe('SharePriceDashboard metrics mode', () => {
         // should not have reported any runaway update loop.
         expect(mountedQueries.getByTestId('share-price-dashboard-parent-rerender-count').textContent).toBe('3');
         expect(getRenderedYAxisLabelTexts(mountedQueries)).toEqual(labelsBeforeParentRerenders);
-        expect(mountedQueries.getByRole('button', { name: 'HIDE METRICS' })).toBeTruthy();
+        expect(mountedQueries.getByRole('button', { name: 'EXIT METRICS' })).toBeTruthy();
         expectNoDangerousReactLoopWarnings(consoleErrorSpy);
       } finally {
         consoleErrorSpy.mockRestore();
@@ -5257,39 +5403,39 @@ describe('SharePriceDashboard metrics mode', () => {
 
         // Phase 2: focus AAPL. That should hide the sibling card but keep the
         // focused card interactive.
-        await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'SHOW METRICS' }));
+        await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'ENTER METRICS' }));
         await flushDashboardWork(4);
         expect(getDashboardCard('AAPL')).toBeTruthy();
         expect(getDashboardCard('MSFT')).toBeNull();
-        expect(within(getDashboardCard('AAPL')).getByRole('button', { name: 'HIDE METRICS' })).toBeTruthy();
+        expect(within(getDashboardCard('AAPL')).getByRole('button', { name: 'EXIT METRICS' })).toBeTruthy();
 
         // Phase 3: hide AAPL metrics so both cards remount.
-        await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'HIDE METRICS' }));
+        await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'EXIT METRICS' }));
         await flushDashboardWork(4);
         expect(getDashboardCard('AAPL')).toBeTruthy();
         expect(getDashboardCard('MSFT')).toBeTruthy();
 
         // Phase 4: repeat the same flow with MSFT.
-        await user.click(within(getDashboardCard('MSFT')).getByRole('button', { name: 'SHOW METRICS' }));
+        await user.click(within(getDashboardCard('MSFT')).getByRole('button', { name: 'ENTER METRICS' }));
         await flushDashboardWork(4);
         expect(getDashboardCard('AAPL')).toBeNull();
         expect(getDashboardCard('MSFT')).toBeTruthy();
-        expect(within(getDashboardCard('MSFT')).getByRole('button', { name: 'HIDE METRICS' })).toBeTruthy();
+        expect(within(getDashboardCard('MSFT')).getByRole('button', { name: 'EXIT METRICS' })).toBeTruthy();
 
         // Phase 5: restore both cards once more to prove the remount path stays
         // safe after a second handoff.
-        await user.click(within(getDashboardCard('MSFT')).getByRole('button', { name: 'HIDE METRICS' }));
+        await user.click(within(getDashboardCard('MSFT')).getByRole('button', { name: 'EXIT METRICS' }));
         await flushDashboardWork(4);
         expect(getDashboardCard('AAPL')).toBeTruthy();
         expect(getDashboardCard('MSFT')).toBeTruthy();
 
         // Phase 6: focus AAPL again. The earlier bug could build up over
         // repeated cycles, so this final repeat guards the cumulative case.
-        await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'SHOW METRICS' }));
+        await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'ENTER METRICS' }));
         await flushDashboardWork(4);
         expect(getDashboardCard('AAPL')).toBeTruthy();
         expect(getDashboardCard('MSFT')).toBeNull();
-        expect(within(getDashboardCard('AAPL')).getByRole('button', { name: 'HIDE METRICS' })).toBeTruthy();
+        expect(within(getDashboardCard('AAPL')).getByRole('button', { name: 'EXIT METRICS' })).toBeTruthy();
         expectNoDangerousReactLoopWarnings(consoleErrorSpy);
       } finally {
         consoleErrorSpy.mockRestore();
@@ -5329,9 +5475,9 @@ describe('SharePriceDashboard metrics mode', () => {
 
         // Phase 1: focus AAPL, then restore both cards so the sibling-remount
         // path has already been exercised once.
-        await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'SHOW METRICS' }));
+        await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'ENTER METRICS' }));
         await flushDashboardWork(4);
-        await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'HIDE METRICS' }));
+        await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'EXIT METRICS' }));
         await flushDashboardWork(4);
 
         expect(getDashboardCard('AAPL')).toBeTruthy();
@@ -5348,12 +5494,12 @@ describe('SharePriceDashboard metrics mode', () => {
         // Phase 3: open focused metrics again after the layout churn. If the
         // dashboard reintroduced the earlier effect cycle, this is where the
         // console warning would reappear.
-        await user.click(within(getDashboardCard('MSFT')).getByRole('button', { name: 'SHOW METRICS' }));
+        await user.click(within(getDashboardCard('MSFT')).getByRole('button', { name: 'ENTER METRICS' }));
         await flushDashboardWork(4);
 
         expect(getDashboardCard('AAPL')).toBeNull();
         expect(getDashboardCard('MSFT')).toBeTruthy();
-        expect(within(getDashboardCard('MSFT')).getByRole('button', { name: 'HIDE METRICS' })).toBeTruthy();
+        expect(within(getDashboardCard('MSFT')).getByRole('button', { name: 'EXIT METRICS' })).toBeTruthy();
         expect(within(getDashboardCard('MSFT')).getAllByTestId('share-price-dashboard-y-axis-label').length).toBeGreaterThan(0);
         expectNoDangerousReactLoopWarnings(consoleErrorSpy);
       } finally {
@@ -5378,7 +5524,7 @@ describe('SharePriceDashboard metrics mode', () => {
 
         // Phase 1: open focused metrics so the dashboard is in its richest,
         // most measurement-sensitive state.
-        await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+        await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
         await flushDashboardWork(3);
 
         let activeScrollRegion = screen.getAllByTestId(DASHBOARD_TEST_ID).at(-1);
@@ -5437,7 +5583,7 @@ describe('SharePriceDashboard metrics mode', () => {
         },
       });
 
-      await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+      await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
       await flushDashboardWork();
 
       // A narrow scroll region makes the "frozen left rail vs moving values"
@@ -5509,7 +5655,7 @@ describe('SharePriceDashboard metrics mode', () => {
         },
       });
 
-      await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+      await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
       await flushDashboardWork();
 
       await configureScrollRegion(scrollRegion, 360);
@@ -5555,7 +5701,7 @@ describe('SharePriceDashboard metrics mode', () => {
       },
     });
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     const metricCell = getOverrideableMetricCell();
@@ -5603,7 +5749,7 @@ describe('SharePriceDashboard metrics mode', () => {
 
     const mountedQueries = within(mountedContainer);
     await act(async () => {
-      fireEvent.click(mountedQueries.getByRole('button', { name: 'SHOW METRICS' }));
+      fireEvent.click(mountedQueries.getByRole('button', { name: 'ENTER METRICS' }));
     });
     await flushDashboardWork();
 
@@ -5623,7 +5769,7 @@ describe('SharePriceDashboard metrics mode', () => {
       payload: buildMetricsModePayload(),
     });
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     const metricCell = getOverrideableMetricCell();
@@ -5705,7 +5851,7 @@ describe('SharePriceDashboard metrics mode', () => {
     expect(getMainTableRowLeftRail('main::priceCurrency')?.textContent).toContain('SP currency');
     expect(screen.getAllByText('USD').length).toBeGreaterThan(0);
 
-    await user.click(screen.getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(screen.getByRole('button', { name: 'ENTER METRICS' }));
     await flushDashboardWork();
 
     const metricsViewport = screen.getAllByTestId('share-price-dashboard-metrics-viewport').at(-1);
@@ -5723,3 +5869,4 @@ describe('SharePriceDashboard metrics mode', () => {
   });
 
 });
+

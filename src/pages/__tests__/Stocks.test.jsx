@@ -47,10 +47,10 @@ vi.mock('../../components/SharePriceDashboard', () => ({
         <div>{identifier}</div>
         {isFocusedMetricsMode ? <div>Focused metrics mode</div> : null}
         <button type="button" onClick={() => onMetricsVisibilityChange?.(true)}>
-          SHOW METRICS
+          ENTER METRICS
         </button>
         <button type="button" onClick={() => onMetricsVisibilityChange?.(false)}>
-          HIDE METRICS
+          EXIT METRICS
         </button>
       </div>
     );
@@ -139,9 +139,9 @@ describe('Stocks page focused metrics mode', () => {
     // be visible before any stock enters focused metrics mode.
     expect(screen.getByTestId('stock-search-results')).toBeTruthy();
 
-    // Clicking SHOW METRICS on AAPL simulates the child dashboard asking the
+    // Clicking ENTER METRICS on AAPL simulates the child dashboard asking the
     // page to focus that one stock and hide its siblings.
-    await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'SHOW METRICS' }));
+    await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'ENTER METRICS' }));
 
     expect(screen.getByTestId('stock-search-results')).toBeTruthy();
     expect(screen.getAllByTestId('share-price-dashboard-mock')).toHaveLength(1);
@@ -160,9 +160,9 @@ describe('Stocks page focused metrics mode', () => {
     });
 
     // We enter focused metrics mode first so the second click can prove that
-    // HIDE METRICS returns the page to its ordinary multi-card watchlist state.
-    await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'SHOW METRICS' }));
-    await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'HIDE METRICS' }));
+    // EXIT METRICS returns the page to its ordinary multi-card watchlist state.
+    await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'ENTER METRICS' }));
+    await user.click(within(getDashboardCard('AAPL')).getByRole('button', { name: 'EXIT METRICS' }));
 
     expect(screen.getByTestId('stock-search-results')).toBeTruthy();
     expect(screen.getAllByTestId('share-price-dashboard-mock')).toHaveLength(2);
