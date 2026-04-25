@@ -306,6 +306,12 @@ Regenerate it with:
 npm run docs:schema
 ```
 
+## 7.5. Beginner architecture diagram
+
+Use `docs/beginner-architecture-diagram.md` when you want a high-level, beginner-friendly view of the app's major layers, components, interfaces, and external systems.
+
+This is the best starting point if you want to understand the system as an early planning-stage architecture rather than as a file-by-file implementation.
+
 ## 8. Live search CLI
 
 The live search CLI is a manual debugging tool for stock search.
