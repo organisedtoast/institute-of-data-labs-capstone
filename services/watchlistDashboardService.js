@@ -5,6 +5,7 @@ const { isAnnualFieldDirectlyOverrideable } = require("../catalog/fieldCatalog")
 const { buildMainTableRowKey } = require("./stockMetricsViewService");
 const { clearLegacyDerivedMetricOverrides } = require("../utils/derivedMetricOverrideCleanup");
 const { recalculateDerived } = require("../utils/derivedCalc");
+const normalizeTickerSymbol = require("../utils/normalizeTickerSymbol");
 const { isDefaultBoldMainTableRowKey } = require("../shared/defaultBoldStockRows");
 const { isStockDocumentRefreshRequired } = require("./stockDataVersionService");
 
@@ -14,10 +15,6 @@ const { isStockDocumentRefreshRequired } = require("./stockDataVersionService");
 //
 // Keeping that split on the backend makes the frontend faster without changing
 // the visible stock-card behavior beginners already understand.
-
-function normalizeTickerSymbol(tickerSymbol) {
-  return String(tickerSymbol || "").trim().toUpperCase();
-}
 
 function getEffectiveValue(metricField) {
   if (!metricField || typeof metricField !== "object") {
@@ -312,6 +309,25 @@ async function listWatchlistDashboardBootstraps(options = {}) {
         .map((ticker) => stockDocumentsByTicker.get(ticker))
         .filter(Boolean)
     : stockDocuments;
+  const orderedIdentifiers = orderedStockDocuments
+    .map((stockDocument) => normalizeTickerSymbol(stockDocument?.tickerSymbol))
+    .filter(Boolean);
+  const storedPreferences = await StockMetricsRowPreference.find({
+    tickerSymbol: { $in: orderedIdentifiers },
+  }).lean();
+  const rowPreferencesByTicker = new Map();
+
+  // One batched query avoids an extra round-trip per stock card while still
+  // letting each dashboard payload read its own saved row preferences.
+  storedPreferences.forEach((preference) => {
+    const tickerSymbol = normalizeTickerSymbol(preference?.tickerSymbol);
+
+    if (!rowPreferencesByTicker.has(tickerSymbol)) {
+      rowPreferencesByTicker.set(tickerSymbol, new Map());
+    }
+
+    rowPreferencesByTicker.get(tickerSymbol).set(preference.rowKey, preference);
+  });
 
   const dashboardPayloads = await Promise.all(
     orderedStockDocuments.map(async (stockDocument) => {
@@ -320,12 +336,7 @@ async function listWatchlistDashboardBootstraps(options = {}) {
       // The bootstrap payload tells the Stocks page whether this row should be
       // refreshed in the background because its stored ROIC-backed shape is old.
       const needsBackgroundRefresh = isStockDocumentRefreshRequired(stockDocument);
-      const storedPreferences = await StockMetricsRowPreference.find({
-        tickerSymbol: identifier,
-      }).lean();
-      const rowPreferenceByKey = new Map(
-        storedPreferences.map((preference) => [preference.rowKey, preference])
-      );
+      const rowPreferenceByKey = rowPreferencesByTicker.get(identifier) || new Map();
 
       try {
         const priceRows = await fetchBootstrapPriceRows(identifier);
@@ -355,5 +366,4 @@ module.exports = {
   normalizeAnnualMainTableRows,
   normalizeAnnualMetrics,
   normalizePriceRows,
-  shouldUpgradeLegacyAnnualHistory: isStockDocumentRefreshRequired,
 };

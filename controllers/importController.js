@@ -4,12 +4,14 @@
 
 const { parseRequestedImportRangeYears } = require("../services/importRangeService");
 const WatchlistStock = require("../models/WatchlistStock");
+const { getTrimmedString } = require("../middleware/validate");
 const { assertActiveLensName } = require("../services/lensService");
 const { buildFreshStockData } = require("../services/watchlistStockRefreshService");
 
 async function importStock(req, res, next) {
   try {
-    const { tickerSymbol, investmentCategory } = req.body;
+    const tickerSymbol = getTrimmedString(req.body?.tickerSymbol);
+    const investmentCategory = getTrimmedString(req.body?.investmentCategory);
     const {
       years,
       importRangeYearsExplicit,
@@ -18,7 +20,7 @@ async function importStock(req, res, next) {
       return res.status(400).json({ error: "tickerSymbol is required" });
     }
 
-    if (!investmentCategory || typeof investmentCategory !== "string" || investmentCategory.trim() === "") {
+    if (!investmentCategory) {
       return res.status(400).json({ error: "investmentCategory is required and must be a non-empty string." });
     }
 
@@ -28,7 +30,7 @@ async function importStock(req, res, next) {
       tickerSymbol,
       years,
       importRangeYearsExplicit,
-      investmentCategory: investmentCategory.trim(),
+      investmentCategory,
     });
 
     const doc = await WatchlistStock.findOneAndUpdate(

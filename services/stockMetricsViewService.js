@@ -5,12 +5,9 @@ const { resolveVisibleFieldsForStock } = require("./lensService");
 const { clearLegacyDerivedMetricOverrides } = require("../utils/derivedMetricOverrideCleanup");
 const { recalculateDerived } = require("../utils/derivedCalc");
 const { hasUserOverride } = require("../utils/metricField");
+const normalizeTickerSymbol = require("../utils/normalizeTickerSymbol");
 const { getNestedValue } = require("../utils/pathUtils");
 const { isDefaultBoldRowKey } = require("../shared/defaultBoldStockRows");
-
-function normalizeTickerSymbol(tickerSymbol) {
-  return String(tickerSymbol || "").trim().toUpperCase();
-}
 
 function buildMainTableRowKey(fieldPath) {
   return `main::${fieldPath}`;

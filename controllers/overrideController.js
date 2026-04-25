@@ -1,7 +1,5 @@
-// Override routes let a user correct any metric path the backend stores.
-// We keep separate routes for annual rows, forecast buckets, and top-level
-// placeholders so the request path itself tells a beginner which part of the
-// document is being edited.
+// Override routes stay split by document area so the URL itself still shows a
+// beginner which part of the stock document is being edited.
 
 const {
   ANNUAL_DERIVED_PATHS,
@@ -17,9 +15,12 @@ const {
 const WatchlistStock = require("../models/WatchlistStock");
 const { clearLegacyDerivedMetricOverrides } = require("../utils/derivedMetricOverrideCleanup");
 const { recalculateDerived } = require("../utils/derivedCalc");
-const { createMetricField } = require("../utils/metricField");
+const {
+  createMetricField,
+  getBaseSourceOfTruth,
+  resolveEffectiveValue,
+} = require("../utils/metricField");
 const { flattenObjectPaths, getNestedValue, setNestedValue } = require("../utils/pathUtils");
-const { getBaseSourceOfTruth, resolveEffectiveValue } = require("../utils/effectiveValue");
 
 function applyMetricOverrides(target, allowedPaths, derivedLockedPaths, payload) {
   const flattened = flattenObjectPaths(payload);
@@ -78,113 +79,103 @@ function applyMetricOverrides(target, allowedPaths, derivedLockedPaths, payload)
   }
 }
 
-async function setAnnualOverride(req, res, next) {
-  try {
-    const ticker = req.params.ticker.toUpperCase();
-    const fiscalYear = parseInt(req.params.fiscalYear, 10);
-    const stock = await WatchlistStock.findOne({ tickerSymbol: ticker });
-    if (!stock) {
-      return res.status(404).json({ error: "Stock not found" });
-    }
-
-    const annualEntry = stock.annualData.find((row) => row.fiscalYear === fiscalYear);
-    if (!annualEntry) {
-      return res.status(404).json({ error: "Year not found" });
-    }
-
-    const annualRouteForecastDerivedPaths = FORECAST_BUCKET_KEYS.flatMap((bucketKey) =>
-      FORECAST_RELATIVE_METRIC_PATHS
-        .filter((path) => isForecastFieldDerivedInternalCalculation(path))
-        .map((path) => `forecastData.${bucketKey}.${path}`)
-    );
-    const annualRouteOverrideablePaths = [
-      ...ANNUAL_OVERRIDEABLE_PATHS,
-      ...FORECAST_BUCKET_KEYS.flatMap((bucketKey) =>
-        FORECAST_OVERRIDEABLE_PATHS.map((path) => `forecastData.${bucketKey}.${path}`)
-      ),
-      ...TOP_LEVEL_OVERRIDEABLE_PATHS,
-    ];
-
-    if (clearLegacyDerivedMetricOverrides(stock)) {
-      recalculateDerived(stock);
-    }
-
-    // The catalog source metadata is now the only policy source. That keeps
-    // "derived means recalculated-but-locked" consistent between routes and UI.
-    applyMetricOverrides(
-      annualEntry,
-      annualRouteOverrideablePaths,
-      [
-        ...ANNUAL_DERIVED_PATHS,
-        ...annualRouteForecastDerivedPaths,
-        ...TOP_LEVEL_METRIC_PATHS.filter((path) => isTopLevelFieldDerivedInternalCalculation(path)),
-      ],
-      req.body
-    );
-    recalculateDerived(stock);
-    await stock.save();
-    res.json(stock);
-  } catch (error) {
-    next(error);
+// Express 5 forwards rejected async handlers to the shared error middleware,
+// so these routes do not need local try/catch(next) wrappers.
+async function setAnnualOverride(req, res) {
+  const ticker = req.params.ticker.toUpperCase();
+  const fiscalYear = parseInt(req.params.fiscalYear, 10);
+  const stock = await WatchlistStock.findOne({ tickerSymbol: ticker });
+  if (!stock) {
+    return res.status(404).json({ error: "Stock not found" });
   }
+
+  const annualEntry = stock.annualData.find((row) => row.fiscalYear === fiscalYear);
+  if (!annualEntry) {
+    return res.status(404).json({ error: "Year not found" });
+  }
+
+  const annualRouteForecastDerivedPaths = FORECAST_BUCKET_KEYS.flatMap((bucketKey) =>
+    FORECAST_RELATIVE_METRIC_PATHS
+      .filter((path) => isForecastFieldDerivedInternalCalculation(path))
+      .map((path) => `forecastData.${bucketKey}.${path}`)
+  );
+  const annualRouteOverrideablePaths = [
+    ...ANNUAL_OVERRIDEABLE_PATHS,
+    ...FORECAST_BUCKET_KEYS.flatMap((bucketKey) =>
+      FORECAST_OVERRIDEABLE_PATHS.map((path) => `forecastData.${bucketKey}.${path}`)
+    ),
+    ...TOP_LEVEL_OVERRIDEABLE_PATHS,
+  ];
+
+  if (clearLegacyDerivedMetricOverrides(stock)) {
+    recalculateDerived(stock);
+  }
+
+  // The catalog source metadata is now the only policy source. That keeps
+  // "derived means recalculated-but-locked" consistent between routes and UI.
+  applyMetricOverrides(
+    annualEntry,
+    annualRouteOverrideablePaths,
+    [
+      ...ANNUAL_DERIVED_PATHS,
+      ...annualRouteForecastDerivedPaths,
+      ...TOP_LEVEL_METRIC_PATHS.filter((path) => isTopLevelFieldDerivedInternalCalculation(path)),
+    ],
+    req.body
+  );
+  recalculateDerived(stock);
+  await stock.save();
+  res.json(stock);
 }
 
-async function setForecastOverride(req, res, next) {
-  try {
-    const ticker = req.params.ticker.toUpperCase();
-    const bucket = req.params.bucket.toLowerCase();
-    const stock = await WatchlistStock.findOne({ tickerSymbol: ticker });
-    if (!stock) {
-      return res.status(404).json({ error: "Stock not found" });
-    }
-
-    const forecastBucket = stock.forecastData?.[bucket];
-    if (!forecastBucket) {
-      return res.status(404).json({ error: "Forecast bucket not found" });
-    }
-
-    if (clearLegacyDerivedMetricOverrides(stock)) {
-      recalculateDerived(stock);
-    }
-
-    applyMetricOverrides(
-      forecastBucket,
-      FORECAST_OVERRIDEABLE_PATHS,
-      FORECAST_RELATIVE_METRIC_PATHS.filter((path) => isForecastFieldDerivedInternalCalculation(path)),
-      req.body
-    );
-    recalculateDerived(stock);
-    await stock.save();
-    res.json(stock);
-  } catch (error) {
-    next(error);
+async function setForecastOverride(req, res) {
+  const ticker = req.params.ticker.toUpperCase();
+  const bucket = req.params.bucket.toLowerCase();
+  const stock = await WatchlistStock.findOne({ tickerSymbol: ticker });
+  if (!stock) {
+    return res.status(404).json({ error: "Stock not found" });
   }
+
+  const forecastBucket = stock.forecastData?.[bucket];
+  if (!forecastBucket) {
+    return res.status(404).json({ error: "Forecast bucket not found" });
+  }
+
+  if (clearLegacyDerivedMetricOverrides(stock)) {
+    recalculateDerived(stock);
+  }
+
+  applyMetricOverrides(
+    forecastBucket,
+    FORECAST_OVERRIDEABLE_PATHS,
+    FORECAST_RELATIVE_METRIC_PATHS.filter((path) => isForecastFieldDerivedInternalCalculation(path)),
+    req.body
+  );
+  recalculateDerived(stock);
+  await stock.save();
+  res.json(stock);
 }
 
-async function setTopLevelMetricOverride(req, res, next) {
-  try {
-    const ticker = req.params.ticker.toUpperCase();
-    const stock = await WatchlistStock.findOne({ tickerSymbol: ticker });
-    if (!stock) {
-      return res.status(404).json({ error: "Stock not found" });
-    }
-
-    if (clearLegacyDerivedMetricOverrides(stock)) {
-      recalculateDerived(stock);
-    }
-
-    applyMetricOverrides(
-      stock,
-      TOP_LEVEL_OVERRIDEABLE_PATHS,
-      TOP_LEVEL_METRIC_PATHS.filter((path) => isTopLevelFieldDerivedInternalCalculation(path)),
-      req.body
-    );
-    recalculateDerived(stock);
-    await stock.save();
-    res.json(stock);
-  } catch (error) {
-    next(error);
+async function setTopLevelMetricOverride(req, res) {
+  const ticker = req.params.ticker.toUpperCase();
+  const stock = await WatchlistStock.findOne({ tickerSymbol: ticker });
+  if (!stock) {
+    return res.status(404).json({ error: "Stock not found" });
   }
+
+  if (clearLegacyDerivedMetricOverrides(stock)) {
+    recalculateDerived(stock);
+  }
+
+  applyMetricOverrides(
+    stock,
+    TOP_LEVEL_OVERRIDEABLE_PATHS,
+    TOP_LEVEL_METRIC_PATHS.filter((path) => isTopLevelFieldDerivedInternalCalculation(path)),
+    req.body
+  );
+  recalculateDerived(stock);
+  await stock.save();
+  res.json(stock);
 }
 
 module.exports = {

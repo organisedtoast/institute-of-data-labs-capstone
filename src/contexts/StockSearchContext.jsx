@@ -1,17 +1,15 @@
-import React from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 
-import StockSearchContext from './stockSearchContext';
+import extractApiErrorMessage from '../utils/extractApiErrorMessage';
+import normalizeTickerIdentifier from '../utils/normalizeTickerIdentifier';
 
 const DEFAULT_IMPORT_CATEGORY = 'Firm Specific Turnaround';
 const STOCK_SEARCH_FALLBACK_MESSAGE = 'Search is unavailable right now. Please try again in a moment.';
 const PENDING_STOCK_ACTION_ADD = 'add';
 const PENDING_STOCK_ACTION_OPEN = 'open';
-
-function normalizeTickerIdentifier(value) {
-  return String(value || '').trim().toUpperCase();
-}
+// eslint-disable-next-line react-refresh/only-export-components
+export const StockSearchContext = createContext(null);
 
 function isDevelopmentEnvironment() {
   return Boolean(import.meta.env?.DEV);
@@ -52,14 +50,6 @@ function resolveSearchFailureMessage(requestError) {
   return STOCK_SEARCH_FALLBACK_MESSAGE;
 }
 
-function getApiErrorMessage(requestError, fallbackMessage) {
-  return (
-    requestError.response?.data?.message ||
-    requestError.response?.data?.error ||
-    fallbackMessage
-  );
-}
-
 function mapWatchlistStockToCard(stockDocument) {
   const identifier = normalizeTickerIdentifier(
     stockDocument?.identifier || stockDocument?.tickerSymbol,
@@ -89,7 +79,7 @@ function prioritizeStockCards(stockCards, prioritizedIdentifier) {
     return stockCards;
   }
 
-  const normalizedIdentifier = prioritizedIdentifier.trim().toUpperCase();
+  const normalizedIdentifier = normalizeTickerIdentifier(prioritizedIdentifier);
   const prioritizedCards = [];
   const remainingCards = [];
 
@@ -138,7 +128,7 @@ export function StockSearchProvider({ children }) {
       setStocks([]);
       setStocksStatus('error');
       setStocksError(
-        getApiErrorMessage(requestError, 'Unable to load watchlist stocks right now.'),
+        extractApiErrorMessage(requestError, 'Unable to load watchlist stocks right now.'),
       );
       return null;
     }
@@ -273,7 +263,7 @@ export function StockSearchProvider({ children }) {
     } catch (requestError) {
       setSearchStatus('error');
       setSearchError(
-        getApiErrorMessage(
+        extractApiErrorMessage(
           requestError,
           `Unable to add ${normalizedIdentifier} to the watchlist right now.`,
         ),
@@ -315,7 +305,7 @@ export function StockSearchProvider({ children }) {
   }, [loadStocks]);
 
   const removeStockByIdentifier = useCallback(async (identifierToRemove) => {
-    const normalizedIdentifier = String(identifierToRemove || '').trim().toUpperCase();
+    const normalizedIdentifier = normalizeTickerIdentifier(identifierToRemove);
 
     if (!normalizedIdentifier) {
       return false;
@@ -329,7 +319,7 @@ export function StockSearchProvider({ children }) {
       return Array.isArray(nextStocks);
     } catch (requestError) {
       setStocksError(
-        getApiErrorMessage(
+        extractApiErrorMessage(
           requestError,
           `Unable to remove ${normalizedIdentifier} from the watchlist right now.`,
         ),

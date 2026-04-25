@@ -1,17 +1,4 @@
-// This routes file defines all the endpoints related to the watchlist, including
-// lightweight summary reads,
-// batched dashboard bootstrap reads,
-// CRUD operations,
-// importing stocks,
-// setting overrides, and
-// refreshing stock data.
-
-// Each route is linked to a specific controller function that handles the corresponding logic.
-
-// Routes contain no logic; they just connect URLs to the functions that handle them. 
-// All the real work happens in controllers and services.
-
-// Import necessary modules
+// Routes wire watchlist URLs to controllers; business logic lives elsewhere.
 const express = require("express");
 const router = express.Router();
 const {
@@ -21,7 +8,6 @@ const {
   validateFiscalYear,
 } = require("../middleware/validate");
  
-// Import all controllers
 const { importStock } = require("../controllers/importController");
 const {
   getAllStocks, getOneStock, createStock,
@@ -38,7 +24,6 @@ const {
   updateStockMetricsRowPreference,
 } = require("../controllers/stockMetricsViewController");
  
-// Import routes
 router.post("/import", importStock);
  
 // Summary and dashboard bootstrap reads come before `/:ticker` so those named
@@ -46,14 +31,12 @@ router.post("/import", importStock);
 router.get("/summary", getStockSummaries);
 router.get("/dashboards", getDashboardBootstraps);
 
-// CRUD routes
 router.get("/", getAllStocks);
 router.get("/:ticker", validateTicker, getOneStock);
 router.post("/", validateCreateStock, createStock);
 router.patch("/:ticker", validateTicker, validateUpdateStock, updateStock);
 router.delete("/:ticker", validateTicker, deleteStock);
  
-// Override and refresh routes
 router.patch("/:ticker/annual/:fiscalYear/overrides", validateTicker, validateFiscalYear, setAnnualOverride);
 router.patch("/:ticker/forecast/:bucket/overrides", validateTicker, setForecastOverride);
 router.patch("/:ticker/metrics/overrides", validateTicker, setTopLevelMetricOverride);

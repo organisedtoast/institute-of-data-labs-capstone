@@ -1,15 +1,6 @@
-// This middleware file is a central error handler. 
-
-// It catches errors thrown in routes and sends appropriate responses to the client.
-
-// It handles:
-// - Mongoose validation errors (400 Bad Request)
-// - Duplicate key errors (409 Conflict)
-// - Any other unexpected errors (500 Internal Server Error)
-
-// To use this middleware, simply add it to your Express app after all your routes:
-// const errorHandler = require('./middleware/errorHandler');
-// app.use(errorHandler);
+// Central Express error handler.
+// Keep request-shaped errors friendly while still surfacing unexpected failures
+// with enough detail for local debugging.
 
 function errorHandler(err, req, res, _next) {
   console.error("Error:", err.message);

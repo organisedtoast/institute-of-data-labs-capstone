@@ -161,4 +161,8 @@ const watchlistStockSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
+// Homepage category cards query stocks by investment category, so this index
+// keeps that read path fast as the watchlist grows.
+watchlistStockSchema.index({ investmentCategory: 1 });
+
 module.exports = mongoose.model("WatchlistStock", watchlistStockSchema, "watchlist");

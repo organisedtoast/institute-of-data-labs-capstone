@@ -1,6 +1,6 @@
 import { useContext } from 'react';
 
-import StockSearchContext from '../contexts/stockSearchContext';
+import { StockSearchContext } from '../contexts/StockSearchContext.jsx';
 
 export default function useStockSearch() {
   const contextValue = useContext(StockSearchContext);

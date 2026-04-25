@@ -1,21 +1,7 @@
-import defaultBoldStockRowsJson from "./defaultBoldStockRows.json" with { type: "json" };
-
-// This browser-facing wrapper stays self-contained on purpose.
-// Vite serves `.mjs` files directly to the browser during local development,
-// so importing a CommonJS helper here can break `/stocks` even when Node-based
-// tests still pass. Keeping the ESM derivation local avoids that format trap.
-const {
-  // The JSON file is still the one canonical default-bold source.
-  // This wrapper only turns that data into browser-safe ESM exports.
-  defaultBoldStockRows,
-  defaultBoldRowKeys,
-  defaultBoldMainTableRowKeys,
-  defaultBoldMetricsFieldPaths,
-  isDefaultBoldRowKey,
-  isDefaultBoldMainTableRowKey,
-  isDefaultBoldMetricsFieldPath,
-} = (() => {
-  const normalizedDefaultBoldStockRows = defaultBoldStockRowsJson.map((row) => ({
+function buildDefaultBoldStockRowsHelper(defaultBoldStockRows = []) {
+  // Both backend and frontend wrappers derive their lookup Sets from the same
+  // normalized list so one JSON source controls the default-bold behavior.
+  const normalizedDefaultBoldStockRows = defaultBoldStockRows.map((row) => ({
     surface: String(row?.surface || ""),
     fieldPath: String(row?.fieldPath || ""),
     rowKey: String(row?.rowKey || ""),
@@ -58,14 +44,6 @@ const {
     isDefaultBoldMainTableRowKey,
     isDefaultBoldMetricsFieldPath,
   };
-})();
+}
 
-export {
-  defaultBoldStockRows,
-  defaultBoldRowKeys,
-  defaultBoldMainTableRowKeys,
-  defaultBoldMetricsFieldPaths,
-  isDefaultBoldRowKey,
-  isDefaultBoldMainTableRowKey,
-  isDefaultBoldMetricsFieldPath,
-};
+module.exports = buildDefaultBoldStockRowsHelper;

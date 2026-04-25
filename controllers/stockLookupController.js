@@ -1,5 +1,9 @@
 const roicService = require("../services/roicService");
 const stockSearchService = require("../services/stockSearchService");
+const {
+  getMonthRangeValidationMessage,
+  getTrimmedString,
+} = require("../middleware/validate");
 
 // This controller owns the read-only stock lookup API.
 // Its job is to validate incoming request data, call the correct service, and
@@ -10,9 +14,9 @@ const stockSearchService = require("../services/stockSearchService");
 // This endpoint returns live price history from ROIC for charting and preview
 // flows. Looking up prices should never create or update a Mongo document.
 async function getStockPrices(req, res) {
-  const identifier = String(req.params.ticker || "").trim().toUpperCase();
-  const startDate = typeof req.query.startDate === "string" ? req.query.startDate.trim() : "";
-  const endDate = typeof req.query.endDate === "string" ? req.query.endDate.trim() : "";
+  const identifier = getTrimmedString(req.params.ticker).toUpperCase();
+  const startDate = getTrimmedString(req.query.startDate);
+  const endDate = getTrimmedString(req.query.endDate);
 
   if (!identifier) {
     return res.status(400).json({
@@ -23,15 +27,19 @@ async function getStockPrices(req, res) {
   // The controller only validates the month filters here.
   // ROIC-specific date conversion and price normalization stay inside
   // roicService so the same rules are not duplicated across the app.
-  if ((startDate && !roicService.isValidMonthString(startDate)) || (endDate && !roicService.isValidMonthString(endDate))) {
-    return res.status(400).json({
-      message: "startDate and endDate must use the YYYY-MM format.",
-    });
-  }
+  const monthRangeValidationMessage = getMonthRangeValidationMessage(
+    startDate,
+    endDate,
+    roicService.isValidMonthString,
+    {
+      startLabel: "startDate",
+      endLabel: "endDate",
+    },
+  );
 
-  if (startDate && endDate && startDate > endDate) {
+  if (monthRangeValidationMessage) {
     return res.status(400).json({
-      message: "startDate must be earlier than or equal to endDate.",
+      message: monthRangeValidationMessage,
     });
   }
 
@@ -60,7 +68,7 @@ async function getStockPrices(req, res) {
 // lives in stockSearchService because that service owns ranking, suffix
 // probing, de-duplication, and other search-specific behavior.
 async function searchStocks(req, res) {
-  const rawQuery = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  const rawQuery = getTrimmedString(req.query.q);
 
   if (!rawQuery) {
     return res.status(400).json({

@@ -10,6 +10,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import SharePriceDashboard from '../components/SharePriceDashboard';
 import StockSearchResults from '../components/StockSearchResults';
 import useStockSearch from '../hooks/useStockSearch';
+import extractApiErrorMessage from '../utils/extractApiErrorMessage';
+import normalizeTickerIdentifier from '../utils/normalizeTickerIdentifier';
 import {
   fetchWatchlistDashboardBootstraps,
   refreshWatchlistDashboardBootstrap,
@@ -173,7 +175,7 @@ function Stocks() {
 
   const stockIdentifierList = useMemo(() => {
     return stocks
-      .map((stock) => String(stock?.identifier || '').trim().toUpperCase())
+      .map((stock) => normalizeTickerIdentifier(stock?.identifier))
       .filter(Boolean);
   }, [stocks]);
 
@@ -230,11 +232,10 @@ function Stocks() {
 
         setDashboardCards([]);
         setDashboardCardsStatus('error');
-        setDashboardCardsError(
-          requestError.response?.data?.message ||
-          requestError.response?.data?.error ||
+        setDashboardCardsError(extractApiErrorMessage(
+          requestError,
           'Unable to load dashboard data for your watchlist right now.',
-        );
+        ));
         reconcileFocusedMetricsIdentifier([]);
       }
     };

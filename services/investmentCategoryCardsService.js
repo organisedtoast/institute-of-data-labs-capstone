@@ -3,6 +3,7 @@ const Lens = require("../models/Lens");
 const WatchlistStock = require("../models/WatchlistStock");
 const InvestmentCategoryConstituentPreference = require("../models/InvestmentCategoryConstituentPreference");
 const StockPriceHistoryCache = require("../models/StockPriceHistoryCache");
+const normalizeTickerSymbol = require("../utils/normalizeTickerSymbol");
 const roicService = require("./roicService");
 
 const MONTH_STRING_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -15,10 +16,6 @@ const CONSTITUENT_STATUS_ORDER = {
 
 function isValidMonthString(monthString) {
   return typeof monthString === "string" && MONTH_STRING_PATTERN.test(monthString);
-}
-
-function normalizeTickerSymbol(tickerSymbol) {
-  return String(tickerSymbol || "").trim().toUpperCase();
 }
 
 function normalizeMonthString(monthString) {

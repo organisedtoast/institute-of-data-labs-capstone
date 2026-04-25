@@ -1,14 +1,8 @@
-// Load .env variables first
+// Load environment variables before anything reads process.env.
 require('dotenv').config(); 
-
-// Set up the Express server
 const express = require('express');
 const mongoose = require("mongoose");
-
-// Connect to the database using the connection function defined in config/db.js
 const { connectDB, disconnectDB } = require('./config/db');
-
-// Import routes and middleware
 // The stock lookup routes are the read-only live market-data boundary.
 // They do not create MongoDB records; they only validate input and proxy the
 // normalized ROIC lookup responses used by search and preview flows.
@@ -19,16 +13,12 @@ const errorHandler = require("./middleware/errorHandler");
 const { ensureDefaultLenses } = require("./services/lensService");
 const { migrateInvestmentCategoryNames } = require("./services/investmentCategoryMigrationService");
 
-// Create an Express application instance
 const app = express();
 
-// Use middleware to parse JSON bodies from incoming requests. (so req.body works)
+// JSON + URL-encoded body parsing for API payloads and simple form posts.
 app.use(express.json());
-
-// Use middleware to parse URL-encoded bodies (for form submissions - is this needed?).
 app.use(express.urlencoded({ extended: true }));
 
-// Health check endpoint
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date() });
 });
@@ -44,20 +34,17 @@ app.get("/", (req, res) => {
 // boundary much easier to understand for a new developer.
 app.use("/api", stockLookupRoutes);
  
-// Mount watchlist routes under /api/watchlist
 app.use("/api/watchlist", watchlistRoutes);
 
-// Mount homepage investment category routes under /api/homepage/investment-category-cards
 app.use("/api/homepage/investment-category-cards", investmentCategoryCardsRoutes);
  
-// Central error handler (must be registered LAST)
+// Register the error handler last so route errors reach it.
 app.use(errorHandler);
 
 let activeServer = null;
 let databaseStartupError = null;
 
-// Start the server programmatically so tests or scripts can reuse the same app
-// instance without forcing a second copy of the server to boot automatically.
+// Tests and scripts reuse this helper so the app can boot once per process.
 async function startServer() {
   // If the server is already running, return the same listener.
   // This makes the helper predictable for tests that may accidentally call
@@ -88,8 +75,7 @@ async function startServer() {
     }
   }
 
-  // app.listen() uses a callback-based API, so we wrap it in a Promise
-  // to make startup easy to `await` from tests and harness scripts.
+  // app.listen() is callback-based, so we wrap it for await-friendly startup.
   activeServer = await new Promise((resolve, reject) => {
     const server = app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
@@ -103,14 +89,11 @@ async function startServer() {
 }
 
 async function stopServer() {
-  // We copy the current listener into a local variable first so this function
-  // can safely run even if cleanup is triggered more than once.
+  // Copy the current listener first so repeated cleanup stays safe.
   const serverToClose = activeServer;
   activeServer = null;
   databaseStartupError = null;
 
-  // Closing the HTTP server stops Express from accepting new requests.
-  // If no server is running, we simply skip this step.
   if (serverToClose) {
     await new Promise((resolve, reject) => {
       serverToClose.close((error) => {

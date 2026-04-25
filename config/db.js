@@ -1,7 +1,3 @@
-// This module handles the connection between our app and MongoDB.
-// We use Mongoose, which is a library that provides a structured
-// way to interact with MongoDB from JavaScript.
-
 const mongoose = require("mongoose");
 
 // We keep track of an in-flight connection attempt so repeated calls to
@@ -11,22 +7,16 @@ let connectionPromise = null;
 
 async function connectDB() {
   try {
-    // readyState is Mongoose's built-in connection status flag.
-    // 1 means "already connected", so we can safely reuse the existing
-    // connection instead of trying to connect again.
+    // Reuse an existing live connection instead of reconnecting.
     if (mongoose.connection.readyState === 1) {
       return mongoose.connection;
     }
 
-    // 2 means "currently connecting". In that case we wait for the
-    // original connection attempt to finish instead of starting another one.
+    // Reuse the in-flight promise if another caller already started connecting.
     if (mongoose.connection.readyState === 2 && connectionPromise) {
       return connectionPromise;
     }
 
-    // mongoose.connect() opens the database connection.
-    // The MONGO_URI comes from our .env file so sensitive connection
-    // details are not hard-coded in source code.
     connectionPromise = mongoose.connect(process.env.MONGO_URI);
 
     const conn = await connectionPromise;
@@ -59,6 +49,4 @@ async function disconnectDB() {
   console.log("MongoDB disconnected");
 }
 
-// Export both lifecycle helpers so the server can connect on startup and
-// disconnect on shutdown.
 module.exports = { connectDB, disconnectDB };

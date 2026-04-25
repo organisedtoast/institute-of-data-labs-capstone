@@ -1,4 +1,5 @@
 import axios from 'axios';
+import normalizeTickerIdentifier from '../utils/normalizeTickerIdentifier';
 
 function normalizeCard(card) {
   return {
@@ -78,7 +79,7 @@ export async function updateInvestmentCategoryConstituent(
   cardRange,
   options = {},
 ) {
-  const normalizedTicker = String(tickerSymbol || '').trim().toUpperCase();
+  const normalizedTicker = normalizeTickerIdentifier(tickerSymbol);
   const response = await axios.patch(
     `/api/homepage/investment-category-cards/${encodeURIComponent(investmentCategory)}/constituents/${normalizedTicker}`,
     {

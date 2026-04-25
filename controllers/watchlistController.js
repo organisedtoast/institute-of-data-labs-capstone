@@ -1,12 +1,5 @@
-// Watchlist reads now have two levels:
-// - lightweight summary reads for shared search/navigation state
-// - richer dashboard bootstrap reads for the Stocks page first paint
-//
-// The older CRUD routes still stay here too:
-// - create a placeholder stock manually
-// - read one or many full stock documents
-// - update category or company name
-// - delete a stock
+// This controller keeps the older watchlist CRUD routes together with the
+// newer summary/bootstrap reads that feed shared search state and first paint.
 
 const WatchlistStock = require("../models/WatchlistStock");
 const { assertActiveLensName } = require("../services/lensService");
@@ -14,6 +7,7 @@ const {
   listWatchlistDashboardBootstraps,
   listWatchlistSummaries,
 } = require("../services/watchlistDashboardService");
+const normalizeTickerSymbol = require("../utils/normalizeTickerSymbol");
 const {
   createEmptyAnalystRevisions,
   createEmptyForecastBucket,
@@ -33,139 +27,110 @@ function buildCompanyNameOverride(existingField, companyName) {
   };
 }
 
-async function createStock(req, res, next) {
-  try {
+// Express 5 forwards rejected async handlers to the shared error middleware,
+// so these routes can stay small without repeating try/catch(next) wrappers.
+async function createStock(req, res) {
+  await assertActiveLensName(req.body.investmentCategory);
+
+  const doc = await WatchlistStock.create({
+    tickerSymbol: req.body.tickerSymbol,
+    investmentCategory: req.body.investmentCategory.trim(),
+    companyName: createMetricField(null, "system"),
+    forecastData: {
+      fy1: createEmptyForecastBucket(),
+      fy2: createEmptyForecastBucket(),
+      fy3: createEmptyForecastBucket(),
+    },
+    growthForecasts: createEmptyGrowthForecasts(),
+    analystRevisions: createEmptyAnalystRevisions(),
+  });
+
+  res.status(201).json(doc);
+}
+
+async function getAllStocks(req, res) {
+  // This route only serializes the documents back to JSON, so lean avoids
+  // paying for full Mongoose document instances we never mutate here.
+  const stocks = await WatchlistStock.find().lean();
+  res.json(stocks);
+}
+
+async function getStockSummaries(req, res) {
+  const summaries = await listWatchlistSummaries();
+  res.json(summaries);
+}
+
+async function getDashboardBootstraps(req, res) {
+  const requestedTickers = typeof req.query?.tickers === "string"
+    ? req.query.tickers.split(",")
+    : Array.isArray(req.query?.tickers)
+      ? req.query.tickers
+      : [];
+  const dashboards = await listWatchlistDashboardBootstraps({
+    tickers: requestedTickers,
+  });
+  res.json({ dashboards });
+}
+
+async function getOneStock(req, res) {
+  const tickerSymbol = normalizeTickerSymbol(req.params.ticker);
+  // Like getAllStocks, this read path only returns JSON and never calls save().
+  const stock = await WatchlistStock.findOne({
+    tickerSymbol,
+  }).lean();
+  if (!stock) {
+    return res.status(404).json({ error: "Stock not found" });
+  }
+
+  res.json(stock);
+}
+
+async function updateStock(req, res) {
+  const tickerSymbol = normalizeTickerSymbol(req.params.ticker);
+  const updates = {};
+
+  if (req.body.investmentCategory !== undefined) {
     await assertActiveLensName(req.body.investmentCategory);
-
-    const doc = await WatchlistStock.create({
-      tickerSymbol: req.body.tickerSymbol,
-      investmentCategory: req.body.investmentCategory.trim(),
-      companyName: createMetricField(null, "system"),
-      forecastData: {
-        fy1: createEmptyForecastBucket(),
-        fy2: createEmptyForecastBucket(),
-        fy3: createEmptyForecastBucket(),
-      },
-      growthForecasts: createEmptyGrowthForecasts(),
-      analystRevisions: createEmptyAnalystRevisions(),
-    });
-
-    res.status(201).json(doc);
-  } catch (error) {
-    next(error);
+    updates.investmentCategory = req.body.investmentCategory.trim();
   }
-}
 
-async function getAllStocks(req, res, next) {
-  try {
-    const stocks = await WatchlistStock.find();
-    res.json(stocks);
-  } catch (error) {
-    next(error);
-  }
-}
+  if (req.body.companyName !== undefined) {
+    const existingStock = await WatchlistStock.findOne({ tickerSymbol });
 
-async function getStockSummaries(req, res, next) {
-  try {
-    const summaries = await listWatchlistSummaries();
-    res.json(summaries);
-  } catch (error) {
-    next(error);
-  }
-}
-
-async function getDashboardBootstraps(req, res, next) {
-  try {
-    const requestedTickers = typeof req.query?.tickers === "string"
-      ? req.query.tickers.split(",")
-      : Array.isArray(req.query?.tickers)
-        ? req.query.tickers
-        : [];
-    const dashboards = await listWatchlistDashboardBootstraps({
-      tickers: requestedTickers,
-    });
-    res.json({ dashboards });
-  } catch (error) {
-    next(error);
-  }
-}
-
-async function getOneStock(req, res, next) {
-  try {
-    const stock = await WatchlistStock.findOne({
-      tickerSymbol: req.params.ticker.toUpperCase(),
-    });
-    if (!stock) {
+    if (!existingStock) {
       return res.status(404).json({ error: "Stock not found" });
     }
 
-    res.json(stock);
-  } catch (error) {
-    next(error);
-  }
-}
-
-async function updateStock(req, res, next) {
-  try {
-    const updates = {};
-
-    if (req.body.investmentCategory !== undefined) {
-      await assertActiveLensName(req.body.investmentCategory);
-      updates.investmentCategory = req.body.investmentCategory.trim();
-    }
-
-    if (req.body.companyName !== undefined) {
-      const existingStock = await WatchlistStock.findOne({
-        tickerSymbol: req.params.ticker.toUpperCase(),
-      });
-
-      if (!existingStock) {
-        return res.status(404).json({ error: "Stock not found" });
-      }
-
-      updates.companyName = buildCompanyNameOverride(
-        existingStock.companyName,
-        req.body.companyName
-      );
-
-      const doc = await WatchlistStock.findOneAndUpdate(
-        { tickerSymbol: req.params.ticker.toUpperCase() },
-        updates,
-        { returnDocument: "after", runValidators: true }
-      );
-
-      return res.json(doc);
-    }
-
-    const doc = await WatchlistStock.findOneAndUpdate(
-      { tickerSymbol: req.params.ticker.toUpperCase() },
-      updates,
-      { returnDocument: "after", runValidators: true }
+    // We only need the existing document when rebuilding the override-friendly
+    // companyName field, so category-only updates can skip that extra read.
+    updates.companyName = buildCompanyNameOverride(
+      existingStock.companyName,
+      req.body.companyName
     );
-
-    if (!doc) {
-      return res.status(404).json({ error: "Stock not found" });
-    }
-
-    res.json(doc);
-  } catch (error) {
-    next(error);
   }
+
+  const doc = await WatchlistStock.findOneAndUpdate(
+    { tickerSymbol },
+    updates,
+    { returnDocument: "after", runValidators: true }
+  );
+
+  if (!doc) {
+    return res.status(404).json({ error: "Stock not found" });
+  }
+
+  res.json(doc);
 }
 
-async function deleteStock(req, res, next) {
-  try {
-    const doc = await WatchlistStock.findOneAndDelete({
-      tickerSymbol: req.params.ticker.toUpperCase(),
-    });
-    if (!doc) {
-      return res.status(404).json({ error: "Stock not found" });
-    }
-
-    res.json({ message: "Deleted", tickerSymbol: doc.tickerSymbol });
-  } catch (error) {
-    next(error);
+async function deleteStock(req, res) {
+  const doc = await WatchlistStock.findOneAndDelete({
+    tickerSymbol: normalizeTickerSymbol(req.params.ticker),
+  });
+  if (!doc) {
+    return res.status(404).json({ error: "Stock not found" });
   }
+
+  res.json({ message: "Deleted", tickerSymbol: doc.tickerSymbol });
 }
 
 module.exports = {
