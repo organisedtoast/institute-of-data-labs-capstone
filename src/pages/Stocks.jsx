@@ -1,9 +1,14 @@
 import React from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CircularProgress from '@mui/material/CircularProgress';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
 import Typography from '@mui/material/Typography';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -134,6 +139,8 @@ function Stocks() {
   const [dashboardCardsStatus, setDashboardCardsStatus] = useState('idle');
   const [dashboardCardsError, setDashboardCardsError] = useState('');
   const [focusedMetricsIdentifier, setFocusedMetricsIdentifier] = useState('');
+  const [pendingRemovalStock, setPendingRemovalStock] = useState(null);
+  const [isConfirmingRemoval, setIsConfirmingRemoval] = useState(false);
   const backgroundRefreshStartedRef = useRef(new Set());
 
   const reconcileFocusedMetricsIdentifier = useCallback((nextDashboardCards) => {
@@ -311,14 +318,53 @@ function Stocks() {
     setFocusedMetricsIdentifier(nextIsOpen ? identifier : '');
   }, []);
 
-  const handleRemoveStock = useCallback((identifier) => {
-    // Clearing focus in the same state transition is safer than rendering one
-    // frame of stale focus and repairing it later in an effect.
-    setFocusedMetricsIdentifier((previousFocusedMetricsIdentifier) => {
-      return previousFocusedMetricsIdentifier === identifier ? '' : previousFocusedMetricsIdentifier;
+  const handleOpenRemoveStockDialog = useCallback((stockToRemove) => {
+    if (!stockToRemove?.identifier) {
+      return;
+    }
+
+    const matchingSummaryStock = stocks.find((stock) => stock.identifier === stockToRemove.identifier);
+
+    // The page owns this dialog state because it also owns the focused-card view
+    // and the final delete action. Keeping both decisions together avoids split logic.
+    setPendingRemovalStock({
+      identifier: stockToRemove.identifier,
+      displayName: stockToRemove.companyName || stockToRemove.name || matchingSummaryStock?.name || stockToRemove.identifier,
     });
-    removeStockByIdentifier(identifier);
-  }, [removeStockByIdentifier]);
+  }, [stocks]);
+
+  const handleCloseRemoveStockDialog = useCallback(() => {
+    if (isConfirmingRemoval) {
+      return;
+    }
+
+    setPendingRemovalStock(null);
+  }, [isConfirmingRemoval]);
+
+  const handleConfirmRemoveStock = useCallback(async () => {
+    if (!pendingRemovalStock?.identifier || isConfirmingRemoval) {
+      return;
+    }
+
+    const identifierToRemove = pendingRemovalStock.identifier;
+
+    setIsConfirmingRemoval(true);
+
+    try {
+      const didRemoveStock = await removeStockByIdentifier(identifierToRemove);
+
+      if (didRemoveStock) {
+        // We only clear focused mode after a real confirmed removal succeeds,
+        // so opening or cancelling the dialog never changes what the user is viewing.
+        setFocusedMetricsIdentifier((previousFocusedMetricsIdentifier) => {
+          return previousFocusedMetricsIdentifier === identifierToRemove ? '' : previousFocusedMetricsIdentifier;
+        });
+      }
+    } finally {
+      setPendingRemovalStock(null);
+      setIsConfirmingRemoval(false);
+    }
+  }, [isConfirmingRemoval, pendingRemovalStock, removeStockByIdentifier]);
 
   const visibleStocks = useMemo(() => {
     if (!focusedMetricsIdentifier) {
@@ -384,11 +430,39 @@ function Stocks() {
               dashboardCard={stock}
               isFocusedMetricsMode={focusedMetricsIdentifier === stock.identifier}
               onMetricsVisibilityChange={(nextIsOpen) => handleMetricsVisibilityChange(stock.identifier, nextIsOpen)}
-              onRemove={() => handleRemoveStock(stock.identifier)}
+              onRemove={() => handleOpenRemoveStockDialog(stock)}
             />
           );
         })}
       </Box>
+
+      <Dialog
+        open={Boolean(pendingRemovalStock)}
+        onClose={handleCloseRemoveStockDialog}
+        aria-labelledby="confirm-stock-removal-title"
+      >
+        <DialogTitle id="confirm-stock-removal-title">
+          {`CONFIRM REMOVAL of ${pendingRemovalStock?.displayName || ''}`}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            Removing this stock will take it out of your watchlist.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={handleCloseRemoveStockDialog} disabled={isConfirmingRemoval}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={handleConfirmRemoveStock}
+            disabled={isConfirmingRemoval}
+          >
+            Remove stock
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
