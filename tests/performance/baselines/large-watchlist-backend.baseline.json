@@ -1,0 +1,31 @@
+{
+  "suiteName": "backend-large-watchlist",
+  "updatedAt": null,
+  "allowedTimeRegressionPercent": 35,
+  "allowedMemoryRegressionPercent": 40,
+  "entries": [
+    { "scenarioName": "watchlist-summary", "datasetSize": 100, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "watchlist-summary", "datasetSize": 500, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "watchlist-summary", "datasetSize": 1000, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "watchlist-summary", "datasetSize": 2000, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "watchlist-summary", "datasetSize": 5000, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+
+    { "scenarioName": "watchlist-dashboards", "datasetSize": 100, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "watchlist-dashboards", "datasetSize": 500, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "watchlist-dashboards", "datasetSize": 1000, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "watchlist-dashboards", "datasetSize": 2000, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "watchlist-dashboards", "datasetSize": 5000, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+
+    { "scenarioName": "watchlist-metrics-view", "datasetSize": 100, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "watchlist-metrics-view", "datasetSize": 500, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "watchlist-metrics-view", "datasetSize": 1000, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "watchlist-metrics-view", "datasetSize": 2000, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "watchlist-metrics-view", "datasetSize": 5000, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+
+    { "scenarioName": "homepage-category-query", "datasetSize": 100, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "homepage-category-query", "datasetSize": 500, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "homepage-category-query", "datasetSize": 1000, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "homepage-category-query", "datasetSize": 2000, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } },
+    { "scenarioName": "homepage-category-query", "datasetSize": 5000, "timeMetrics": { "p95LatencyMs": null, "averageLatencyMs": null }, "memoryMetrics": { "rssAfterMb": null, "heapAfterMb": null } }
+  ]
+}

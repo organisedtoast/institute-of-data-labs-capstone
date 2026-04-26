@@ -1,0 +1,87 @@
+{
+  "harness": "backend",
+  "version": 1,
+  "generatedAt": null,
+  "scenarios": {
+    "summary-100": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "summary-500": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "summary-1000": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "summary-2000": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "summary-5000": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "dashboards-100": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "dashboards-500": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "dashboards-1000": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "dashboards-2000": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "dashboards-5000": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "metrics-view-100": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "metrics-view-500": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "metrics-view-1000": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "metrics-view-2000": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "metrics-view-5000": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "homepage-query-100": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "homepage-query-500": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "homepage-query-1000": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "homepage-query-2000": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "homepage-query-5000": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    }
+  }
+}

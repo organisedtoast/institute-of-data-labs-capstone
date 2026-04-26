@@ -147,3 +147,6 @@ node_modules
 # Claude AI assistant folders
 .claude
 
+# Manual performance benchmark outputs
+performance-results/
+

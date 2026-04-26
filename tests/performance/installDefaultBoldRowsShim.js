@@ -1,0 +1,46 @@
+const path = require("node:path");
+
+const buildDefaultBoldStockRowsHelper = require("../../shared/defaultBoldStockRowsCore");
+
+const FALLBACK_DEFAULT_BOLD_ROWS = [
+  { surface: "main", fieldPath: "annualData[].base.sharePrice", rowKey: "main::annualData[].base.sharePrice" },
+  { surface: "main", fieldPath: "annualData[].base.marketCap", rowKey: "main::annualData[].base.marketCap" },
+  { surface: "detail", fieldPath: "annualData[].valuationMultiples.evEbitTrailing", rowKey: "940::annualData[].valuationMultiples.evEbitTrailing" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy1.evEbit", rowKey: "950::annualData[].forecastData.fy1.evEbit" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy2.evEbit", rowKey: "960::annualData[].forecastData.fy2.evEbit" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy3.evEbit", rowKey: "970::annualData[].forecastData.fy3.evEbit" },
+  { surface: "detail", fieldPath: "annualData[].valuationMultiples.peTrailing", rowKey: "980::annualData[].valuationMultiples.peTrailing" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy1.pe", rowKey: "990::annualData[].forecastData.fy1.pe" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy2.pe", rowKey: "1000::annualData[].forecastData.fy2.pe" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy3.pe", rowKey: "1010::annualData[].forecastData.fy3.pe" },
+  { surface: "detail", fieldPath: "annualData[].epsAndDividends.epsTrailing", rowKey: "1410::annualData[].epsAndDividends.epsTrailing" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy1.eps", rowKey: "1420::annualData[].forecastData.fy1.eps" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy2.eps", rowKey: "1430::annualData[].forecastData.fy2.eps" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy3.eps", rowKey: "1440::annualData[].forecastData.fy3.eps" },
+  { surface: "detail", fieldPath: "annualData[].epsAndDividends.dyTrailing", rowKey: "1450::annualData[].epsAndDividends.dyTrailing" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy1.dy", rowKey: "1460::annualData[].forecastData.fy1.dy" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy2.dy", rowKey: "1470::annualData[].forecastData.fy2.dy" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy3.dy", rowKey: "1480::annualData[].forecastData.fy3.dy" },
+  { surface: "detail", fieldPath: "annualData[].epsAndDividends.dpsTrailing", rowKey: "1490::annualData[].epsAndDividends.dpsTrailing" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy1.dps", rowKey: "1500::annualData[].forecastData.fy1.dps" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy2.dps", rowKey: "1510::annualData[].forecastData.fy2.dps" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy3.dps", rowKey: "1520::annualData[].forecastData.fy3.dps" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy1.marketCap", rowKey: "670::annualData[].forecastData.fy1.marketCap" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy2.marketCap", rowKey: "680::annualData[].forecastData.fy2.marketCap" },
+  { surface: "detail", fieldPath: "annualData[].forecastData.fy3.marketCap", rowKey: "690::annualData[].forecastData.fy3.marketCap" }
+];
+
+function installDefaultBoldRowsShim() {
+  const sharedHelperPath = path.resolve(__dirname, "..", "..", "shared", "defaultBoldStockRows.js");
+
+  require.cache[sharedHelperPath] = {
+    id: sharedHelperPath,
+    filename: sharedHelperPath,
+    loaded: true,
+    exports: buildDefaultBoldStockRowsHelper(FALLBACK_DEFAULT_BOLD_ROWS),
+  };
+}
+
+module.exports = {
+  installDefaultBoldRowsShim,
+};

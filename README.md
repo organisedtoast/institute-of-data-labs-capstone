@@ -69,6 +69,12 @@ These are the scripts beginners usually reach for first.
 | `npm run test:homepage-routes` | Runs the homepage category-card route integration test. | Use this when you change homepage card route behavior, canonical default ranges, or constituent toggles. |
 | `npm run test:e2e-stubbed` | Runs the deterministic end-to-end backend import/CRUD harness with fake ROIC responses. | Use this when you changed import, refresh, overrides, normalization, or MongoDB persistence behavior. |
 | `npm run test:e2e-live` | Runs the live end-to-end backend harness against the real ROIC API and real MongoDB. | Use this as a manual confidence check when you need production-like confirmation. |
+| `npm run perf:seed -- 1000` | Seeds a deterministic large-watchlist dataset into an isolated performance database. | Use this before manual scale investigations when you want a repeatable watchlist size such as `1000` or `5000` stocks. |
+| `npm run perf:backend` | Runs the backend large-watchlist stress/resource harness and compares the results to the checked-in baseline JSON. | Use this when you want to measure route latency, payload size, and Node memory behavior as the watchlist scales. |
+| `npm run perf:browser:check` | Runs only the Playwright browser setup check and launch smoke test. | Use this first when the real browser benchmark is failing and you need to know whether the issue is browser setup or the app itself. |
+| `npm run perf:browser` | Runs the manual real-browser benchmark for the `Stocks` page against large seeded watchlists. | Use this when you want to see whether the actual page still renders and stays usable at scale. |
+| `npm run perf:baseline` | Intentionally refreshes the checked-in large-watchlist baseline JSON after you decide the new measurements should become the shared reference. | Use this only when you intentionally want to accept the new performance profile as the project baseline. |
+| `node --test tests/chunked-large-watchlist-seeding.test.js` | Runs the targeted chunked-seeding backend test. | Use this when you change how the large-watchlist performance dataset is generated or inserted. |
 
 Two extra script notes:
 
@@ -295,6 +301,267 @@ These are useful developer tools, but they are **not** automated tests.
 | `npm run docs:schema` | Regenerates `docs/schema-reference.md` from the field catalog and related schema metadata. | Use this when you change schema docs, field-catalog entries, or the generator script. |
 | `npm run inspect:lens` | Runs the lens inspection CLI for the example category `Profitable Hi Growth`. | Use this when you want to inspect visible card/detail fields without starting the frontend. |
 | `npm run check:frontend-branch-sync` | Fails unless local `frontend-branch` and `main` point to identical file trees. | Use this before a manual merge that is supposed to leave `main` unchanged. |
+| `npm run perf:seed -- 1000` | Seeds a deterministic performance dataset into an isolated MongoDB database name. | Use this before manual scale checks or when you want a known watchlist size ready in the database. |
+| `npm run perf:backend` | Runs the backend large-watchlist performance harness and writes JSON results under `performance-results/backend/`. | Use this when you are investigating API scaling, payload growth, or backend memory drift. |
+| `npm run perf:browser:check` | Runs the browser discovery step plus a launch smoke test without seeding data or starting the app servers. | Use this as the first troubleshooting step for Playwright browser issues. |
+| `npm run perf:browser` | Runs the manual browser benchmark and writes JSON results under `performance-results/browser/`. | Use this when you want to measure first visible stock cards, first usable interaction, and progressive activation on the real `Stocks` page. |
+| `npm run perf:baseline` | Refreshes the checked-in baseline files in `tests/performance/baselines/`. | Use this only after you intentionally approve a new baseline and want future regressions measured against it. |
+| `node --test tests/chunked-large-watchlist-seeding.test.js` | Verifies the chunked performance seeder still inserts the expected records and summary counts. | Use this when you change `tests/performance/largeWatchlistDataset.js` or the seeding configuration. |
+
+## 6.5. Large-Watchlist Performance Toolkit
+
+This repo now includes a dedicated **large-watchlist performance toolkit** for the specific problem that originally showed up in this app: once the watchlist grows, the `Stocks` page and the watchlist-related backend routes need to stay fast enough to feel usable.
+
+The toolkit has **two parts**:
+
+- a **backend harness** for route latency, payload size, and Node memory behavior
+- a **manual browser benchmark** for the real `Stocks` page in a real browser
+
+Both parts use **deterministic seeded data** instead of live ROIC data. That matters because performance regressions are much easier to spot when the data stays repeatable from run to run.
+
+The seeded-data setup is now **chunked on purpose**. Instead of building the full synthetic watchlist in one giant in-memory array, the seeder builds and inserts smaller batches. This reduces setup-time memory spikes and helps the benchmark spend more of its memory on the real app routes rather than on test-fixture preparation.
+
+Important beginner note: this toolkit is about **performance behavior**, not financial-value correctness. It is trying to answer questions like "does the app still load and stay responsive with thousands of stocks?" rather than "is ROIC returning the right market data today?"
+
+### Why there are two harnesses
+
+The backend harness and browser benchmark answer different questions:
+
+- The **backend harness** asks: "How heavy are the API routes when the watchlist becomes very large?"
+- The **browser benchmark** asks: "How quickly does the real `Stocks` page show useful content and stay interactive in the browser?"
+
+You need both because an app can have:
+
+- fast backend routes but a slow browser UI
+- or a responsive-feeling UI that is still overusing server memory
+
+### Commands
+
+Seed a deterministic large watchlist:
+
+```bash
+npm run perf:seed -- 1000
+```
+
+Example with an explicit chunk size:
+
+```bash
+PERF_SEED_CHUNK_SIZE=100 npm run perf:seed -- 5000
+```
+
+Run the backend harness:
+
+```bash
+npm run perf:backend
+```
+
+Run the manual browser benchmark:
+
+```bash
+npm run perf:browser
+```
+
+Run only the browser setup check:
+
+```bash
+npm run perf:browser:check
+```
+
+Refresh the checked-in baseline on purpose:
+
+```bash
+npm run perf:baseline
+```
+
+### Supported dataset sizes
+
+By default, the toolkit measures these watchlist sizes:
+
+- `100`
+- `500`
+- `1000`
+- `2000`
+- `5000`
+
+You can override that with:
+
+```bash
+PERF_DATASET_SIZES=100,1000,5000 npm run perf:backend
+```
+
+or:
+
+```bash
+PERF_DATASET_SIZES=5000 npm run perf:browser
+```
+
+### Useful performance environment variables
+
+These environment variables are optional:
+
+| Variable | What it changes | Example |
+| --- | --- | --- |
+| `PERF_DATASET_SIZES` | Comma-separated dataset sizes to test instead of the defaults. | `PERF_DATASET_SIZES=1000,5000` |
+| `PERF_LEGACY_PERCENTAGE` | Fraction of seeded stocks that behave like older legacy records and should need background refresh. | `PERF_LEGACY_PERCENTAGE=0.1` |
+| `PERF_ANNUAL_HISTORY_SIZE` | Number of annual rows to seed per stock. | `PERF_ANNUAL_HISTORY_SIZE=7` |
+| `PERF_PRICE_HISTORY_MONTHS` | Number of monthly homepage price-cache points to seed per stock. | `PERF_PRICE_HISTORY_MONTHS=72` |
+| `PERF_SEED_CHUNK_SIZE` | Number of fake stocks to build and insert per chunk while seeding the large-watchlist dataset. Smaller chunks use less memory during setup. | `PERF_SEED_CHUNK_SIZE=100` |
+| `PERF_DATABASE_NAME` | Overrides the default isolated MongoDB database name used by the performance scripts. This is helpful when you want a fresh benchmark database after a crashed run. | `PERF_DATABASE_NAME=stockgossipmonitor_perf_retry` |
+| `PERF_BACKEND_REPEATS` | Number of repeated route calls per backend scenario. | `PERF_BACKEND_REPEATS=5` |
+| `PERF_BROWSER_SCROLL_STEPS` | How many large scroll steps the browser benchmark uses to trigger progressive card activation. | `PERF_BROWSER_SCROLL_STEPS=10` |
+| `PERF_BROWSER_HEADLESS=1` | Runs the browser benchmark without opening a visible browser window. | `PERF_BROWSER_HEADLESS=1` |
+| `PERF_BROWSER_EXECUTABLE_PATH` | Points the benchmark at a browser executable you know can be launched locally. | `PERF_BROWSER_EXECUTABLE_PATH="C:\Program Files\Google\Chrome\Application\chrome.exe"` |
+| `PERF_BROWSER_PREFLIGHT=1` | Tells `npm run perf:browser` to stop after the browser setup check instead of running the full benchmark. | `PERF_BROWSER_PREFLIGHT=1 npm run perf:browser` |
+| `PERF_BASELINE_HARNESS` | Chooses which baseline to refresh when running `npm run perf:baseline`. | `PERF_BASELINE_HARNESS=browser` |
+
+### Where the results go
+
+Manual benchmark outputs are intentionally **not** committed to Git. They are written to:
+
+- `performance-results/backend/`
+- `performance-results/browser/`
+
+The latest run is also copied to a stable filename in each folder:
+
+- `performance-results/backend/backend-harness-latest.json`
+- `performance-results/browser/browser-benchmark-latest.json`
+
+### Where the shared baselines live
+
+The checked-in baseline profiles live here:
+
+- [backend-baseline.json](C:/Users/Daniel/OneDrive/organisedshare.ai/Institute%20of%20Data/2026-02-02-SE-FT-AP-A-B/institute-of-data-labs-capstone/tests/performance/baselines/backend-baseline.json)
+- [browser-baseline.json](C:/Users/Daniel/OneDrive/organisedshare.ai/Institute%20of%20Data/2026-02-02-SE-FT-AP-A-B/institute-of-data-labs-capstone/tests/performance/baselines/browser-baseline.json)
+
+Those files exist so everyone compares against the same shared reference instead of inventing their own private timing targets.
+
+### Browser setup and troubleshooting order
+
+The manual browser benchmark now separates three different failure types on purpose:
+
+- **browser install problems** such as "Chromium is not installed"
+- **browser launch problems** such as `spawn EPERM`, where the environment blocks starting the browser process
+- **real benchmark failures after launch**, where the browser started but the app benchmark itself then failed
+
+The benchmark tries browser candidates in this order:
+
+1. the browser pointed to by `PERF_BROWSER_EXECUTABLE_PATH`, if you set one
+2. a detected local Chrome installation
+3. Playwright's bundled Chromium browser
+
+Use this troubleshooting order:
+
+1. Verify the Playwright package is installed:
+
+```bash
+npm install
+```
+
+2. Verify the bundled browser binary is installed:
+
+```bash
+npx playwright install chromium
+```
+
+3. Run the lightweight setup check before the real benchmark:
+
+```bash
+npm run perf:browser:check
+```
+
+4. Only run the full browser benchmark after that setup check passes:
+
+```bash
+npm run perf:browser
+```
+
+You can also ask the main browser script to stop after preflight:
+
+```bash
+PERF_BROWSER_PREFLIGHT=1 npm run perf:browser
+```
+
+Important beginner note: `spawn EPERM` means the local environment blocked launching the browser process. That is a **setup-blocked** result, not proof that the React app regressed. In other words, the browser could not even start, so the `Stocks` page benchmark never got a chance to run.
+
+Typical outcomes are:
+
+- `passed` = browser setup worked and the real benchmark can run
+- `setup_blocked` = browser discovery or browser launch is blocked before the app benchmark starts
+- `benchmark_failed` = browser setup worked, but the benchmark later failed or regressed after launch
+
+### How baseline comparison works
+
+This toolkit uses a **relative baseline** model, not fixed promises like "this route must always finish in 300 ms".
+
+That means each run compares the current measurement against the checked-in baseline and asks:
+
+- did this get slower by more than the allowed percentage?
+- did memory growth get worse by more than the allowed percentage?
+- did something catastrophic happen, such as a timeout, crash, or non-responsive page?
+
+This is more realistic for local performance work because absolute timings vary from machine to machine, but **relative regressions** are still meaningful.
+
+### What counts as a regression
+
+For the current starter version, a scenario is treated as a regression when:
+
+- a measured metric exceeds its baseline by more than the allowed regression percentage
+- the browser benchmark can no longer progressively activate more stock cards as the user scrolls
+- first visible stock content no longer appears before legacy background refresh completes
+- the harness times out, crashes, or returns invalid measurements
+
+### Beginner metric definitions
+
+- **First paint / first visible render**: how long it takes before the user can actually see the first useful stock card content on screen.
+- **First usable interaction**: how long it takes before the page is ready for a meaningful click, such as opening stock metrics.
+- **Route latency**: how long one backend API route takes to respond.
+- **Payload size**: how many bytes came back from one API response. Larger payloads usually mean more work for both the server and the browser.
+- **RSS memory**: the total memory the Node process is holding at the operating-system level.
+- **Heap memory**: the JavaScript memory the process or browser is actively using for objects and arrays.
+- **Repeated-run drift**: whether the same route gets steadily slower across repeated calls in the same process. This is a simple beginner-friendly signal that memory pressure or unstable work may be building up.
+
+### What each harness measures
+
+The backend harness measures:
+
+- `GET /api/watchlist/summary`
+- `GET /api/watchlist/dashboards`
+- `GET /api/watchlist/:ticker/metrics-view`
+- `POST /api/homepage/investment-category-cards/query`
+
+It records:
+
+- `p50` and `p95` route latency
+- response payload size
+- Node `rss` and `heapUsed` growth during repeated calls
+- repeated-run drift
+
+The browser benchmark measures:
+
+- initial route load for `/stocks`
+- time to first visible stock card
+- time to first usable interaction
+- whether scrolling activates more stock cards progressively
+- browser heap growth where the browser exposes that metric
+- whether legacy background refresh stays behind first paint instead of blocking it
+
+### Important limitation
+
+This toolkit does **not** prove that every one of the thousands of stock cards is fully rendered immediately. That would go against the current app design.
+
+This app is intentionally built to:
+
+- load lightweight summary data separately from heavier dashboard data
+- batch the first stock-card bootstrap request
+- lazy-load detailed metrics only when needed
+- refresh legacy stocks in the background after first paint
+- progressively activate cards near the viewport instead of doing all possible work at once
+
+So the large-watchlist question is:
+
+**"Does the app stay usable, bounded, and consistent with its intended design at scale?"**
+
+That is the question this toolkit is trying to answer.
 
 ## 7. Schema reference
 

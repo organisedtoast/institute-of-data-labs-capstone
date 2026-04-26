@@ -1,0 +1,13 @@
+{
+  "suiteName": "browser-large-watchlist",
+  "updatedAt": null,
+  "allowedTimeRegressionPercent": 35,
+  "allowedMemoryRegressionPercent": 40,
+  "entries": [
+    { "scenarioName": "stocks-page-manual-benchmark", "datasetSize": 100, "timeMetrics": { "firstVisibleCardMs": null, "firstUsableInteractionMs": null, "scrollActivationMs": null }, "memoryMetrics": { "browserHeapAfterScrollMb": null, "activatedCardCountAfterScroll": null } },
+    { "scenarioName": "stocks-page-manual-benchmark", "datasetSize": 500, "timeMetrics": { "firstVisibleCardMs": null, "firstUsableInteractionMs": null, "scrollActivationMs": null }, "memoryMetrics": { "browserHeapAfterScrollMb": null, "activatedCardCountAfterScroll": null } },
+    { "scenarioName": "stocks-page-manual-benchmark", "datasetSize": 1000, "timeMetrics": { "firstVisibleCardMs": null, "firstUsableInteractionMs": null, "scrollActivationMs": null }, "memoryMetrics": { "browserHeapAfterScrollMb": null, "activatedCardCountAfterScroll": null } },
+    { "scenarioName": "stocks-page-manual-benchmark", "datasetSize": 2000, "timeMetrics": { "firstVisibleCardMs": null, "firstUsableInteractionMs": null, "scrollActivationMs": null }, "memoryMetrics": { "browserHeapAfterScrollMb": null, "activatedCardCountAfterScroll": null } },
+    { "scenarioName": "stocks-page-manual-benchmark", "datasetSize": 5000, "timeMetrics": { "firstVisibleCardMs": null, "firstUsableInteractionMs": null, "scrollActivationMs": null }, "memoryMetrics": { "browserHeapAfterScrollMb": null, "activatedCardCountAfterScroll": null } }
+  ]
+}

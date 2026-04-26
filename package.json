@@ -27,7 +27,12 @@
     "test:e2e-stubbed": "node --test tests/e2e-stubbed-import-crud.test.js",
     "test:e2e-live": "node --test tests/e2e-live-import-crud.test.js",
     "inspect:lens": "node scripts/inspect-lens-fields.js --category \"Profitable Hi Growth\"",
-    "start": "nodemon server.js"
+    "start": "nodemon server.js",
+    "perf:seed": "node scripts/performance/seed-large-watchlist.js",
+    "perf:backend": "node scripts/performance/run-backend-harness.js",
+    "perf:browser:check": "node scripts/performance/check-browser-benchmark-setup.js",
+    "perf:browser": "node scripts/performance/run-browser-benchmark.js",
+    "perf:baseline": "node scripts/performance/refresh-large-watchlist-baseline.js"
   },
   "keywords": [],
   "author": "",
@@ -59,6 +64,7 @@
     "globals": "^17.4.0",
     "jsdom": "^26.1.0",
     "nodemon": "^3.1.14",
+    "playwright": "^1.59.1",
     "vite": "^8.0.1",
     "vitest": "^3.2.4"
   }

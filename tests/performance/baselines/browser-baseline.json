@@ -1,0 +1,27 @@
+{
+  "harness": "browser",
+  "version": 1,
+  "generatedAt": null,
+  "scenarios": {
+    "stocks-page-100": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "stocks-page-500": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "stocks-page-1000": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "stocks-page-2000": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    },
+    "stocks-page-5000": {
+      "allowedRegressionPct": 25,
+      "metrics": {}
+    }
+  }
+}
