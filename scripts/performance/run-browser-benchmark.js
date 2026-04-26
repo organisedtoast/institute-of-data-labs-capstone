@@ -21,7 +21,7 @@ function printBrowserBenchmarkSummary(result, outputFile) {
   };
 
   if (result.status === BROWSER_BENCHMARK_STATUS.PASSED) {
-    summary.message = "Browser benchmark ran successfully.";
+    summary.message = "Browser benchmark ran successfully, including the progressive-activation checks.";
   } else if (result.status === BROWSER_BENCHMARK_STATUS.SETUP_BLOCKED) {
     summary.message = "Browser benchmark setup is blocked before the real benchmark can start.";
     summary.setupStatus = result.setupDiagnostics?.setupStatus || null;

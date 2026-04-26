@@ -957,6 +957,7 @@ export default function SharePriceDashboard({
   initialDashboardData = null,
   isRemovable = false,
   onRemove = null,
+  onFirstVisibleDashboardPaint = null,
   scaleAnimationDurationMs = null,
   isFocusedMetricsMode = false,
   onMetricsVisibilityChange = null,
@@ -1029,6 +1030,7 @@ export default function SharePriceDashboard({
   });
   const metricRowActionMenuRef = useRef(null);
   const leftRailPressFeedbackTimeoutRef = useRef(null);
+  const hasReportedFirstVisibleDashboardPaintRef = useRef(false);
 
   const attachTimelineScrollRef = useCallback((node) => {
     if (timelineScrollRef.current && timelineScrollRef.current !== node) {
@@ -1180,6 +1182,78 @@ export default function SharePriceDashboard({
       resetViewState: false,
     });
   }, [applyDashboardSnapshot, identifier]);
+
+  useEffect(() => {
+    hasReportedFirstVisibleDashboardPaintRef.current = false;
+  }, [identifier]);
+
+  useEffect(() => {
+    if (
+      hasReportedFirstVisibleDashboardPaintRef.current ||
+      isLoading ||
+      !dashboardData ||
+      typeof onFirstVisibleDashboardPaint !== 'function'
+    ) {
+      return undefined;
+    }
+
+    let isCancelled = false;
+    let firstAnimationFrameId = null;
+    let secondAnimationFrameId = null;
+    let visibilityRetryTimeoutId = null;
+    const requestAnimationFrameWithFallback =
+      typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
+        ? window.requestAnimationFrame.bind(window)
+        : (callback) => setTimeout(callback, 0);
+    const cancelAnimationFrameWithFallback =
+      typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function'
+        ? window.cancelAnimationFrame.bind(window)
+        : clearTimeout;
+
+    const schedulePaintCheck = () => {
+      firstAnimationFrameId = requestAnimationFrameWithFallback(() => {
+        secondAnimationFrameId = requestAnimationFrameWithFallback(() => {
+          if (isCancelled || hasReportedFirstVisibleDashboardPaintRef.current) {
+            return;
+          }
+
+          const scrollRegionNode = timelineScrollRef.current;
+          const scrollRegionBounds = scrollRegionNode?.getBoundingClientRect?.();
+          const hasVisibleLayout = Boolean(
+            scrollRegionBounds
+            && scrollRegionBounds.width > 0
+            && scrollRegionBounds.height > 0,
+          );
+
+          if (!scrollRegionNode || !hasVisibleLayout) {
+            visibilityRetryTimeoutId = setTimeout(schedulePaintCheck, 50);
+            return;
+          }
+
+          // A mounted component is not automatically a painted component. We
+          // wait for two animation frames and visible layout so the page only
+          // starts legacy refresh after the real dashboard is actually on screen.
+          hasReportedFirstVisibleDashboardPaintRef.current = true;
+          onFirstVisibleDashboardPaint(identifier);
+        });
+      });
+    };
+
+    schedulePaintCheck();
+
+    return () => {
+      isCancelled = true;
+      if (firstAnimationFrameId != null) {
+        cancelAnimationFrameWithFallback(firstAnimationFrameId);
+      }
+      if (secondAnimationFrameId != null) {
+        cancelAnimationFrameWithFallback(secondAnimationFrameId);
+      }
+      if (visibilityRetryTimeoutId != null) {
+        clearTimeout(visibilityRetryTimeoutId);
+      }
+    };
+  }, [dashboardData, identifier, isLoading, onFirstVisibleDashboardPaint]);
 
   useEffect(() => {
     if (!initialDashboardData || String(initialDashboardData.identifier || '').trim().toUpperCase() !== identifier) {

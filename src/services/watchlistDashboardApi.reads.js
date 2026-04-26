@@ -13,6 +13,9 @@ import {
 import normalizeTickerIdentifier from '../utils/normalizeTickerIdentifier';
 
 async function fetchWatchlistDashboardBootstraps(options = {}) {
+  // The Stocks page can now call this helper in bounded ticker chunks instead
+  // of treating one giant watchlist bootstrap response as a first-paint
+  // prerequisite. The route contract stays the same; only the caller strategy changes.
   const response = await axios.get(
     '/api/watchlist/dashboards',
     buildDashboardBootstrapRequestOptions(options),

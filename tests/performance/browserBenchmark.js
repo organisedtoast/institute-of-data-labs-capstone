@@ -319,9 +319,41 @@ async function performBrowserSetupCheck(rawOptions = {}) {
   };
 }
 
+function isFrontendBuildStale(distPath) {
+  if (!fs.existsSync(distPath)) {
+    return true;
+  }
+
+  // We rebuild whenever any tracked Stocks-page or shared dashboard source is
+  // newer than the built bundle. Without this, the benchmark would silently
+  // run against a stale dist and any frontend fix would not actually be
+  // validated, which is exactly the failure mode that masked the real shell
+  // and refresh-race fixes during prior performance passes.
+  const sourceDirectories = [
+    path.join(REPO_ROOT, "src"),
+    path.join(REPO_ROOT, "index.html"),
+    path.join(REPO_ROOT, "vite.config.mjs"),
+  ];
+  const distMtimeMs = fs.statSync(distPath).mtimeMs;
+
+  const isAnythingNewer = (entryPath) => {
+    if (!fs.existsSync(entryPath)) {
+      return false;
+    }
+    const stats = fs.statSync(entryPath);
+    if (stats.isFile()) {
+      return stats.mtimeMs > distMtimeMs;
+    }
+    const childNames = fs.readdirSync(entryPath);
+    return childNames.some((childName) => isAnythingNewer(path.join(entryPath, childName)));
+  };
+
+  return sourceDirectories.some(isAnythingNewer);
+}
+
 function ensureFrontendBuild() {
   const distPath = path.join(REPO_ROOT, "dist", "index.html");
-  if (fs.existsSync(distPath)) {
+  if (!isFrontendBuildStale(distPath)) {
     return;
   }
 
@@ -388,7 +420,8 @@ function buildBrowserScenarioResult({ baseline, datasetSize, metrics, metadata =
     passed:
       comparison.passed
       && metadata.progressiveActivationWorked !== false
-      && metadata.firstPaintBeatRefresh !== false,
+      && metadata.firstRealDashboardBeatRefreshStart !== false
+      && metadata.firstRealDashboardBeatRefreshCompletion !== false,
     regressionBudgetPct: comparison.allowedRegressionPct,
     scenarioName,
     comparisons: comparison.comparisons,
@@ -523,8 +556,42 @@ async function runBrowserBenchmark(rawOptions = {}) {
         viewport: { width: 1440, height: 900 },
       });
       const page = await context.newPage();
+      const scenarioName = `stocks-page-${datasetSize}`;
+      const scenarioMetrics = {
+        activationScrollMs: null,
+        browserHeapGrowthBytes: null,
+        firstUsableInteractionMs: null,
+        firstVisibleCardMs: null,
+        firstVisibleShellMs: null,
+        routeLoadMs: null,
+      };
+      const scenarioMetadata = {
+        activatedAfterScrollCount: null,
+        chunkSize: seedSummary.chunkSize,
+        firstLegacyRefreshCompletedMs: null,
+        firstLegacyRefreshStartedMs: null,
+        firstTicker: seedSummary.firstTicker,
+        initialActivatedCount: null,
+        legacyStockCount: seedSummary.legacyStockCount,
+        progressiveActivationWorked: false,
+        firstPaintBeatRefresh: false,
+        firstRealDashboardBeatRefreshCompletion: false,
+        firstRealDashboardBeatRefreshStart: false,
+      };
       let firstRefreshCompletedMs = null;
+      let firstRefreshStartedMs = null;
       const startedAt = Date.now();
+
+      page.on("request", (request) => {
+        if (
+          firstRefreshStartedMs == null &&
+          request.method() === "POST" &&
+          request.url().includes("/api/watchlist/") &&
+          request.url().endsWith("/refresh")
+        ) {
+          firstRefreshStartedMs = Date.now() - startedAt;
+        }
+      });
 
       page.on("response", (response) => {
         if (
@@ -537,84 +604,121 @@ async function runBrowserBenchmark(rawOptions = {}) {
         }
       });
 
-      const routeNavigationStartedAt = performance.now();
-      await page.goto(`http://127.0.0.1:${browserPort}/stocks`, {
-        waitUntil: "domcontentloaded",
-        timeout: 120000,
-      });
-      const routeLoadMs = Number((performance.now() - routeNavigationStartedAt).toFixed(2));
+      try {
+        const routeNavigationStartedAt = performance.now();
+        await page.goto(`http://127.0.0.1:${browserPort}/stocks`, {
+          waitUntil: "domcontentloaded",
+          timeout: 120000,
+        });
+        scenarioMetrics.routeLoadMs = Number((performance.now() - routeNavigationStartedAt).toFixed(2));
 
-      const firstVisibleStartedAt = performance.now();
-      await page.waitForSelector('[data-testid="share-price-dashboard-scroll-region"]', {
-        state: "visible",
-        timeout: 120000,
-      });
-      const firstVisibleCardMs = Number((performance.now() - firstVisibleStartedAt).toFixed(2));
+        const firstVisibleContentStartedAt = performance.now();
+        // Shell timing tells us when the user first sees the page structure,
+        // even if the richer chart dashboard is still loading behind it.
+        await page.waitForSelector('[data-testid="share-price-dashboard-shell"], [data-testid="share-price-dashboard-scroll-region"]', {
+          state: "visible",
+          timeout: 120000,
+        });
+        scenarioMetrics.firstVisibleShellMs = Number((performance.now() - firstVisibleContentStartedAt).toFixed(2));
 
-      const heapBefore = await page.evaluate(() => (
-        typeof performance.memory?.usedJSHeapSize === "number"
-          ? performance.memory.usedJSHeapSize
-          : null
-      ));
+        // The real dashboard timing stays stricter: this is the first fully
+        // bootstrapped stock card, not just the lightweight shell.
+        await page.waitForSelector('[data-testid="share-price-dashboard-scroll-region"]', {
+          state: "visible",
+          timeout: 120000,
+        });
+        scenarioMetrics.firstVisibleCardMs = Number((performance.now() - firstVisibleContentStartedAt).toFixed(2));
 
-      const firstToggle = page.locator('[data-testid="share-price-dashboard-metrics-toggle"]').first();
-      const interactionStartedAt = performance.now();
-      await firstToggle.waitFor({ state: "visible", timeout: 120000 });
-      const firstUsableInteractionMs = Number((performance.now() - interactionStartedAt).toFixed(2));
+        const heapBefore = await page.evaluate(() => (
+          typeof performance.memory?.usedJSHeapSize === "number"
+            ? performance.memory.usedJSHeapSize
+            : null
+        ));
 
-      const initialActivatedCount = await page.locator('[data-testid="share-price-dashboard-scroll-region"]').count();
-      const scrollActivationStartedAt = performance.now();
-      for (let step = 0; step < scrollSteps; step += 1) {
-        await page.mouse.wheel(0, 1200);
-        await wait(150);
+        const firstToggle = page.locator('[data-testid="share-price-dashboard-metrics-toggle"]').first();
+        const interactionStartedAt = performance.now();
+        await firstToggle.waitFor({ state: "visible", timeout: 120000 });
+        scenarioMetrics.firstUsableInteractionMs = Number((performance.now() - interactionStartedAt).toFixed(2));
+
+        // Progressive activation only means something if the initial paint
+        // leaves more cards to discover later. This count records how many real
+        // dashboards are already active before the harness scrolls the page.
+        scenarioMetadata.initialActivatedCount = await page.locator('[data-testid="share-price-dashboard-scroll-region"]').count();
+        const scrollActivationStartedAt = performance.now();
+        for (let step = 0; step < scrollSteps; step += 1) {
+          await page.mouse.wheel(0, 1200);
+          await wait(150);
+        }
+        await wait(500);
+        // After the scripted scroll, we expect this count to be higher than the
+        // initial one. If it is not, the page likely activated too much of the
+        // render window up front and left nothing new for scrolling to reveal.
+        scenarioMetadata.activatedAfterScrollCount = await page.locator('[data-testid="share-price-dashboard-scroll-region"]').count();
+        scenarioMetrics.activationScrollMs = Number((performance.now() - scrollActivationStartedAt).toFixed(2));
+
+        await firstToggle.click();
+        await page.waitForSelector('[data-testid="share-price-dashboard-detail-metrics-header"]', {
+          state: "visible",
+          timeout: 120000,
+        });
+
+        const heapAfter = await page.evaluate(() => (
+          typeof performance.memory?.usedJSHeapSize === "number"
+            ? performance.memory.usedJSHeapSize
+            : null
+        ));
+        scenarioMetrics.browserHeapGrowthBytes =
+          Number.isFinite(heapBefore) && Number.isFinite(heapAfter)
+            ? heapAfter - heapBefore
+            : null;
+
+        scenarioMetadata.firstLegacyRefreshStartedMs = firstRefreshStartedMs;
+        scenarioMetadata.firstLegacyRefreshCompletedMs = firstRefreshCompletedMs;
+        scenarioMetadata.progressiveActivationWorked =
+          scenarioMetadata.activatedAfterScrollCount > scenarioMetadata.initialActivatedCount;
+        scenarioMetadata.firstRealDashboardBeatRefreshStart =
+          firstRefreshStartedMs == null ? true : scenarioMetrics.firstVisibleCardMs < firstRefreshStartedMs;
+        scenarioMetadata.firstRealDashboardBeatRefreshCompletion =
+          firstRefreshCompletedMs == null ? true : scenarioMetrics.firstVisibleCardMs < firstRefreshCompletedMs;
+        scenarioMetadata.firstPaintBeatRefresh = scenarioMetadata.firstRealDashboardBeatRefreshCompletion;
+
+        scenarioResults.push(buildBrowserScenarioResult({
+          baseline,
+          datasetSize,
+          metrics: scenarioMetrics,
+          metadata: scenarioMetadata,
+          scenarioName,
+        }));
+      } catch (error) {
+        scenarioMetadata.firstLegacyRefreshStartedMs = firstRefreshStartedMs;
+        scenarioMetadata.firstLegacyRefreshCompletedMs = firstRefreshCompletedMs;
+        scenarioMetadata.firstRealDashboardBeatRefreshStart =
+          firstRefreshStartedMs == null
+            ? false
+            : Number.isFinite(scenarioMetrics.firstVisibleCardMs)
+              ? scenarioMetrics.firstVisibleCardMs < firstRefreshStartedMs
+              : false;
+        scenarioMetadata.firstRealDashboardBeatRefreshCompletion =
+          firstRefreshCompletedMs == null
+            ? false
+            : Number.isFinite(scenarioMetrics.firstVisibleCardMs)
+              ? scenarioMetrics.firstVisibleCardMs < firstRefreshCompletedMs
+              : false;
+        scenarioMetadata.firstPaintBeatRefresh = scenarioMetadata.firstRealDashboardBeatRefreshCompletion;
+        scenarioMetadata.failureMessage = error.stack || error.message;
+
+        scenarioResults.push(buildBrowserScenarioResult({
+          baseline,
+          datasetSize,
+          metrics: scenarioMetrics,
+          metadata: scenarioMetadata,
+          scenarioName,
+        }));
+
+        throw error;
+      } finally {
+        await context.close();
       }
-      await wait(500);
-      const activatedAfterScrollCount = await page.locator('[data-testid="share-price-dashboard-scroll-region"]').count();
-      const activationScrollMs = Number((performance.now() - scrollActivationStartedAt).toFixed(2));
-
-      await firstToggle.click();
-      await page.waitForSelector('[data-testid="share-price-dashboard-detail-metrics-header"]', {
-        state: "visible",
-        timeout: 120000,
-      });
-
-      const heapAfter = await page.evaluate(() => (
-        typeof performance.memory?.usedJSHeapSize === "number"
-          ? performance.memory.usedJSHeapSize
-          : null
-      ));
-      const browserHeapGrowthBytes =
-        Number.isFinite(heapBefore) && Number.isFinite(heapAfter)
-          ? heapAfter - heapBefore
-          : null;
-
-      const metrics = {
-        activationScrollMs,
-        browserHeapGrowthBytes,
-        firstUsableInteractionMs,
-        firstVisibleCardMs,
-        routeLoadMs,
-      };
-      const scenarioName = `stocks-page-${datasetSize}`;
-      scenarioResults.push(buildBrowserScenarioResult({
-        baseline,
-        datasetSize,
-        metrics,
-        metadata: {
-          activatedAfterScrollCount,
-          chunkSize: seedSummary.chunkSize,
-          firstLegacyRefreshCompletedMs: firstRefreshCompletedMs,
-          firstTicker: seedSummary.firstTicker,
-          initialActivatedCount,
-          legacyStockCount: seedSummary.legacyStockCount,
-          progressiveActivationWorked: activatedAfterScrollCount > initialActivatedCount,
-          firstPaintBeatRefresh:
-            firstRefreshCompletedMs == null ? true : firstVisibleCardMs < firstRefreshCompletedMs,
-        },
-        scenarioName,
-      }));
-
-      await context.close();
     }
 
     const result = buildResultEnvelope({

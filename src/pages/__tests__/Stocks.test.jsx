@@ -5,7 +5,7 @@
 // when that focused card exits metrics mode.
 
 import React from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,6 +15,8 @@ import {
   fetchWatchlistDashboardBootstraps,
   refreshWatchlistDashboardBootstrap,
 } from '../../services/watchlistDashboardApi';
+
+const REFRESH_START_DELAY_MS = 3500;
 
 vi.mock('../../hooks/useStockSearch', () => ({
   default: vi.fn(),
@@ -36,9 +38,14 @@ vi.mock('../../components/SharePriceDashboard', () => ({
     identifier,
     isFocusedMetricsMode = false,
     name,
+    onFirstVisibleDashboardPaint,
     onMetricsVisibilityChange,
     onRemove,
   }) {
+    React.useEffect(() => {
+      onFirstVisibleDashboardPaint?.(identifier);
+    }, [identifier, onFirstVisibleDashboardPaint]);
+
     return (
       <div
         data-testid="share-price-dashboard-mock"
@@ -84,7 +91,90 @@ function buildDashboardBootstrap(overrides = {}) {
   };
 }
 
-function renderStocksPage(overrides = {}, dashboardBootstraps = null) {
+function buildManyStocks(count) {
+  return Array.from({ length: count }, (_unusedValue, index) => {
+    const numericIdentifier = String(index + 1).padStart(4, '0');
+    return buildStock({
+      identifier: `PERF${numericIdentifier}`,
+      name: `Perf Stock ${numericIdentifier}`,
+    });
+  });
+}
+
+function buildManyDashboardBootstraps(stockCards) {
+  return stockCards.map((stockCard, index) => {
+    return buildDashboardBootstrap({
+      identifier: stockCard.identifier,
+      companyName: stockCard.name,
+      prices: [{ date: '2024-01-02', close: 100 + index }],
+    });
+  });
+}
+
+function createDeferredPromise() {
+  let resolvePromise;
+  let rejectPromise;
+
+  const promise = new Promise((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+
+  return {
+    promise,
+    reject: rejectPromise,
+    resolve: resolvePromise,
+  };
+}
+
+function installMockIntersectionObserver() {
+  const originalIntersectionObserver = globalThis.IntersectionObserver;
+  const observerInstances = [];
+
+  class MockIntersectionObserver {
+    constructor(callback) {
+      this.callback = callback;
+      this.observedElements = new Set();
+      observerInstances.push(this);
+    }
+
+    observe(element) {
+      this.observedElements.add(element);
+    }
+
+    unobserve(element) {
+      this.observedElements.delete(element);
+    }
+
+    disconnect() {
+      this.observedElements.clear();
+    }
+  }
+
+  globalThis.IntersectionObserver = MockIntersectionObserver;
+
+  return {
+    restore() {
+      globalThis.IntersectionObserver = originalIntersectionObserver;
+    },
+    triggerIntersect(element) {
+      observerInstances.forEach((observerInstance) => {
+        if (!observerInstance.observedElements.has(element)) {
+          return;
+        }
+
+        observerInstance.callback([
+          {
+            isIntersecting: true,
+            target: element,
+          },
+        ]);
+      });
+    },
+  };
+}
+
+function renderStocksPage(overrides = {}, dashboardBootstraps = null, options = {}) {
   useStockSearch.mockReturnValue({
     stocks: [
       buildStock(),
@@ -103,14 +193,16 @@ function renderStocksPage(overrides = {}, dashboardBootstraps = null) {
     ...overrides,
   });
 
-  fetchWatchlistDashboardBootstraps.mockResolvedValue(dashboardBootstraps || [
-    buildDashboardBootstrap(),
-    buildDashboardBootstrap({
-      identifier: 'MSFT',
-      companyName: 'Microsoft Corporation',
-      prices: [{ date: '2024-01-02', close: 200 }],
-    }),
-  ]);
+  if (!options.skipDashboardBootstrapMock) {
+    fetchWatchlistDashboardBootstraps.mockResolvedValue(dashboardBootstraps || [
+      buildDashboardBootstrap(),
+      buildDashboardBootstrap({
+        identifier: 'MSFT',
+        companyName: 'Microsoft Corporation',
+        prices: [{ date: '2024-01-02', close: 200 }],
+      }),
+    ]);
+  }
 
   return render(<Stocks />);
 }
@@ -270,12 +362,10 @@ describe('Stocks page focused metrics mode', () => {
     expect(screen.queryByText('Focused metrics mode')).toBeNull();
   });
 
-  it('refreshes legacy dashboard cards in the background without blocking the initial render', async () => {
-    fetchWatchlistDashboardBootstraps.mockResolvedValueOnce([
-      buildDashboardBootstrap({
-        needsBackgroundRefresh: true,
-      }),
-    ]);
+  it('refreshes legacy dashboard cards in the background without blocking the initial render', { timeout: REFRESH_START_DELAY_MS * 2 + 4000 }, async () => {
+    const firstBootstrapBatch = createDeferredPromise();
+
+    fetchWatchlistDashboardBootstraps.mockReturnValueOnce(firstBootstrapBatch.promise);
     refreshWatchlistDashboardBootstrap.mockResolvedValueOnce({
       identifier: 'AAPL',
       companyName: 'Apple Inc.',
@@ -289,16 +379,196 @@ describe('Stocks page focused metrics mode', () => {
 
     renderStocksPage({
       stocks: [buildStock()],
+    }, null, {
+      skipDashboardBootstrapMock: true,
     });
+
+    expect(screen.getByTestId('share-price-dashboard-shell')).toBeTruthy();
+    expect(refreshWatchlistDashboardBootstrap).not.toHaveBeenCalled();
+
+    firstBootstrapBatch.resolve([
+      buildDashboardBootstrap({
+        needsBackgroundRefresh: true,
+      }),
+    ]);
 
     await waitFor(() => {
       expect(screen.getAllByTestId('share-price-dashboard-mock')).toHaveLength(1);
     });
 
     expect(screen.queryByText('Loading your watchlist...')).toBeNull();
+    expect(refreshWatchlistDashboardBootstrap).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, REFRESH_START_DELAY_MS - 250));
+    });
+
+    expect(refreshWatchlistDashboardBootstrap).not.toHaveBeenCalled();
 
     await waitFor(() => {
       expect(refreshWatchlistDashboardBootstrap).toHaveBeenCalledWith('AAPL');
-    });
+    }, { timeout: REFRESH_START_DELAY_MS + 2000 });
+  });
+
+  it('renders summary shells before the first dashboard bootstrap request completes', async () => {
+    const deferredBootstrapResponse = createDeferredPromise();
+    const intersectionHarness = installMockIntersectionObserver();
+
+    fetchWatchlistDashboardBootstraps.mockReturnValueOnce(deferredBootstrapResponse.promise);
+
+    try {
+      renderStocksPage({}, null, {
+        skipDashboardBootstrapMock: true,
+      });
+
+      expect(screen.getAllByTestId('share-price-dashboard-shell')).toHaveLength(2);
+      expect(screen.queryAllByTestId('share-price-dashboard-mock')).toHaveLength(0);
+
+      deferredBootstrapResponse.resolve([
+        buildDashboardBootstrap(),
+        buildDashboardBootstrap({
+          identifier: 'MSFT',
+          companyName: 'Microsoft Corporation',
+          prices: [{ date: '2024-01-02', close: 200 }],
+        }),
+      ]);
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('share-price-dashboard-mock')).toHaveLength(2);
+      });
+    } finally {
+      intersectionHarness.restore();
+    }
+  });
+
+  it('requests only the initial dashboard bootstrap chunk on first paint', async () => {
+    const summaryStocks = buildManyStocks(15);
+    const initialChunk = buildManyDashboardBootstraps(summaryStocks.slice(0, 4));
+    const intersectionHarness = installMockIntersectionObserver();
+
+    try {
+      renderStocksPage(
+        {
+          stocks: summaryStocks,
+        },
+        initialChunk,
+      );
+
+      await waitFor(() => {
+        expect(fetchWatchlistDashboardBootstraps).toHaveBeenCalledTimes(1);
+      });
+
+      expect(fetchWatchlistDashboardBootstraps).toHaveBeenCalledWith({
+        tickers: summaryStocks.slice(0, 4).map((stock) => stock.identifier),
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('share-price-dashboard-mock')).toHaveLength(4);
+      });
+      expect(screen.getAllByTestId('share-price-dashboard-shell')).toHaveLength(11);
+    } finally {
+      intersectionHarness.restore();
+    }
+  });
+
+  it('keeps the first render window bounded until the sentinel grows it', async () => {
+    const summaryStocks = buildManyStocks(80);
+    const initialChunk = buildManyDashboardBootstraps(summaryStocks.slice(0, 4));
+    const intersectionHarness = installMockIntersectionObserver();
+
+    try {
+      renderStocksPage(
+        {
+          stocks: summaryStocks,
+        },
+        initialChunk,
+      );
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('share-price-dashboard-mock')).toHaveLength(4);
+      });
+
+      expect(screen.getAllByTestId('share-price-dashboard-shell')).toHaveLength(20);
+      expect(screen.queryByText(summaryStocks[24].name)).toBeNull();
+
+      await act(async () => {
+        intersectionHarness.triggerIntersect(screen.getByTestId('stocks-render-window-sentinel'));
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('share-price-dashboard-shell')).toHaveLength(68);
+      });
+
+      expect(screen.getByText(summaryStocks[24].name)).toBeTruthy();
+      expect(screen.getByText(summaryStocks[71].name)).toBeTruthy();
+      expect(screen.queryByText(summaryStocks[72].name)).toBeNull();
+    } finally {
+      intersectionHarness.restore();
+    }
+  });
+
+  it('queues later viewport requests instead of firing overlapping bootstrap fetches', async () => {
+    const summaryStocks = buildManyStocks(40);
+    const initialChunk = buildManyDashboardBootstraps(summaryStocks.slice(0, 4));
+    const secondChunk = createDeferredPromise();
+    const intersectionHarness = installMockIntersectionObserver();
+
+    fetchWatchlistDashboardBootstraps
+      .mockResolvedValueOnce(initialChunk)
+      .mockReturnValueOnce(secondChunk.promise);
+
+    try {
+      renderStocksPage(
+        {
+          stocks: summaryStocks,
+        },
+        null,
+        {
+          skipDashboardBootstrapMock: true,
+        },
+      );
+
+      await waitFor(() => {
+        expect(fetchWatchlistDashboardBootstraps).toHaveBeenCalledTimes(1);
+      });
+
+      const fifthShellCard = screen.getAllByTestId('share-price-dashboard-shell-observer-target').find((cardNode) => {
+        return cardNode.getAttribute('data-identifier') === summaryStocks[4].identifier;
+      });
+      const seventeenthShellCard = screen.getAllByTestId('share-price-dashboard-shell-observer-target').find((cardNode) => {
+        return cardNode.getAttribute('data-identifier') === summaryStocks[16].identifier;
+      });
+
+      expect(fifthShellCard).toBeTruthy();
+      expect(seventeenthShellCard).toBeTruthy();
+
+      // Each intersection now enqueues only the intersecting card so the
+      // initial wave of viewport activations does not snowball past what is
+      // actually on screen. The drain step still bundles all queued
+      // identifiers into one fetch, which is what we assert below.
+      await act(async () => {
+        intersectionHarness.triggerIntersect(fifthShellCard);
+        intersectionHarness.triggerIntersect(seventeenthShellCard);
+      });
+
+      await waitFor(() => {
+        expect(fetchWatchlistDashboardBootstraps).toHaveBeenCalledTimes(2);
+      });
+
+      expect(fetchWatchlistDashboardBootstraps).toHaveBeenNthCalledWith(2, {
+        tickers: [summaryStocks[4].identifier, summaryStocks[16].identifier],
+      });
+
+      secondChunk.resolve(
+        buildManyDashboardBootstraps([summaryStocks[4], summaryStocks[16]]),
+      );
+
+      await waitFor(() => {
+        expect(screen.getAllByTestId('share-price-dashboard-mock')).toHaveLength(6);
+      });
+      expect(fetchWatchlistDashboardBootstraps).toHaveBeenCalledTimes(2);
+    } finally {
+      intersectionHarness.restore();
+    }
   });
 });

@@ -1022,6 +1022,24 @@ describe('watchlistDashboardApi', () => {
     ]);
   });
 
+  it('serializes multiple tickers for chunked dashboard bootstrap requests', async () => {
+    axios.get.mockResolvedValueOnce({
+      data: {
+        dashboards: [],
+      },
+    });
+
+    await fetchWatchlistDashboardBootstraps({
+      tickers: ['aapl', 'msft', 'nvda'],
+    });
+
+    expect(axios.get).toHaveBeenCalledWith('/api/watchlist/dashboards', {
+      params: {
+        tickers: 'AAPL,MSFT,NVDA',
+      },
+    });
+  });
+
   it('loads metrics-view lazily through the dedicated endpoint', async () => {
     const abortSignal = new AbortController().signal;
 

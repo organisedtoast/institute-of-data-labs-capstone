@@ -5,23 +5,58 @@
   "scenarios": {
     "stocks-page-100": {
       "allowedRegressionPct": 25,
-      "metrics": {}
+      "metrics": {
+        "activationScrollMs": null,
+        "browserHeapGrowthBytes": null,
+        "firstUsableInteractionMs": null,
+        "firstVisibleCardMs": null,
+        "firstVisibleShellMs": null,
+        "routeLoadMs": null
+      }
     },
     "stocks-page-500": {
       "allowedRegressionPct": 25,
-      "metrics": {}
+      "metrics": {
+        "activationScrollMs": null,
+        "browserHeapGrowthBytes": null,
+        "firstUsableInteractionMs": null,
+        "firstVisibleCardMs": null,
+        "firstVisibleShellMs": null,
+        "routeLoadMs": null
+      }
     },
     "stocks-page-1000": {
       "allowedRegressionPct": 25,
-      "metrics": {}
+      "metrics": {
+        "activationScrollMs": null,
+        "browserHeapGrowthBytes": null,
+        "firstUsableInteractionMs": null,
+        "firstVisibleCardMs": null,
+        "firstVisibleShellMs": null,
+        "routeLoadMs": null
+      }
     },
     "stocks-page-2000": {
       "allowedRegressionPct": 25,
-      "metrics": {}
+      "metrics": {
+        "activationScrollMs": null,
+        "browserHeapGrowthBytes": null,
+        "firstUsableInteractionMs": null,
+        "firstVisibleCardMs": null,
+        "firstVisibleShellMs": null,
+        "routeLoadMs": null
+      }
     },
     "stocks-page-5000": {
       "allowedRegressionPct": 25,
-      "metrics": {}
+      "metrics": {
+        "activationScrollMs": null,
+        "browserHeapGrowthBytes": null,
+        "firstUsableInteractionMs": null,
+        "firstVisibleCardMs": null,
+        "firstVisibleShellMs": null,
+        "routeLoadMs": null
+      }
     }
   }
 }

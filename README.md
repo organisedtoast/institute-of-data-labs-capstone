@@ -86,10 +86,10 @@ Two extra script notes:
 The app now splits "shared lightweight state" from "page-heavy data" on purpose:
 
 - `GET /api/watchlist/summary` loads the lightweight stock list used by shared search state, `SEE STOCK` detection, and add/open/remove flows.
-- `GET /api/watchlist/dashboards` loads the batched first-paint payload for the `Stocks` page so the browser does not make one dashboard request per card.
+- `GET /api/watchlist/dashboards` still provides the rich stock-card bootstrap payload, but the `Stocks` page now renders only a bounded window of shells, then requests real dashboard data in a small queued ticker flow instead of waiting for one giant whole-watchlist response before first paint.
 - `GET /api/watchlist/:ticker/metrics-view` is lazy. The `Stocks` page only requests it after the user clicks `SHOW METRICS`.
 - `PATCH /api/watchlist/:ticker/metrics-row-preferences` now stores stock-card row display choices. Detailed metrics rows can be hidden and bolded, while main-table rows can be bolded but not hidden.
-- `POST /api/watchlist/:ticker/refresh` still upgrades legacy stocks, but the `Stocks` page now does that work in the background after first paint instead of blocking the whole page load.
+- `POST /api/watchlist/:ticker/refresh` still upgrades legacy stocks, but the `Stocks` page now waits for the first visible real dashboard paint and a short idle gap before starting that background work.
 - `POST /api/homepage/investment-category-cards/query` now returns the canonical latest trailing 5Y homepage payload on first load, so `Home` no longer mounts and immediately re-queries the same cards.
 - Stock-card default-bold rows now come from one shared JSON source that both the backend and frontend reuse through format-specific wrappers, so saved row bolding defaults stay consistent across first paint, older fallback payloads, and browser builds such as Edge.
 - The backend wrapper is CommonJS because Node loads it on the server, while the browser wrapper stays self-contained ESM because Vite serves that file directly during local development and in-browser module loading.
@@ -201,7 +201,7 @@ The dashboard helpers still depend on the browser-safe default-bold wrapper, so 
 
 | File | What it proves | When to run it | How to run it |
 | --- | --- | --- | --- |
-| `src/services/__tests__/watchlistDashboardApi.test.js` | Proves the frontend watchlist dashboard API layer can normalize full dashboard payloads, preserve row-preference metadata such as main-table row bolding, keep the new `SP currency` and `Reporting currency` stock-card rows alive through both live and fallback payload shapes, apply the expanded default-bold stock rows for pricing, valuation, EPS, dividends, and forecast market cap when older payloads omit that flag, keep derived main-table rows read-only in the normalized payload, load the browser-safe shared default-bold helper path, load batched dashboard bootstraps, lazy-load metrics-view payloads, and send the shared row-preference update contract used for both hide/show and bold/unbold actions. | Run this when you change frontend dashboard data loading, currency-row normalization, default row bolding, derived-field editability, the browser-safe shared helper, row-preference normalization, batched bootstrap behavior, lazy metrics loading, or legacy refresh behavior. | `npm run test:ui -- src/services/__tests__/watchlistDashboardApi.test.js` |
+| `src/services/__tests__/watchlistDashboardApi.test.js` | Proves the frontend watchlist dashboard API layer can normalize full dashboard payloads, preserve row-preference metadata such as main-table row bolding, keep the new `SP currency` and `Reporting currency` stock-card rows alive through both live and fallback payload shapes, apply the expanded default-bold stock rows for pricing, valuation, EPS, dividends, and forecast market cap when older payloads omit that flag, keep derived main-table rows read-only in the normalized payload, load the browser-safe shared default-bold helper path, support chunked dashboard bootstrap requests through the existing `tickers` contract, lazy-load metrics-view payloads, and send the shared row-preference update contract used for both hide/show and bold/unbold actions. | Run this when you change frontend dashboard data loading, currency-row normalization, default row bolding, derived-field editability, the browser-safe shared helper, row-preference normalization, chunked bootstrap behavior, lazy metrics loading, or legacy refresh behavior. | `npm run test:ui -- src/services/__tests__/watchlistDashboardApi.test.js` |
 | `src/services/__tests__/investmentCategoryCardsApi.test.js` | Proves the homepage category-cards API wrapper can load and normalize cards, preserve the canonical-initial-range flag, request one card through the bulk contract, and send constituent-toggle updates with the right range payload. | Run this when you change homepage category card fetching or the frontend API wrapper around those routes. | `npm run test:ui -- src/services/__tests__/investmentCategoryCardsApi.test.js` |
 
 ### Shared state and context tests
@@ -223,7 +223,7 @@ The dashboard helpers still depend on the browser-safe default-bold wrapper, so 
 
 | File | What it proves | When to run it | How to run it |
 | --- | --- | --- | --- |
-| `src/pages/__tests__/Stocks.test.jsx` | Proves the `Stocks` page keeps search visible while hiding sibling stock cards during focused metrics mode, restores the full watchlist when metrics are closed, and refreshes legacy dashboard cards in the background without blocking the initial render. | Run this when you change page-level watchlist rendering, batched dashboard bootstrap behavior, or focused metrics behavior on the `Stocks` route. | `npm run test:ui -- src/pages/__tests__/Stocks.test.jsx` |
+| `src/pages/__tests__/Stocks.test.jsx` | Proves the `Stocks` page renders summary shells before rich dashboard bootstraps finish, keeps the initial render window bounded, grows that render window as the bottom sentinel reaches the viewport, requests dashboard bootstraps through a small page-owned queue, keeps search visible while hiding sibling stock cards during focused metrics mode, restores the full watchlist when metrics are closed, and refreshes legacy dashboard cards only after the first visible real dashboard paint plus the initial queue settle gate. | Run this when you change page-level watchlist rendering, render-window growth, queued dashboard bootstrap behavior, deferred background refresh, or focused metrics behavior on the `Stocks` route. | `npm run test:ui -- src/pages/__tests__/Stocks.test.jsx` |
 | `src/pages/__tests__/Home.search-results-layout.test.jsx` | Proves the `Home` page keeps the shared search-results width contract even though it uses a centered stack, so the search bar stays aligned with `Stocks`. | Run this when you change Home page layout wrappers or shared search-results placement on non-Stocks pages. | `npm run test:ui -- src/pages/__tests__/Home.search-results-layout.test.jsx` |
 | `src/pages/__tests__/StocksRemount.integration.test.jsx` | Proves the `Stocks` route can survive remount-oriented flows where the page, provider, and dashboard wiring are exercised together in a larger integration-style test. | Run this when you change remount behavior, route/provider wiring, or flows where the focused stock hides and restores the rest of the page. | `npm run test:ui -- src/pages/__tests__/StocksRemount.integration.test.jsx` |
 | `src/components/__tests__/SharePriceDashboard.test.jsx` | Proves the stock dashboard survives the hardest UI scenarios: preset scrolling, sticky rails, chart alignment, lazy metrics loading, row-action menus, stock-card overlay edge positioning, main-table versus detailed-metrics interaction differences, the new `SP currency` row above `Share price`, the new `Reporting currency` row directly under the detail heading, expanded default-bold stock rows plus user unbolding, persisted row-preference regressions, shared hover tooltip edge positioning, full-width detail-metrics section-boundary styling, stock-card value formatting without forced `$` symbols, exact-zero table values rendering as `0` or `0%` instead of noisy decimal versions, derived main-table/detail cells staying inert while editable input rows still open the shared override editor, shared enhanced scrollbar contracts for the chart/table and focused metrics viewport including their widened size, React loop regressions, and focused metrics layout edge cases such as `MAX`. It also protects the browser-safe scrollbar helper shape so Edge keeps the wider width instead of falling back to the standards-only path. | Run this when you change the stock card dashboard, batched bootstrap handoff, currency-row placement, default row bolding, row-action behavior, derived-field editability, stock-card overlay positioning, detail metrics table, section-boundary styling, value formatting, scroll measurement, preset logic, shared hover tooltip positioning, the shared internal scrollbar rule, or any animation/layout code inside `SharePriceDashboard`. | `npm run test:ui -- src/components/__tests__/SharePriceDashboard.test.jsx` |
@@ -320,6 +320,18 @@ The toolkit has **two parts**:
 Both parts use **deterministic seeded data** instead of live ROIC data. That matters because performance regressions are much easier to spot when the data stays repeatable from run to run.
 
 The seeded-data setup is now **chunked on purpose**. Instead of building the full synthetic watchlist in one giant in-memory array, the seeder builds and inserts smaller batches. This reduces setup-time memory spikes and helps the benchmark spend more of its memory on the real app routes rather than on test-fixture preparation.
+
+The `Stocks` page now follows a **summary-first first-paint strategy**:
+
+- the shared search context loads the lightweight watchlist summary first
+- the page renders a bounded window of shell cards from that summary immediately
+- each shell reserves roughly the same vertical space as a real dashboard card, so the first scroll layout stays close to the final dashboard layout
+- the page then requests rich dashboard bootstraps through a small page-owned queue
+- the bootstrap viewport observer uses a tighter preload margin, so only cards genuinely near the viewport activate on first paint
+- the page grows the rendered card window as the user scrolls deeper into the watchlist
+- legacy stock refresh only starts after the first visible real dashboard has already painted and the initial bootstrap queue has settled
+
+Important beginner note: this means the page now loads **what the user needs first** instead of waiting for every stock card's chart payload before showing anything useful.
 
 Important beginner note: this toolkit is about **performance behavior**, not financial-value correctness. It is trying to answer questions like "does the app still load and stay responsive with thousands of stocks?" rather than "is ROIC returning the right market data today?"
 
@@ -507,13 +519,17 @@ For the current starter version, a scenario is treated as a regression when:
 
 - a measured metric exceeds its baseline by more than the allowed regression percentage
 - the browser benchmark can no longer progressively activate more stock cards as the user scrolls
-- first visible stock content no longer appears before legacy background refresh completes
+- the first real dashboard no longer appears before legacy background refresh starts
+- the first real dashboard no longer appears before legacy background refresh completes
 - the harness times out, crashes, or returns invalid measurements
 
 ### Beginner metric definitions
 
 - **First paint / first visible render**: how long it takes before the user can actually see the first useful stock card content on screen.
+- **First visible shell**: how long it takes before the page shows the lightweight stock-card shell structure.
+- **First visible real dashboard**: how long it takes before the first fully bootstrapped stock dashboard appears with the real chart/table scroll region.
 - **First usable interaction**: how long it takes before the page is ready for a meaningful click, such as opening stock metrics.
+- **Progressive activation**: whether scrolling reveals and activates more real stock dashboards later, instead of activating the whole render window immediately on first paint.
 - **Route latency**: how long one backend API route takes to respond.
 - **Payload size**: how many bytes came back from one API response. Larger payloads usually mean more work for both the server and the browser.
 - **RSS memory**: the total memory the Node process is holding at the operating-system level.
@@ -539,11 +555,12 @@ It records:
 The browser benchmark measures:
 
 - initial route load for `/stocks`
+- time to first visible shell card
 - time to first visible stock card
 - time to first usable interaction
-- whether scrolling activates more stock cards progressively
+- whether scrolling activates more stock cards progressively instead of front-loading the whole visible render window
 - browser heap growth where the browser exposes that metric
-- whether legacy background refresh stays behind first paint instead of blocking it
+- whether legacy background refresh starts and completes after the first real dashboard instead of racing ahead of it
 
 ### Important limitation
 
@@ -552,9 +569,10 @@ This toolkit does **not** prove that every one of the thousands of stock cards i
 This app is intentionally built to:
 
 - load lightweight summary data separately from heavier dashboard data
-- batch the first stock-card bootstrap request
+- render only a bounded window of stock cards at first, instead of mounting the full watchlist at once
+- request stock-card bootstraps in bounded queued chunks instead of one whole-watchlist payload
 - lazy-load detailed metrics only when needed
-- refresh legacy stocks in the background after first paint
+- refresh legacy stocks in the background only after the first real dashboard has visibly painted
 - progressively activate cards near the viewport instead of doing all possible work at once
 
 So the large-watchlist question is:
@@ -578,6 +596,8 @@ npm run docs:schema
 Use `docs/beginner-architecture-diagram.md` when you want a high-level, beginner-friendly view of the app's major layers, components, interfaces, and external systems.
 
 This is the best starting point if you want to understand the system as an early planning-stage architecture rather than as a file-by-file implementation.
+
+It now also includes a current-state user flow diagram that shows how a user moves from `Home` into shared search, watchlist navigation, and deeper `Stocks` page analysis.
 
 ## 8. Live search CLI
 

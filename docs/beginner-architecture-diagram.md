@@ -81,6 +81,77 @@ flowchart LR
 - The backend separates request handling into three API concerns, then delegates to business/data services.
 - MongoDB stores the app's own persistent data, while ROIC provides the main third-party market and company data.
 
+## User Flow Diagram
+
+This is a current-state user flow diagram. It shows the main steps a user can take
+while interacting with the app, without dropping down into backend or data-storage details.
+
+```mermaid
+flowchart TB
+    start([User opens app]) --> homeLanding[Land on Home page]
+
+    subgraph homeFlow[Home Page Category Analysis]
+        homeLanding --> homeChoice{Choose next action}
+        homeChoice --> browseCards[Browse investment category cards]
+        homeChoice --> sharedSearchEntry[Search for a stock from navbar]
+        homeChoice --> stocksNav[Click Stocks in navbar]
+        browseCards --> viewCategory[View investment category card]
+        viewCategory --> adjustCategoryRange[Adjust chart timeframe or visible month range]
+        adjustCategoryRange --> openConstituents[Open constituents list]
+        openConstituents --> toggleDecision{Enable or disable constituent?}
+        toggleDecision --> enableConstituent[Enable constituent]
+        toggleDecision --> disableConstituent[Disable constituent]
+        enableConstituent --> continueHome[Continue browsing Home cards]
+        disableConstituent --> continueHome
+    end
+
+    subgraph searchFlow[Shared Search And Watchlist Navigation]
+        sharedSearchEntry --> searchResults[View search results]
+        searchResults --> watchlistDecision{Is stock already in watchlist?}
+        watchlistDecision -->|Yes| seeStock[SEE STOCK]
+        watchlistDecision -->|No| addStock[ADD STOCK]
+        searchResults --> clearResults[Clear search results]
+        seeStock --> navigateToStocks[Navigate to Stocks page]
+        addStock --> navigateToStocks
+        navigateToStocks --> stocksLanding
+    end
+
+    subgraph stocksFlow[Stocks Page And Stock Card Analysis]
+        stocksNav --> stocksLanding[Land on Stocks page]
+        stocksLanding --> viewWatchlist[View watchlist stock cards]
+        viewWatchlist --> scrollCards[Scroll through stock cards]
+        viewWatchlist --> searchAgain[Search again from navbar]
+        viewWatchlist --> openExisting[Open existing stock from results]
+        viewWatchlist --> addNew[Add new stock from results]
+        viewWatchlist --> removeStock[Remove stock from watchlist]
+        viewWatchlist --> metricsMode[Enter metrics mode for one stock]
+        removeStock --> confirmRemoval[Confirm removal]
+        confirmRemoval --> updatedWatchlist[Return to updated watchlist]
+        metricsMode --> detailedMetrics[View detailed metrics]
+        detailedMetrics --> changeCategory[Change investment category]
+        detailedMetrics --> editOverrides[Edit override values]
+        detailedMetrics --> hideRow[Hide row]
+        detailedMetrics --> boldRow[Bold or unbold row]
+        changeCategory --> exitMetrics[Exit metrics mode]
+        editOverrides --> exitMetrics
+        hideRow --> exitMetrics
+        boldRow --> exitMetrics
+        exitMetrics --> returnToCards[Return to stock-card list]
+        searchAgain --> searchResults
+        openExisting --> returnToCards
+        addNew --> updatedWatchlist
+    end
+```
+
+## User Flow Notes
+
+- `Home` and `Stocks` are the two main page destinations in the app.
+- Navbar search is shared across both pages.
+- Search results use `SEE STOCK` for stocks already in the watchlist and `ADD STOCK` for new ones.
+- Home category cards support chart-range changes, constituents viewing, and constituent enable/disable.
+- The deeper stock-analysis path lives on the `Stocks` page through stock cards and focused metrics mode.
+- This diagram intentionally does not show a direct constituent-row click-through to an individual stock card, because that is not the current verified interaction.
+
 ## Key And Supporting Files By Architecture Block
 
 This section maps each diagram block to the main files you would open first.
