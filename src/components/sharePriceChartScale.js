@@ -196,21 +196,12 @@ export function getYAxisDecimalPlaces(tickValues) {
 
 const PLAIN_VALUE_NO_DECIMALS_THRESHOLD = 100;
 
-function getPlainLabelFractionDigits(value, fallbackFractionDigits) {
-  if (!Number.isFinite(Number(value))) {
-    return fallbackFractionDigits;
-  }
-
-  return Math.abs(Number(value)) >= PLAIN_VALUE_NO_DECIMALS_THRESHOLD ? 0 : fallbackFractionDigits;
-}
-
 export function formatYAxisPrice(value, tickValues) {
-  // The stock card uses the same plain-value rule in both the table and chart:
-  // once a non-compact value reaches 100, we drop decimals to keep the labels
-  // easy to scan while leaving smaller values at the chart's normal precision.
-  // We intentionally return plain numbers here instead of "$" values because
-  // the stock cards can show companies that are not denominated in USD.
-  const decimalPlaces = getPlainLabelFractionDigits(value, getYAxisDecimalPlaces(tickValues));
+  void tickValues;
+  // Stock-card Y-axis labels are easier for beginners to scan when sub-100
+  // prices always keep two decimals, even if the rounded tick step itself
+  // could be displayed with fewer decimal places.
+  const decimalPlaces = Math.abs(Number(value)) >= PLAIN_VALUE_NO_DECIMALS_THRESHOLD ? 0 : 2;
 
   return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: decimalPlaces,

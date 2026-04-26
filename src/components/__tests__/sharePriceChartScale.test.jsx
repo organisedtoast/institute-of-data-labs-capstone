@@ -37,11 +37,13 @@ describe('sharePriceChartScale', () => {
     expect(scale.ticks).toEqual([36, 38, 40, 42, 44, 46, 48]);
   });
 
-  it('formats Y-axis prices with only the decimals the rounded step needs', () => {
-    // The stock chart keeps the same decimal rules, but it no longer assumes
-    // the visible values should always show a USD symbol.
-    expect(formatYAxisPrice(12.5, [7.5, 10, 12.5, 15, 17.5])).toBe('12.5');
+  it('formats sub-100 stock Y-axis prices with exactly two decimals', () => {
+    // The stock chart now keeps a fixed two-decimal display below 100 so small
+    // prices stay visually consistent for users scanning the left rail.
+    expect(formatYAxisPrice(12.5, [7.5, 10, 12.5, 15, 17.5])).toBe('12.50');
     expect(formatYAxisPrice(0.4, [0.25, 0.3, 0.35, 0.4, 0.45, 0.5])).toBe('0.40');
+    expect(formatYAxisPrice(99.9, [80, 85, 90, 95, 99.9])).toBe('99.90');
+    expect(formatYAxisPrice(-1.2, [-2, -1.5, -1.2, -1, -0.5, 0])).toBe('-1.20');
     expect(formatYAxisPrice(160, [100, 120, 140, 160, 180, 200])).toBe('160');
   });
 });

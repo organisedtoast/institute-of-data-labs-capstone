@@ -591,11 +591,49 @@ function getMetricEditorInputType(fieldPath, value) {
     return 'date';
   }
 
-  if (typeof value === 'number') {
-    return 'number';
+  return 'text';
+}
+
+function isMetricEditorNumericValue(value, fieldPath) {
+  if (inferMetricDisplayKind(fieldPath) === 'date') {
+    return false;
   }
 
-  return 'text';
+  if (typeof value === 'number') {
+    return Number.isFinite(value);
+  }
+
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const normalizedValue = value.replace(/,/g, '').trim();
+  return normalizedValue !== '' && !Number.isNaN(Number(normalizedValue));
+}
+
+function formatMetricEditorNumericValue(value) {
+  if (!Number.isFinite(Number(value))) {
+    return value === null || value === undefined ? '' : String(value);
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 20,
+  }).format(Number(value));
+}
+
+function sanitizeMetricEditorValue(rawValue, fieldPath, isNumeric) {
+  if (inferMetricDisplayKind(fieldPath) === 'date') {
+    return rawValue;
+  }
+
+  if (!isNumeric || typeof rawValue !== 'string') {
+    return rawValue;
+  }
+
+  // The editor shows grouped numbers for readability, but the backend still
+  // expects a plain numeric value. We strip commas here so saving keeps the
+  // existing numeric contract unchanged.
+  return rawValue.replace(/,/g, '').trim();
 }
 
 function coerceMetricEditorValue(rawValue, fieldPath) {
@@ -2453,13 +2491,25 @@ export default function SharePriceDashboard({
       return;
     }
 
+    const isNumericValue = isMetricEditorNumericValue(cell.value, fieldPath);
+
     setMetricsActionError('');
     setMetricEditorState({
       overrideTarget: cell.overrideTarget,
       fieldPath,
       anchorRect,
+      isNumeric: isNumericValue,
     });
-    setMetricEditorValue(cell.value === null || cell.value === undefined ? '' : String(cell.value));
+    // Grouped digits make large overrides much easier to read at a glance.
+    // We only do this for numeric values; date and free-text fields keep their
+    // existing raw editor behavior.
+    setMetricEditorValue(
+      cell.value === null || cell.value === undefined
+        ? ''
+        : isNumericValue
+          ? formatMetricEditorNumericValue(cell.value)
+          : String(cell.value),
+    );
   };
 
   const closeMetricEditor = () => {
@@ -2718,10 +2768,16 @@ export default function SharePriceDashboard({
     setMetricsActionError('');
 
     try {
+      const sanitizedMetricEditorValue = sanitizeMetricEditorValue(
+        metricEditorValue,
+        metricEditorState.fieldPath,
+        metricEditorState.isNumeric === true,
+      );
+
       await updateDashboardMetricOverride(
         identifier,
         metricEditorState.overrideTarget,
-        coerceMetricEditorValue(metricEditorValue, metricEditorState.fieldPath),
+        coerceMetricEditorValue(sanitizedMetricEditorValue, metricEditorState.fieldPath),
       );
       await reloadDashboardPayload();
       closeMetricEditor();
@@ -4349,6 +4405,9 @@ export default function SharePriceDashboard({
           <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mb: 1 }}>
             Right click on desktop or long press on touch to edit overrideable values.
           </Typography>
+          {/* Numeric override fields stay on text input instead of browser
+              type="number" so thousands separators remain legal visible
+              characters while the user is editing the value. */}
           <TextField
             fullWidth
             label="Override value"
@@ -4356,6 +4415,7 @@ export default function SharePriceDashboard({
             type={getMetricEditorInputType(metricEditorState.fieldPath, metricEditorValue)}
             value={metricEditorValue}
             onChange={(event) => setMetricEditorValue(event.target.value)}
+            inputProps={metricEditorState.isNumeric === true ? { inputMode: 'decimal' } : undefined}
             InputLabelProps={{ shrink: true }}
           />
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 1, mt: 1.5 }}>

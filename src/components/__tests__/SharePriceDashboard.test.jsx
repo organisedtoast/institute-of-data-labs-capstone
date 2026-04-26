@@ -2627,7 +2627,7 @@ describe('SharePriceDashboard preset scrolling', () => {
     });
   });
 
-  it('drops decimals from 3-digit plain main-table, Y-axis, and hover values while preserving smaller values', async () => {
+  it('keeps two decimals below 100 on stock Y-axis labels while still dropping them at 3 digits', async () => {
     const payload = buildPlainValueBoundaryDashboardPayload();
     const { scrollRegion } = await renderDashboard({ payload });
     const sharePriceRow = getMainTableRow('Share price');
@@ -2646,6 +2646,16 @@ describe('SharePriceDashboard preset scrolling', () => {
     expect(renderedLabelsAtOrAboveHundred.length).toBeGreaterThan(0);
     renderedLabelsAtOrAboveHundred.forEach((labelText) => {
       expect(labelText.includes('.')).toBe(false);
+    });
+
+    const renderedLabelsBelowHundred = renderedLabelTexts.filter((labelText) => {
+      const numericPortion = Number(String(labelText).replace(/,/g, ''));
+      return Number.isFinite(numericPortion) && Math.abs(numericPortion) < 100;
+    });
+
+    expect(renderedLabelsBelowHundred.length).toBeGreaterThan(0);
+    renderedLabelsBelowHundred.forEach((labelText) => {
+      expect(labelText).toMatch(/^-?\d+\.\d{2}$/);
     });
 
     const svg = scrollRegion.querySelector('svg');
@@ -5098,6 +5108,137 @@ describe('SharePriceDashboard metrics mode', () => {
       columnKey: 'annual-2025',
     });
     expect(savedCell.getAttribute('data-is-overridden')).toBe('true');
+  });
+
+  it('shows grouped thousands separators when a numeric override editor opens', async () => {
+    const payload = buildDashboardPayload();
+
+    await renderDashboard({
+      payload,
+    });
+
+    const sharesOnIssueCell = getMainTableCell({
+      rowKey: 'annualData[].base.sharesOnIssue',
+      columnKey: 'annual-2025',
+    });
+    expect(sharesOnIssueCell).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.contextMenu(sharesOnIssueCell);
+    });
+
+    const overrideInput = screen.getByLabelText('Override value');
+    expect(overrideInput.value).toBe('1,015,000,000');
+    expect(overrideInput.getAttribute('type')).toBe('text');
+    expect(overrideInput.getAttribute('inputmode')).toBe('decimal');
+  });
+
+  it('saves grouped decimal numeric overrides as clean numbers', async () => {
+    const initialPayload = buildDashboardPayload();
+    const savedPayload = buildDashboardPayload();
+    savedPayload.annualMainTableRows[savedPayload.annualMainTableRows.length - 1].cells.sharePrice = {
+      ...savedPayload.annualMainTableRows[savedPayload.annualMainTableRows.length - 1].cells.sharePrice,
+      value: 12345.67,
+      sourceOfTruth: 'user',
+      isOverridden: true,
+    };
+
+    updateDashboardMetricOverride.mockResolvedValue({});
+
+    const { user } = await renderDashboard({
+      payloadSequence: [initialPayload, savedPayload],
+    });
+
+    const sharePriceCell = getMainTableCell({
+      rowKey: 'annualData[].base.sharePrice',
+      columnKey: 'annual-2025',
+    });
+
+    await act(async () => {
+      fireEvent.contextMenu(sharePriceCell);
+    });
+
+    const overrideInput = screen.getByLabelText('Override value');
+    await user.clear(overrideInput);
+    await user.type(overrideInput, '12,345.67');
+    await user.click(screen.getByRole('button', { name: 'SAVE OVERRIDE' }));
+    await flushDashboardWork();
+    await flushDashboardWork();
+
+    expect(updateDashboardMetricOverride).toHaveBeenCalledWith(
+      'AAPL',
+      {
+        kind: 'annual',
+        fiscalYear: 2025,
+        payloadPath: 'base.sharePrice',
+      },
+      12345.67,
+    );
+  });
+
+  it('saves grouped negative numeric overrides as clean numbers', async () => {
+    const initialPayload = buildDashboardPayload();
+
+    updateDashboardMetricOverride.mockResolvedValue({});
+
+    const { user } = await renderDashboard({
+      payloadSequence: [initialPayload, initialPayload],
+    });
+
+    const sharePriceCell = getMainTableCell({
+      rowKey: 'annualData[].base.sharePrice',
+      columnKey: 'annual-2025',
+    });
+
+    await act(async () => {
+      fireEvent.contextMenu(sharePriceCell);
+    });
+
+    const overrideInput = screen.getByLabelText('Override value');
+    await user.clear(overrideInput);
+    await user.type(overrideInput, '-12,345.67');
+    await user.click(screen.getByRole('button', { name: 'SAVE OVERRIDE' }));
+    await flushDashboardWork();
+
+    expect(updateDashboardMetricOverride).toHaveBeenCalledWith(
+      'AAPL',
+      {
+        kind: 'annual',
+        fiscalYear: 2025,
+        payloadPath: 'base.sharePrice',
+      },
+      -12345.67,
+    );
+  });
+
+  it('keeps date override fields on the existing date editor path', async () => {
+    const payload = buildDashboardPayload();
+    payload.annualMainTableRows[payload.annualMainTableRows.length - 1].cells.earningsReleaseDate = {
+      ...payload.annualMainTableRows[payload.annualMainTableRows.length - 1].cells.earningsReleaseDate,
+      isOverrideable: true,
+      overrideTarget: {
+        kind: 'annual',
+        fiscalYear: 2025,
+        payloadPath: 'earningsReleaseDate',
+      },
+    };
+
+    await renderDashboard({
+      payload,
+    });
+
+    const earningsReleaseDateCell = getMainTableCell({
+      rowKey: 'annualData[].earningsReleaseDate',
+      columnKey: 'annual-2025',
+    });
+
+    await act(async () => {
+      fireEvent.contextMenu(earningsReleaseDateCell);
+    });
+
+    const overrideInput = screen.getByLabelText('Override value');
+    expect(overrideInput.getAttribute('type')).toBe('date');
+    expect(overrideInput.value).toBe('2026-02-15');
   });
 
   it('drops the overridden flag after CLEAR OVERRIDE reloads a main-table payload', async () => {
