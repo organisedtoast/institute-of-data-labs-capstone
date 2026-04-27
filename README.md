@@ -247,7 +247,9 @@ Backend tests use Node's built-in runner. Some have dedicated npm scripts, and s
 | `npm run test:watchlist-routes` | Runs only `tests/watchlist-routes.test.js`. | Use this when you change watchlist summary loading, batched dashboard bootstrap loading, or the backend route contract behind the `Stocks` page first paint. |
 | `npm run test:homepage-routes` | Runs only `tests/investment-category-cards-routes.test.js`. | Use this when you change homepage card route behavior, canonical default ranges, constituent toggles, or category-card aggregation rules. |
 | `npm run test:lenses` | Runs `tests/lens-visibility.test.js` and `tests/inspect-lens-fields.test.js`. | Use this when you change lens seeding, field visibility rules, or the lens inspection flow. |
-| `npm run test:docs` | Runs only `tests/schema-reference-generator.test.js`. | Use this when you change the schema-reference generator or field-catalog-driven docs. |
+| `npm run test:docs` | Runs the generated-doc checks for `schema-reference`, the beginner architecture doc, and the test-and-script overview doc. | Use this when you change generated docs, their source-of-truth modules, or doc generator scripts. |
+| `npm run test:docs:architecture` | Runs only `tests/beginner-architecture-generator.test.js`. | Use this when you change the beginner architecture doc generator or its structured source data. |
+| `npm run test:docs:test-overview` | Runs only `tests/test-and-script-overview-generator.test.js`. | Use this when you change the test-and-script overview generator or its structured source data. |
 | `npm run test:e2e-stubbed` | Runs the deterministic end-to-end import/CRUD backend harness. | Use this for import, refresh, override, and MongoDB workflow changes. |
 | `npm run test:e2e-live` | Runs the live end-to-end import/CRUD backend harness. | Use this as a manual high-confidence check against the real ROIC API. |
 
@@ -258,6 +260,8 @@ Backend tests use Node's built-in runner. Some have dedicated npm scripts, and s
 | `tests/watchlist-stock-model-load.test.js` | Proves the `WatchlistStock` model can load without initialization-order errors before the server even starts. | Run this when you change model imports, schema setup, or startup wiring. | `node --test tests/watchlist-stock-model-load.test.js` |
 | `tests/server-startup.test.js` | Proves the backend can still boot and serve read-only stock search even when MongoDB is unavailable at startup. | Run this when you change server startup, dependency loading, or degraded-mode availability. | `npm run test:server-startup` |
 | `tests/schema-reference-generator.test.js` | Proves the schema reference generator still emits the key markdown sections developers rely on, including the new `reportingCurrency` references, and fails loudly if required sections would be empty. | Run this when you change the schema doc generator or the field catalog that feeds it. | `npm run test:docs` |
+| `tests/beginner-architecture-generator.test.js` | Proves the beginner architecture generator still emits the key diagram and file-map anchors developers rely on, and fails if the checked-in generated markdown becomes stale. | Run this when you change the architecture-doc source module, generator script, or the generated architecture markdown workflow. | `npm run test:docs:architecture` |
+| `tests/test-and-script-overview-generator.test.js` | Proves the test-and-script overview generator still emits the key test, script, and workflow anchors readers rely on, and fails if the checked-in generated markdown becomes stale. | Run this when you change the test-and-script overview source module, generator script, or the generated overview markdown workflow. | `npm run test:docs:test-overview` |
 | `tests/inspect-lens-fields.test.js` | Proves the lens inspection CLI can print seeded visible fields without needing the frontend. | Run this when you change the lens inspection script or field-visibility output format. | `node --test tests/inspect-lens-fields.test.js` |
 | `tests/default-bold-stock-rows.test.js` | Proves the shared stock-card default-bold source can derive the backend row-key lookup and the frontend field-path lookup from one canonical list, and that the browser-safe ESM wrapper stays aligned with the backend CommonJS helper. | Run this when you change the shared default-bold config or the helper wrappers that feed backend shaping and frontend fallback normalization. | `node --test tests/default-bold-stock-rows.test.js` |
 | `tests/default-bold-stock-rows-vite.test.js` | Proves Vite can transform the browser-facing default-bold wrapper without exposing CommonJS syntax in the `/stocks` import path, which protects the exact dev-only regression that can break the page while Node-side tests still pass. | Run this when you change `shared/defaultBoldStockRows.mjs`, its helper boundaries, or any browser-facing module-format decisions around the default-bold helper. | `node --test tests/default-bold-stock-rows-vite.test.js` |
@@ -299,6 +303,8 @@ These are useful developer tools, but they are **not** automated tests.
 | --- | --- | --- |
 | `npm run search:live` | Starts an interactive terminal-based stock search against the real ROIC-backed search flow. | Use this when you want to manually explore search results without booting the frontend. |
 | `npm run docs:schema` | Regenerates `docs/schema-reference.md` from the field catalog and related schema metadata. | Use this when you change schema docs, field-catalog entries, or the generator script. |
+| `npm run docs:architecture` | Regenerates `docs/beginner-architecture-diagram.md` from the structured architecture source module. | Use this when you make a major architecture change such as route, layer, flow, service-boundary, external-system, or key-file-map updates. |
+| `npm run docs:test-overview` | Regenerates `docs/test-and-script-overview.md` from the structured test-and-script overview source module. | Use this when you add, remove, rename, or significantly change important tests, scripts, or generated-doc workflows. |
 | `npm run inspect:lens` | Runs the lens inspection CLI for the example category `Profitable Hi Growth`. | Use this when you want to inspect visible card/detail fields without starting the frontend. |
 | `npm run check:frontend-branch-sync` | Fails unless local `frontend-branch` and `main` point to identical file trees. | Use this before a manual merge that is supposed to leave `main` unchanged. |
 | `npm run perf:seed -- 1000` | Seeds a deterministic performance dataset into an isolated MongoDB database name. | Use this before manual scale checks or when you want a known watchlist size ready in the database. |
@@ -591,6 +597,31 @@ Regenerate it with:
 npm run docs:schema
 ```
 
+## 7.25. Test and script overview
+
+Use `docs/test-and-script-overview.md` when you want a beginner-friendly narrative guide to the repo's frontend tests, backend tests, end-to-end flows, performance tooling, manual diagnostic scripts, and generated-doc tooling.
+
+This is the longer explanation companion to the README command tables.
+
+This file is generated from:
+
+```text
+scripts/test-and-script-overview-source.js
+```
+
+Regenerate it with:
+
+```bash
+npm run docs:test-overview
+```
+
+Beginner workflow note:
+
+- Edit `scripts/test-and-script-overview-source.js` when important tests, scripts, or doc-tooling workflows change.
+- Run `npm run docs:test-overview` to rebuild the markdown.
+- Run `npm run test:docs:test-overview` or `npm run test:docs` to confirm the checked-in file is up to date.
+- The stale-doc test is the CI-style enforcement path, so it fails loudly if someone forgets to regenerate the file.
+
 ## 7.5. Beginner architecture diagram
 
 Use `docs/beginner-architecture-diagram.md` when you want a high-level, beginner-friendly view of the app's major layers, components, interfaces, and external systems.
@@ -598,6 +629,25 @@ Use `docs/beginner-architecture-diagram.md` when you want a high-level, beginner
 This is the best starting point if you want to understand the system as an early planning-stage architecture rather than as a file-by-file implementation.
 
 It now also includes a current-state user flow diagram that shows how a user moves from `Home` into shared search, watchlist navigation, and deeper `Stocks` page analysis.
+
+This file is generated from:
+
+```text
+scripts/architecture-doc-source.js
+```
+
+Regenerate it with:
+
+```bash
+npm run docs:architecture
+```
+
+Beginner workflow note:
+
+- Edit `scripts/architecture-doc-source.js` when a major architecture change happens.
+- Run `npm run docs:architecture` to rebuild the markdown.
+- Run `npm run test:docs:architecture` or `npm run test:docs` to confirm the checked-in file is up to date.
+- The stale-doc test is the CI-style enforcement path, so it fails loudly if someone forgets to regenerate the file.
 
 ## 8. Live search CLI
 

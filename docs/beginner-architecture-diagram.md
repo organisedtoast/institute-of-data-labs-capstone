@@ -1,5 +1,7 @@
 # Beginner-Focused Architecture Diagram
 
+> Generated from [`scripts/architecture-doc-source.js`](../scripts/architecture-doc-source.js). Edit the source module, not this markdown. Regenerate with `npm run docs:architecture`.
+
 This diagram shows the app as a beginner-friendly early-stage architecture view.
 It keeps the main building blocks, boundaries, interfaces, and external systems visible
 without dropping down to file-by-file implementation detail.
@@ -42,20 +44,16 @@ flowchart LR
     user -->|search, navigate| nav
     user -->|view category cards| home
     user -->|view watchlist dashboards| stocks
-
     nav -->|update search text, results, watchlist state| shared
     home -->|request category cards| frontApi
     stocks -->|request dashboards, metrics view, refresh, remove| frontApi
     shared -->|search stocks, load watchlist summary, import/open/remove stock| frontApi
-
     frontApi -->|HTTP + JSON over /api/*| lookupApi
     frontApi -->|HTTP + JSON over /api/*| watchlistApi
     frontApi -->|HTTP + JSON over /api/*| homepageApi
-
     lookupApi -->|/api/stocks/search<br/>/api/stock-prices/:ticker| roicService
     watchlistApi -->|/api/watchlist/summary<br/>/api/watchlist/dashboards<br/>/api/watchlist/import<br/>/api/watchlist/:ticker| watchlistService
     homepageApi -->|/api/homepage/investment-category-cards/query| homepageService
-
     roicService -->|external API requests| roic
     watchlistService -->|service calls| persistence
     homepageService -->|service calls| persistence
@@ -88,59 +86,96 @@ while interacting with the app, without dropping down into backend or data-stora
 
 ```mermaid
 flowchart TB
-    start([User opens app]) --> homeLanding[Land on Home page]
+    start([User opens app])
+    homeLanding[Land on Home page]
 
     subgraph homeFlow[Home Page Category Analysis]
-        homeLanding --> homeChoice{Choose next action}
-        homeChoice --> browseCards[Browse investment category cards]
-        homeChoice --> sharedSearchEntry[Search for a stock from navbar]
-        homeChoice --> stocksNav[Click Stocks in navbar]
-        browseCards --> viewCategory[View investment category card]
-        viewCategory --> adjustCategoryRange[Adjust chart timeframe or visible month range]
-        adjustCategoryRange --> openConstituents[Open constituents list]
-        openConstituents --> toggleDecision{Enable or disable constituent?}
-        toggleDecision --> enableConstituent[Enable constituent]
-        toggleDecision --> disableConstituent[Disable constituent]
-        enableConstituent --> continueHome[Continue browsing Home cards]
-        disableConstituent --> continueHome
+        homeChoice{Choose next action}
+        browseCards[Browse investment category cards]
+        sharedSearchEntry[Search for a stock from navbar]
+        stocksNav[Click Stocks in navbar]
+        viewCategory[View investment category card]
+        adjustCategoryRange[Adjust chart timeframe or visible month range]
+        openConstituents[Open constituents list]
+        toggleDecision{Enable or disable constituent?}
+        enableConstituent[Enable constituent]
+        disableConstituent[Disable constituent]
+        continueHome[Continue browsing Home cards]
     end
 
     subgraph searchFlow[Shared Search And Watchlist Navigation]
-        sharedSearchEntry --> searchResults[View search results]
-        searchResults --> watchlistDecision{Is stock already in watchlist?}
-        watchlistDecision -->|Yes| seeStock[SEE STOCK]
-        watchlistDecision -->|No| addStock[ADD STOCK]
-        searchResults --> clearResults[Clear search results]
-        seeStock --> navigateToStocks[Navigate to Stocks page]
-        addStock --> navigateToStocks
-        navigateToStocks --> stocksLanding
+        searchResults[View search results]
+        watchlistDecision{Is stock already in watchlist?}
+        seeStock[SEE STOCK]
+        addStock[ADD STOCK]
+        clearResults[Clear search results]
+        navigateToStocks[Navigate to Stocks page]
     end
 
     subgraph stocksFlow[Stocks Page And Stock Card Analysis]
-        stocksNav --> stocksLanding[Land on Stocks page]
-        stocksLanding --> viewWatchlist[View watchlist stock cards]
-        viewWatchlist --> scrollCards[Scroll through stock cards]
-        viewWatchlist --> searchAgain[Search again from navbar]
-        viewWatchlist --> openExisting[Open existing stock from results]
-        viewWatchlist --> addNew[Add new stock from results]
-        viewWatchlist --> removeStock[Remove stock from watchlist]
-        viewWatchlist --> metricsMode[Enter metrics mode for one stock]
-        removeStock --> confirmRemoval[Confirm removal]
-        confirmRemoval --> updatedWatchlist[Return to updated watchlist]
-        metricsMode --> detailedMetrics[View detailed metrics]
-        detailedMetrics --> changeCategory[Change investment category]
-        detailedMetrics --> editOverrides[Edit override values]
-        detailedMetrics --> hideRow[Hide row]
-        detailedMetrics --> boldRow[Bold or unbold row]
-        changeCategory --> exitMetrics[Exit metrics mode]
-        editOverrides --> exitMetrics
-        hideRow --> exitMetrics
-        boldRow --> exitMetrics
-        exitMetrics --> returnToCards[Return to stock-card list]
-        searchAgain --> searchResults
-        openExisting --> returnToCards
-        addNew --> updatedWatchlist
+        stocksLanding[Land on Stocks page]
+        viewWatchlist[View watchlist stock cards]
+        scrollCards[Scroll through stock cards]
+        searchAgain[Search again from navbar]
+        openExisting[Open existing stock from results]
+        addNew[Add new stock from results]
+        removeStock[Remove stock from watchlist]
+        metricsMode[Enter metrics mode for one stock]
+        confirmRemoval[Confirm removal]
+        updatedWatchlist[Return to updated watchlist]
+        detailedMetrics[View detailed metrics]
+        changeCategory[Change investment category]
+        editOverrides[Edit override values]
+        hideRow[Hide row]
+        boldRow[Bold or unbold row]
+        exitMetrics[Exit metrics mode]
+        returnToCards[Return to stock-card list]
     end
+
+    start -->homeLanding
+    homeLanding -->homeChoice
+    homeChoice -->browseCards
+    homeChoice -->sharedSearchEntry
+    homeChoice -->stocksNav
+    browseCards -->viewCategory
+    viewCategory -->adjustCategoryRange
+    adjustCategoryRange -->openConstituents
+    openConstituents -->toggleDecision
+    toggleDecision -->enableConstituent
+    toggleDecision -->disableConstituent
+    enableConstituent -->continueHome
+    disableConstituent -->continueHome
+    sharedSearchEntry -->searchResults
+    searchResults -->watchlistDecision
+    watchlistDecision -->|Yes| seeStock
+    watchlistDecision -->|No| addStock
+    searchResults -->clearResults
+    seeStock -->navigateToStocks
+    addStock -->navigateToStocks
+    navigateToStocks -->stocksLanding
+    stocksNav -->stocksLanding
+    stocksLanding -->viewWatchlist
+    viewWatchlist -->scrollCards
+    viewWatchlist -->searchAgain
+    viewWatchlist -->openExisting
+    viewWatchlist -->addNew
+    viewWatchlist -->removeStock
+    viewWatchlist -->metricsMode
+    removeStock -->confirmRemoval
+    confirmRemoval -->updatedWatchlist
+    metricsMode -->detailedMetrics
+    detailedMetrics -->changeCategory
+    detailedMetrics -->editOverrides
+    detailedMetrics -->hideRow
+    detailedMetrics -->boldRow
+    changeCategory -->exitMetrics
+    editOverrides -->exitMetrics
+    hideRow -->exitMetrics
+    boldRow -->exitMetrics
+    exitMetrics -->returnToCards
+    searchAgain -->searchResults
+    openExisting -->returnToCards
+    addNew -->updatedWatchlist
 ```
 
 ## User Flow Notes
@@ -352,3 +387,9 @@ Supporting files:
 - [`models/InvestmentCategoryConstituentPreference.js`](../models/InvestmentCategoryConstituentPreference.js)
 - [`models/StockPriceHistoryCache.js`](../models/StockPriceHistoryCache.js)
 - [`models/Lens.js`](../models/Lens.js)
+
+## Workflow Notes
+
+- Treat this file as generated output. Edit the source module instead of editing the markdown by hand.
+- A major architecture change means any change to major layers, routes, page flows, backend service boundaries, external-system dependencies, or the key/supporting file mapping.
+- After those changes, run `npm run docs:architecture`. CI-style doc tests will fail if the checked-in markdown is stale.
