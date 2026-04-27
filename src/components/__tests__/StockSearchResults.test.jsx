@@ -90,18 +90,19 @@ describe('StockSearchResults', () => {
   it('opens an existing stock on the Stocks page instead of adding it again', async () => {
     const user = userEvent.setup();
 
-    // On `/stocks`, the UI should act in place. Because the result already
-    // exists, the button should call the dedicated open-existing helper.
+    // On `/stocks`, the page still owns focused-metrics mode, so existing-stock
+    // opens are queued back through that page-owned path instead of bypassing it.
     const { contextValue } = renderSearchResults({
       isStockInWatchlist: vi.fn(() => true),
     });
 
     await user.click(screen.getByRole('button', { name: 'SEE STOCK' }));
 
-    expect(contextValue.openExistingStock).toHaveBeenCalledWith({
+    expect(contextValue.queuePendingStockToOpenExisting).toHaveBeenCalledWith({
       identifier: 'AAPL',
       name: 'Apple Inc.',
     });
+    expect(contextValue.openExistingStock).not.toHaveBeenCalled();
     expect(contextValue.addStockFromResult).not.toHaveBeenCalled();
   });
 
@@ -123,5 +124,22 @@ describe('StockSearchResults', () => {
     });
     expect(mockNavigate).toHaveBeenCalledWith('/stocks');
     expect(contextValue.queuePendingStockToAdd).not.toHaveBeenCalled();
+  });
+
+  it('queues an add action on the Stocks page instead of adding immediately', async () => {
+    const user = userEvent.setup();
+
+    const { contextValue } = renderSearchResults({
+      isStockInWatchlist: vi.fn(() => false),
+    });
+
+    await user.click(screen.getByRole('button', { name: 'ADD STOCK' }));
+
+    expect(contextValue.queuePendingStockToAdd).toHaveBeenCalledWith({
+      identifier: 'AAPL',
+      name: 'Apple Inc.',
+    });
+    expect(contextValue.addStockFromResult).not.toHaveBeenCalled();
+    expect(contextValue.queuePendingStockToOpenExisting).not.toHaveBeenCalled();
   });
 });

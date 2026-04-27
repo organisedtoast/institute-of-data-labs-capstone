@@ -199,6 +199,10 @@ function Stocks() {
   // SharePriceDashboard mount by one paint frame so the lightweight summary
   // structure is visible to the user before the chart-heavy work starts.
   const [hasYieldedAfterShellPaint, setHasYieldedAfterShellPaint] = useState(false);
+  // Refs can remember which identifiers are busy, but refs do not re-run
+  // effects when a request settles. This small piece of state is the page's
+  // "wake the queue again" signal once the current bootstrap fetch finishes.
+  const [isBootstrapRequestInFlight, setIsBootstrapRequestInFlight] = useState(false);
   const [pendingBootstrapIdentifiers, setPendingBootstrapIdentifiers] = useState([]);
   const [renderWindowEndIndex, setRenderWindowEndIndex] = useState(INITIAL_RENDER_WINDOW_SIZE);
   const [pendingRemovalStock, setPendingRemovalStock] = useState(null);
@@ -255,6 +259,22 @@ function Stocks() {
   const summaryCardByIdentifier = useMemo(() => {
     return new Map(summaryCards.map((stock) => [stock.identifier, stock]));
   }, [summaryCards]);
+
+  const openExistingStockFromSearch = useCallback(async (selectedStock) => {
+    // Focused metrics mode intentionally hides sibling cards. When search asks
+    // to open a different existing stock, we first leave that filtered mode so
+    // the prioritized card can actually appear in the normal watchlist view.
+    setFocusedMetricsIdentifier('');
+    await openExistingStock(selectedStock);
+  }, [openExistingStock]);
+
+  const addStockFromSearch = useCallback(async (selectedStock) => {
+    // Add-from-search should follow the same page-level exit path as open:
+    // while focused metrics is filtering to one card, a newly added card would
+    // otherwise be hidden behind that filter.
+    setFocusedMetricsIdentifier('');
+    await addStockFromResult(selectedStock);
+  }, [addStockFromResult]);
 
   const reconcileFocusedMetricsIdentifier = useCallback((nextIdentifiers) => {
     setFocusedMetricsIdentifier((previousFocusedMetricsIdentifier) => {
@@ -324,17 +344,17 @@ function Stocks() {
     // consistent Home-to-Stocks flow for the user and for beginners reading it.
     const handlePendingStockActionOnStocksPage = async () => {
       if (mode === 'open') {
-        await openExistingStock(stock);
+        await openExistingStockFromSearch(stock);
         return;
       }
 
-      await addStockFromResult(stock);
+      await addStockFromSearch(stock);
     };
 
     handlePendingStockActionOnStocksPage();
 
     return undefined;
-  }, [addStockFromResult, clearPendingStockAction, openExistingStock, pendingStockAction]);
+  }, [addStockFromSearch, clearPendingStockAction, openExistingStockFromSearch, pendingStockAction]);
 
   const markInitialBootstrapIdentifiersAsSettled = useCallback((identifiersToMark) => {
     if (!initialBootstrapIdentifiersRef.current.size) {
@@ -368,6 +388,10 @@ function Stocks() {
     if (!normalizedIdentifiers.length) {
       return;
     }
+
+    // The page keeps one network batch active at a time so later shells can
+    // line up behind it instead of flooding the browser with overlapping work.
+    setIsBootstrapRequestInFlight(true);
 
     normalizedIdentifiers.forEach((identifier) => {
       inFlightBootstrapIdentifiersRef.current.add(identifier);
@@ -469,6 +493,9 @@ function Stocks() {
         inFlightBootstrapIdentifiersRef.current.delete(identifier);
       });
       markInitialBootstrapIdentifiersAsSettled(normalizedIdentifiers);
+      // Clearing this state is what wakes the queue-drain effect back up for
+      // any cards that were enqueued while this request was still in flight.
+      setIsBootstrapRequestInFlight(false);
     }
   }, [markInitialBootstrapIdentifiersAsSettled]);
 
@@ -565,7 +592,11 @@ function Stocks() {
   }, [enqueueBootstrapBatchFromIndex, hasYieldedAfterShellPaint, stockIdentifierList, stocksStatus]);
 
   useEffect(() => {
-    if (!pendingBootstrapIdentifiers.length || inFlightBootstrapIdentifiersRef.current.size > 0) {
+    if (
+      !hasYieldedAfterShellPaint
+      || !pendingBootstrapIdentifiers.length
+      || isBootstrapRequestInFlight
+    ) {
       return;
     }
 
@@ -582,11 +613,14 @@ function Stocks() {
       queuedBootstrapIdentifiersRef.current.delete(identifier);
     });
 
-    // One queued request at a time is easier on the browser than many
-    // overlapping fetches. The page owns this queue so shell rendering and
-    // dashboard bootstrapping stay separate jobs.
+    // Queueing and fetching are two separate steps on purpose:
+    // - intersections only add identifiers to the queue
+    // - this effect drains the next batch only after the current request settles
+    //
+    // That split lets the page preserve progressive loading without leaving
+    // later scrolled cards stranded when they intersect during an earlier fetch.
     loadDashboardBootstrapsForIdentifiers(nextIdentifiersToLoad);
-  }, [loadDashboardBootstrapsForIdentifiers, pendingBootstrapIdentifiers]);
+  }, [hasYieldedAfterShellPaint, isBootstrapRequestInFlight, loadDashboardBootstrapsForIdentifiers, pendingBootstrapIdentifiers]);
 
   const supportsIntersectionObserver = typeof IntersectionObserver === 'function';
 

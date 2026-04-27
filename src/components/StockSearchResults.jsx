@@ -24,7 +24,6 @@ export default function StockSearchResults() {
     searchError,
     isStockInWatchlist,
     addStockFromResult,
-    openExistingStock,
     clearSearchFeedback,
     queuePendingStockToAdd,
     queuePendingStockToOpenExisting,
@@ -41,11 +40,16 @@ export default function StockSearchResults() {
     // never looks like "import a missing stock" in the code.
     if (location.pathname === '/stocks') {
       if (stockAlreadyExists) {
-        await openExistingStock(selectedStock);
+        // Even on `/stocks`, we route existing-stock opens back through the
+        // page-owned pending-action flow so the page can exit focused metrics
+        // mode before it reveals the chosen card.
+        queuePendingStockToOpenExisting(selectedStock);
         return;
       }
 
-      await addStockFromResult(selectedStock);
+      // We use the same page-owned path for adds so the page can leave focused
+      // metrics mode before the newly added stock is surfaced in the card list.
+      queuePendingStockToAdd(selectedStock);
       return;
     }
 
