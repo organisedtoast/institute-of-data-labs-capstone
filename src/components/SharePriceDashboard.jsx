@@ -775,6 +775,14 @@ function interpolateSegment({ startTime, endTime, startX, endX }, value, inputKe
     : startTime + (ratio * outputRange);
 }
 
+function clampTimestamp(timestamp, minTime, maxTime) {
+  if (!Number.isFinite(timestamp)) {
+    return minTime;
+  }
+
+  return Math.min(Math.max(timestamp, minTime), maxTime);
+}
+
 function createChartXGeometry({ filteredPriceRows, tablePoints, plotWidth, yearCellWidth }) {
   if (!filteredPriceRows.length) {
     return {
@@ -806,13 +814,17 @@ function createChartXGeometry({ filteredPriceRows, tablePoints, plotWidth, yearC
 
   const anchorPositions = tablePoints.map((annualRow, columnIndex) => {
     const anchorDate = annualRow.earningsReleaseDate || annualRow.fiscalYearEndDate;
+    // A fiscal year's release date can fall just outside a custom month range.
+    // Clamping keeps that table column from pulling the chart line past the
+    // visible price data when the user chooses an older end month.
+    const anchorTime = clampTimestamp(new Date(anchorDate).getTime(), minTime, maxTime);
 
     return {
       fiscalYear: annualRow.fiscalYear,
       date: annualRow.fiscalYearEndDate,
       anchorDate,
-      fiscalYearEndTime: new Date(annualRow.fiscalYearEndDate).getTime(),
-      time: new Date(anchorDate).getTime(),
+      fiscalYearEndTime: clampTimestamp(new Date(annualRow.fiscalYearEndDate).getTime(), minTime, maxTime),
+      time: anchorTime,
       x: (columnIndex * yearCellWidth) + (yearCellWidth / 2),
     };
   });
@@ -1808,17 +1820,18 @@ export default function SharePriceDashboard({
   publishScrollMeasurementRef.current = publishScrollMeasurement;
 
   const timelineLayout = useMemo(() => {
+    const measuredTimelineViewportWidth = Math.max(
+      (scrollState.containerWidth || (fixedLeftRailWidth + RIGHT_TIMELINE_MIN_WIDTH)) - fixedLeftRailWidth,
+      1,
+    );
+
     if (usesPresetTimelineLayout) {
-      const timelineViewportWidth = Math.max(
-        (scrollState.containerWidth || (fixedLeftRailWidth + RIGHT_TIMELINE_MIN_WIDTH)) - fixedLeftRailWidth,
-        1,
-      );
       const minimumColumnWidth = getPresetMinimumColumnWidth(isCompactPresetTable);
       const minimumIntrinsicPlotWidth = tablePoints.length
         ? tablePoints.length * minimumColumnWidth
         : minimumColumnWidth;
       const minimumIntrinsicContentWidth = minimumIntrinsicPlotWidth + CHART_RIGHT_PADDING;
-      const chartContentWidth = Math.max(timelineViewportWidth, minimumIntrinsicContentWidth, 1);
+      const chartContentWidth = Math.max(measuredTimelineViewportWidth, minimumIntrinsicContentWidth, 1);
       const plotWidth = Math.max(chartContentWidth - CHART_RIGHT_PADDING, 1);
       const yearCellWidth = tablePoints.length
         ? Math.max(Math.floor(plotWidth / tablePoints.length), minimumColumnWidth)
@@ -1835,15 +1848,27 @@ export default function SharePriceDashboard({
       };
     }
 
-    const plotWidth = Math.max(RIGHT_TIMELINE_MIN_WIDTH, tablePoints.length * columnDensity.columnWidth);
-    const chartContentWidth = plotWidth + CHART_RIGHT_PADDING;
-    const contentWidth = chartContentWidth + (supplementalMetricsColumns.length * columnDensity.columnWidth);
+    // In preset mode, horizontal scroll changes the selected month window.
+    // In custom range mode, the selected range is already fixed, so scrolling
+    // should only move inside that range. A short custom range should still
+    // stretch to fill the available chart area instead of looking compressed.
+    const intrinsicPlotWidth = tablePoints.length * columnDensity.columnWidth;
+    const plotWidth = Math.max(
+      RIGHT_TIMELINE_MIN_WIDTH,
+      intrinsicPlotWidth,
+      measuredTimelineViewportWidth - CHART_RIGHT_PADDING,
+    );
+    const chartContentWidth = Math.max(measuredTimelineViewportWidth, plotWidth + CHART_RIGHT_PADDING);
+    const yearCellWidth = tablePoints.length
+      ? Math.max(Math.floor(plotWidth / tablePoints.length), columnDensity.columnWidth)
+      : columnDensity.columnWidth;
+    const contentWidth = chartContentWidth + (supplementalMetricsColumns.length * yearCellWidth);
 
     return {
       plotWidth,
       chartContentWidth,
       contentWidth,
-      yearCellWidth: columnDensity.columnWidth,
+      yearCellWidth,
       headerFontSize: { xs: '11px', sm: '12px' },
       bodyFontSize: { xs: '11px', sm: '12px', md: '13px' },
     };

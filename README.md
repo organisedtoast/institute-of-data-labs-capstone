@@ -65,6 +65,13 @@ The `Stocks` page is the deeper stock-analysis workspace. It shows watchlist sto
 - lazy metrics loading
 - focused single-stock mode
 
+Custom stock chart ranges keep the chart and annual table on the same timeline.
+When a user chooses their own start and end months, the chart stretches to the
+available card width if the selected range is not wide enough to need horizontal
+scrolling. The chart line, FY ticks, fiscal bands, and annual table columns all
+share the same widened timeline, so an older end month plus a manually changed
+start month cannot leave the FY rows bunched on the left.
+
 This page is where most of the rich stock-specific analysis happens.
 
 ## Project Structure
@@ -188,6 +195,7 @@ These are the scripts a beginner is most likely to use first.
 | `npm run lint` | Runs ESLint across the repo. | Use before commits or after larger code edits. |
 | `npm run test:ui` | Runs frontend tests with Vitest. | Use for React components, frontend services, and page behavior. |
 | `npm run test:ui:watch` | Runs Vitest in watch mode. | Use while actively changing frontend code. |
+| `npm run test:charts` | Runs the focused Stocks and Home chart regression suites. | Use after changing chart ranges, timeline sizing, FY tick alignment, or shared chart behavior. |
 | `npm run test:backend` | Runs the main backend Node test bundle. | Use for a broad backend confidence check. |
 | `npm run test:watchlist-routes` | Runs watchlist route integration coverage. | Use after changing the backend routes that feed the `Stocks` page. |
 | `npm run test:homepage-routes` | Runs homepage category-card route coverage. | Use after changing homepage category-card route behavior. |
@@ -305,7 +313,7 @@ npm run test:ui -- path/to/test-file
 | `src/contexts/__tests__/StockSearchContext.test.jsx` | Shared navbar search and watchlist state behavior. |
 | `src/components/__tests__/SectorChart.test.jsx` | Homepage chart rendering, presets, axis layout, and tooltip behavior. |
 | `src/components/__tests__/SectorCardComponent.test.jsx` | Category-card constituent flows and canonical initial range behavior. |
-| `src/components/__tests__/SharePriceDashboard.test.jsx` | Rich stock dashboard UI behavior including presets, metrics, row actions, and alignment. |
+| `src/components/__tests__/SharePriceDashboard.test.jsx` | Rich stock dashboard UI behavior including presets, custom chart ranges, expanded year-cell width, metrics, row actions, and alignment. |
 | `src/pages/__tests__/Stocks.test.jsx` | Page-level watchlist shell rendering, bootstrap queue behavior, and focused metrics mode. |
 
 If you want the longer catalog with more narrative detail, use `docs/test-and-script-overview.md`.

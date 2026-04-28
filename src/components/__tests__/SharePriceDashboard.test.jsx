@@ -2871,6 +2871,41 @@ describe('SharePriceDashboard preset scrolling', () => {
     expect(Number(scrollRegion.getAttribute('data-scroll-surface-width'))).toBeGreaterThan(240);
   });
 
+  it('keeps a custom range filling the stock chart when the end month is older than latest data', async () => {
+    const {
+      endInput,
+      scrollRegion,
+      startInput,
+    } = await renderDashboard();
+
+    await act(async () => {
+      fireEvent.change(endInput, { target: { value: '2025-01' } });
+    });
+    await flushDashboardWork();
+
+    await act(async () => {
+      fireEvent.change(startInput, { target: { value: '2018-02' } });
+    });
+    await flushDashboardWork();
+
+    const leftRailWidth = Number(scrollRegion.getAttribute('data-left-rail-width'));
+    const plotWidth = Number(scrollRegion.getAttribute('data-plot-width'));
+    const contentWidth = Number(scrollRegion.getAttribute('data-content-width'));
+    const yearCellWidth = Number(scrollRegion.getAttribute('data-year-cell-width'));
+    const linePath = scrollRegion.querySelector('path[stroke="#f97316"]');
+    const fiscalTicks = screen.getAllByTestId('share-price-dashboard-fiscal-tick');
+
+    expect(startInput.value).toBe('2018-02');
+    expect(endInput.value).toBe('2025-01');
+    expect(scrollRegion.getAttribute('data-scroll-mode')).toBe('range');
+    expect(plotWidth).toBeGreaterThanOrEqual(920 - leftRailWidth - 24);
+    expect(contentWidth).toBeGreaterThanOrEqual(920 - leftRailWidth);
+    expect(yearCellWidth).toBeGreaterThan(88);
+    expect(Number(fiscalTicks.at(-1)?.getAttribute('data-x'))).toBeGreaterThan(plotWidth * 0.75);
+    expect(linePath?.getAttribute('d')).toContain('L');
+    expect(screen.queryByText('No chart data is available for the selected month range.')).toBeNull();
+  });
+
   it('centers each fiscal-year tick on the matching visible table column', async () => {
     setViewportWidth(1024);
 

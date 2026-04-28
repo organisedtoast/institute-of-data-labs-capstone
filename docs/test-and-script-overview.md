@@ -42,7 +42,7 @@ These tests mainly live under `src/**/__tests__/` and run with Vitest plus JSDOM
 
 ### Stock dashboard UI and metrics interactions
 
-`src/components/__tests__/SharePriceDashboard.test.jsx` is the deepest frontend UI suite in the app. It covers stock chart preset behaviour and horizontal scroll syncing, lazy metrics loading, focused metrics mode, row-action menus, hide/show and bold/unbold row behaviour, override editing behaviour, currency-row display rules, section boundary rendering, tooltip behaviour, scrollbar behaviour, and several difficult React regression cases.
+`src/components/__tests__/SharePriceDashboard.test.jsx` is the deepest frontend UI suite in the app. It covers stock chart preset behaviour, custom date-range layout, expanded year-cell width, horizontal scroll syncing, lazy metrics loading, focused metrics mode, row-action menus, hide/show and bold/unbold row behaviour, override editing behaviour, currency-row display rules, section boundary rendering, tooltip behaviour, scrollbar behaviour, and several difficult React regression cases. It specifically protects the Stocks custom-range bug where an older end month followed by a manual start-month change could leave the chart line stretched while the FY ticks and annual table columns stayed bunched on the left.
 
 `src/components/__tests__/sharePriceChartScale.test.jsx` tests stock-chart Y-axis scale logic and label formatting.
 
