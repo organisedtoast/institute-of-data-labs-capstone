@@ -509,7 +509,7 @@ Important note: MongoDB is still needed for normal watchlist persistence, but th
 
 ## Developer Workflow
 
-The canonical repo is this repo. The older standalone frontend repo under `C:\Users\Daniel\Downloads\frontend\institute-of-data-labs-capstone` is archival reference only.
+The canonical repo is this repo.
 
 `frontend-branch` is expected to match `main` whenever you want a later manual merge into `main` to be a true no-op.
 
